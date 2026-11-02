@@ -1,0 +1,17 @@
+# relion_run_motioncorr
+# rc=1
+
+# --- stderr ---
+in: src/motioncorr_runner.cpp, line 141
+ERROR: 
+You have to choose either UCSF MotionCor2 or RELION's own implementation.
+=== Backtrace  ===
+relion_run_motioncorr(+0x9dc87) [0x56f06cd54c87]
+relion_run_motioncorr(+0x1352b) [0x56f06ccca52b]
+relion_run_motioncorr(+0x953d3) [0x56f06cd4c3d3]
+/lib/x86_64-linux-gnu/libc.so.6(+0x2a1ca) [0x71e5ab22a1ca]
+/lib/x86_64-linux-gnu/libc.so.6(__libc_start_main+0x8b) [0x71e5ab22a28b]
+relion_run_motioncorr(+0x95685) [0x56f06cd4c685]
+==================
+ERROR: 
+You have to choose either UCSF MotionCor2 or RELION's own implementation.

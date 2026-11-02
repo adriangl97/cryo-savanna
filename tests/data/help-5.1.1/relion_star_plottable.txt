@@ -1,0 +1,12 @@
+# relion_star_plottable
+# rc=1
+ ** Written datafile:  --help--.dat
+ ** Running: gnuplot -persist gnuplot.plt 
+ ** Alternatively, inside an interactive gnuplot session type: load "gnuplot.plt"
+
+# --- stderr ---
+
+plot '--help--.dat' w l 
+     ^
+"gnuplot.plt" line 4: Bad data on line 1 of file --help--.dat
+

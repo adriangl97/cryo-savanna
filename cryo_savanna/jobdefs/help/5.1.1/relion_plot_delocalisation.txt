@@ -1,0 +1,17 @@
+# relion_plot_delocalisation
+# rc=0
++++ RELION: command line arguments (with defaults for optional ones between parantheses) +++
+====== General options ===== 
+                                --i : Input particle *.star file
+                              --rad : Particle radius [Å]
+                                --o : Output path
+                           --og (1) : Optics group
+                    --max_freq (-1) : Max. image frequency [Å] (default is Nyquist)
+                     --min_freq (0) : Min. image frequency [Å]
+                          --name () : Name of dataset (for the plot)
+                 --all_part (false) : Consider all particles, instead of only the first one in each micrograph
+                          --s (256) : Square size for estimation
+                            --j (1) : Number of threads
+                          --version : Print RELION version and exit
+
+# --- stderr ---

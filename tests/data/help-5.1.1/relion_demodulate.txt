@@ -1,0 +1,11 @@
+# relion_demodulate
+# rc=0
++++ RELION: command line arguments (with defaults for optional ones between parantheses) +++
+====== General options ===== 
+                                --i : Input STAR file with a list of particles
+                              --out : Output path
+                            --j (6) : Number of OMP threads
+                      --r31 (false) : Write output in Relion-3.1 format
+                          --version : Print RELION version and exit
+
+# --- stderr ---

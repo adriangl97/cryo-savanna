@@ -1,0 +1,25 @@
+# relion_ctf_toolbox
+# rc=0
++++ RELION: command line arguments (with defaults for optional ones between parantheses) +++
+====== Pre-multiply options ===== 
+                             --i () : Input STAR file with CTF information
+                             --o () : Output rootname (for multiple images: insert this string before each image's extension)
+             --apply_orient (false) : Also apply the in-plane rotation and translation to the CTF-premultiplied images
+====== OR: simulate options ===== 
+                      --simulate () : Output name for simulated CTF image
+                      --angpix (1.) : Pixel size (A)
+                        --box (256) : Box size (pix)
+                         --kV (300) : Voltage (kV)
+                         --Q0 (0.1) : Amplitude contrast
+                         --Cs (2.7) : Spherical aberration (mm)
+                     --defU (20000) : Defocus in U-direction (A)
+                       --defV (-1.) : Defocus in V-direction (A, default = defU)
+                      --defAng (0.) : Defocus angle (deg)
+                 --phase_shift (0.) : Phase shift (deg)
+====== Shared options ===== 
+    --ctf_intact_first_peak (false) : Leave CTFs intact until first peak
+  --ctf_intact_after_first_peak (false) : Leave CTFs intact after first peak
+                  --ctf_pad (false) : Pre-multiply with a 2x finer-sampled CTF that is then downscaled
+                          --version : Print RELION version and exit
+
+# --- stderr ---

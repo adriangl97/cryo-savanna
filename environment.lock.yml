@@ -1,0 +1,21 @@
+# The versions cryo-savanna was last tested with (python -m pytest: all tests pass).
+# Same packages as environment.yml, pinned; installs the same way:
+#   mamba env create -f environment.lock.yml [-p /opt/cryo-savanna]
+# For a full lock with every dependency and hash: conda-lock -f environment.lock.yml -p linux-64
+# RELION itself is NOT part of this env: load it with `module load relion`.
+name: cryo-savanna
+channels:
+  - conda-forge
+dependencies:
+  - python=3.11
+  - numpy=2.4.6
+  - mrcfile=1.5.4
+  - qtpy=2.4.3
+  - pyside6=6.11.2
+  - pyqtgraph=0.14.0
+  - tifffile          # optional (TIFF movie previews); not pinned: no version was tested
+  - pytest=9.1.1
+  - pytest-qt=4.5.0
+  - pip
+  - pip:
+      - .  # cryo-savanna itself: the cryo-savanna and savanna commands

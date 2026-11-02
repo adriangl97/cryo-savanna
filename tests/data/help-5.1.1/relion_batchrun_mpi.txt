@@ -1,0 +1,12 @@
+# relion_batchrun_mpi
+# rc=0
+RELION version: 5.1.1 
+
++++ RELION: command line arguments (with defaults for optional ones between parantheses) +++
+====== General options ===== 
+                                --i : Input text file with the jobs to execute
+                         --verb (1) : Verbosity
+                 --continue (false) : Only execute those commands that were not done yet
+                          --version : Print RELION version and exit
+
+# --- stderr ---

@@ -1,0 +1,47 @@
+# relion_movie_reconstruct
+# rc=0
++++ RELION: command line arguments (with defaults for optional ones between parantheses) +++
+====== General options ===== 
+                             --i () : Input STAR file with the projection images and their orientations
+                   --o (relion.mrc) : Name for output reconstruction
+                         --sym (c1) : Symmetry group
+                      --maxres (-1) : Maximum resolution (in Angstrom) to consider in Fourier space (default Nyquist)
+                          --pad (2) : Padding factor
+                      --corr_mic () : Motion correction STAR file
+                     --traj_path () : Trajectory path prefix
+                --movie_angpix (-1) : Pixel size in the movie
+                --coord_angpix (-1) : Pixel size of particle coordinates
+                        --frame (1) : Movie frame to reconstruct (1-indexed)
+                --eer_grouping (-1) : Override EER grouping (--frame is in this new grouping)
+                      --window (-1) : Box size to extract from raw movies
+                       --scale (-1) : Box size after down-sampling
+                            --j (2) : Number of threads (1 or 2)
+====== CTF options ===== 
+                      --ctf (false) : Apply CTF correction
+    --ctf_intact_first_peak (false) : Leave CTFs intact until first peak
+        --ctf_phase_flipped (false) : Images have been phase flipped
+         --only_flip_phases (false) : Do not correct CTF-amplitudes, only flip phases
+====== Ewald-sphere correction options ===== 
+                    --ewald (false) : Correct for Ewald-sphere curvature (developmental)
+              --mask_diameter (-1.) : Diameter (in A) of mask for Ewald-sphere curvature correction
+              --width_mask_edge (3) : Width (in pixels) of the soft edge on the mask
+        --reverse_curvature (false) : Try curvature the other way around
+                      --sectors (2) : Number of sectors for Ewald sphere correction
+                --skip_mask (false) : Do not apply real space mask during Ewald sphere correction
+           --skip_weighting (false) : Do not apply weighting during Ewald sphere correction
+====== Helical options ===== 
+               --nr_helical_asu (1) : Number of helical asymmetrical units
+                --helical_rise (0.) : Helical rise (in Angstroms)
+               --helical_twist (0.) : Helical twist (in degrees, + for right-handedness)
+====== Expert options ===== 
+                       --NN (false) : Use nearest-neighbour instead of linear interpolation before gridding correction
+                     --blob_r (1.9) : Radius of blob for gridding interpolation
+                       --blob_m (0) : Order of blob for gridding interpolation
+                      --blob_a (15) : Alpha-value of blob for gridding interpolation
+                        --iter (10) : Number of gridding-correction iterations
+            --skip_gridding (false) : Skip gridding part of the reconstruction
+               --no_barcode (false) : Don't apply barcode-like extension when extracting outside a micrograph
+                         --verb (1) : Verbosity
+                          --version : Print RELION version and exit
+
+# --- stderr ---

@@ -1,0 +1,25 @@
+# relion_convert_star
+# rc=1
+
+# --- stderr ---
++++ RELION: command line arguments (with defaults for optional ones between parantheses) +++
+====== Options ===== 
+                         --i (None) : Input STAR file to be converted
+                         --o (None) : Output STAR file to be written
+                          --Cs (-1) : Spherical aberration (mm)
+                          --Q0 (-1) : Amplitude contrast
+                    --box_size (-1) : Image box size. If image stack is missing you can try using this. Assumes 2D image stack.
+                          --version : Print RELION version and exit
+in: src/apps/convert_star.cpp, line 60
+ERROR: 
+Please specify input and output file names.
+=== Backtrace  ===
+relion_convert_star(+0x9f467) [0x5e47fabce467]
+relion_convert_star(+0x96789) [0x5e47fabc5789]
+relion_convert_star(+0x95546) [0x5e47fabc4546]
+/lib/x86_64-linux-gnu/libc.so.6(+0x2a1ca) [0x7a830ca2a1ca]
+/lib/x86_64-linux-gnu/libc.so.6(__libc_start_main+0x8b) [0x7a830ca2a28b]
+relion_convert_star(+0x957f5) [0x5e47fabc47f5]
+==================
+ERROR: 
+Please specify input and output file names.

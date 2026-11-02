@@ -1,0 +1,22 @@
+# relion_tomo_convert_projections
+# rc=0
++++ RELION: command line arguments (with defaults for optional ones between parantheses) +++
+====== General options ===== 
+                               --ts : Original tilt series (only size needed, unless views have to be excluded)
+                                --o : Output filename
+                   --nc (newst.com) : Input command to IMOD's newstack
+                    --tc (tilt.com) : Input command to IMOD's tilt
+                     --thick (-1.0) : Thickness of original IMOD tomogram (overrides the value in tilt.com)
+                       --offx (0.0) : 3D offset, X
+                       --offy (0.0) : 3D offset, Y
+                       --offz (0.0) : 3D offset, Z
+                   --flipYZ (false) : Interchange the Y and Z coordinates
+                    --flipZ (false) : Change the sign of the Z coordinate
+                  --flipAng (false) : Change the sign of all tilt angles
+                      --ali (false) : Map to aligned stack (.ali)
+                 --ali_size (false) : Use the size indicated in newst.com
+                            --j (1) : Number of threads
+                            --oc () : Output filename for culled stack (with frames excluded)
+                          --version : Print RELION version and exit
+
+# --- stderr ---

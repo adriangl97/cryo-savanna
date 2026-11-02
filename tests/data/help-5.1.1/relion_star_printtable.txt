@@ -1,0 +1,25 @@
+# relion_star_printtable
+# rc=0
+ === Usage: === 
+ relion_star_printtable <starfile> <tablename> [<label1> <label2> ...]
+ 
+ === Purpose: === 
+ This (bash) script prints the contents of a datablock (with name tablename) from a starfile
+ If any labels are given, then only those will be printed 
+ 
+ === Example: === 
+ relion_star_printtable run3_it024_model.star data_model_class_1 rlnResolution rlnSsnrMap
+ (NOTE: not _rlnResolution)
+ 
+ === Limitations: === 
+ This program makes a temporary directory under $TMPDIR. This folder must be writable and have sufficient space.
+ 
+ This program does not perform any error checks.
+ When specified table and/or column(s) are absent in the input, the program might give incorrect results.
+ In older versions, table names and column names could match only partially. For example, rlnFourierShellCorrelationCorrected matched rlnFourierShellCorrelation. This was dangerous and the match is exact now.
+ 
+ To address these issues, this program will be completely re-written in the next major update (RELION 3.2).
+ In the new version, the errors are handled more strictly. Please update your scripts to prepare for transition.
+
+
+# --- stderr ---

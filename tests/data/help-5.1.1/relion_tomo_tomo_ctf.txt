@@ -1,0 +1,14 @@
+# relion_tomo_tomo_ctf
+# rc=0
++++ RELION: command line arguments (with defaults for optional ones between parantheses) +++
+====== General options ===== 
+                               --ts : Tilt sequence image stack (e.g. *.st:mrc)
+                                --p : Tilt projections file (*.tlt)
+                                --o : Output filename
+                     --angpix (1.0) : Pixel size in Å
+                         --kV (1.0) : Voltage in kV
+                         --Cs (2.7) : Spherical aberration in mm
+                            --j (5) : Number of threads
+                          --version : Print RELION version and exit
+
+# --- stderr ---

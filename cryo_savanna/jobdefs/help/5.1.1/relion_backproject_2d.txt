@@ -1,0 +1,18 @@
+# relion_backproject_2d
+# rc=0
+
++++ RELION: command line arguments (with defaults for optional ones between parantheses) +++
+====== General options ===== 
+                                --o : Output directory
+                             --i () : Input file (e.g. run_it023_data.star)
+                --reextract (false) : Extract particles from the micrographs
+            --dual_contrast (false) : Perform a dual-contrast reconstruction
+                        --SNR (0.1) : Assumed signal-to-noise ratio
+                           --m (20) : Margin around the particle [Px]
+                            --j (6) : Number of OMP threads
+====== Display options ===== 
+                  --theme (classic) : Select display theme
+              --list_themes (false) : List available themes and quit
+                          --version : Print RELION version and exit
+
+# --- stderr ---

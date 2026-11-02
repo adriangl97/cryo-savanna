@@ -1,0 +1,13 @@
+# relion_tomo_powspec
+# rc=0
++++ RELION: command line arguments (with defaults for optional ones between parantheses) +++
+====== General options ===== 
+                               --ts : Tilt stack(s) (e.g. 'a.mrc,b.mrc')
+                                --o : Output filename
+                      --sep (false) : Compute separate spectra for all frames
+                          --r (512) : Resolution (in pixels)
+                     --angpix (1.0) : Pixel size in Å
+                       --ratio (-1) : Compute the ratio against this frame
+                          --version : Print RELION version and exit
+
+# --- stderr ---

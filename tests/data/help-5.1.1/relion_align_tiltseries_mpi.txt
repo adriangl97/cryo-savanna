@@ -1,0 +1,38 @@
+# relion_align_tiltseries_mpi
+# rc=0
++++ RELION: command line arguments (with defaults for optional ones between parantheses) +++
+====== General options ===== 
+                                --i : STAR file with all input tomograms, or a unix wildcard to all tomogram files, e.g. "mics/*.mrc"
+             --o (AlignTiltSeries/) : Directory, where all output files will be stored
+         --tomogram_thickness (300) : Estimated tomogram thickness (in nm)
+       --only_do_unfinished (false) : Only estimate CTFs for those tomograms for which there is not yet a logfile with Final values.
+                  --do_at_most (-1) : Only process up to this number of (unprocessed) tomograms.
+                 --batchtomo_exe () : IMOD's batchruntomo executable (default is set through $RELION_BATCHTOMO_EXECUTABLE)
+                 --adoc_template () : Filename of a template for the IMOD directive file (by default, use hard-coded defaults)
+====== IMOD fiducial-based alignment options ===== 
+           --imod_fiducials (false) : Use IMOD's fiducial-based alignment method
+           --fiducial_diameter (10) : Diameter of the fiducials (in nm)
+====== IMOD patch-tracking alignment options ===== 
+          --imod_patchtrack (false) : OR: Use IMOD's patrick-tracking alignment method
+              --patch_overlap (10.) : Overlap between the patches (in %)
+                --patch_size (100.) : Patch size (in nm)
+====== AreTomo2 alignment options ===== 
+                 --aretomo2 (false) : OR: Use AreTomo2 alignment method
+                   --aretomo_exe () : AreTomo executable (can be set through $RELION_ARETOMO_EXECUTABLE, defaults to AreTomo2)
+      --aretomo_tiltcorrect (false) : Specify to correct the tilt angle offset in the tomogram (AreTomo -TiltCor option; default=false)
+  --aretomo_tiltcorrect_angle (999.) : User-specified tilt angle correction (value > 180, means estimate automatically
+              --aretomo_ctf (false) : Perform CTF estimation in AreTomo? (default=false)
+       --aretomo_phaseshift (false) : Perform CTF estimation in AreTomo?
+      --aretomo_reconstruct (false) : Perform Tomogram reconstruction (WBP) in AreTomo?
+  --aretomo_only_reconstruct (false) : Only perform Tomogram reconstruction in AreTomo, and skip alignment/CTF estimation?
+               --aretomo_OutBin (4) : Binning for the output reconstruction by AreTomo
+                 --aretomo_VolZ (0) : Height of the output tomogram reconstruction (in unbinned voxels)
+                           --gpu () : Device ids for each MPI-thread, e.g 0:1:2:3
+====== Expert options ===== 
+            --other_wrapper_args () : Additional command-line arguments that will be passed onto the wrapper.
+             --aretomo_sart (false) : Use SART instead of weighted backprojection for aretomo reconstructions.
+           --aretomo_sart_iter (20) : Number of iterations for aretomo SART reconstruction
+            --aretomo_sart_proj (5) : Number of projections per iterations for aretomo SART reconstruction
+                          --version : Print RELION version and exit
+
+# --- stderr ---

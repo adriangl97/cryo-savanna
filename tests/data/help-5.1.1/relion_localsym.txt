@@ -1,0 +1,48 @@
+# relion_localsym
+# rc=0
++++ RELION: command line arguments (with defaults for optional ones between parantheses) +++
+====== Show usage ===== 
+            --function_help (false) : Show usage for the selected function (JUN 30, 2017)
+====== Options ===== 
+                    --apply (false) : Apply local symmetry to a 3D cryo-EM density map
+                --duplicate (false) : Duplicate subunits/masks according to local symmetry operators
+                   --search (false) : Local searches of local symmetry operators
+                --transform (false) : Transform a map according to three Euler angles and XYZ translations
+                  --txt2rln (false) : Convert operators from DM to RELION STAR format
+                    --debug (false) : (DEBUG ONLY)
+====== Parameters (alphabetically ordered) ===== 
+                      --angpix (1.) : Pixel size (in Angstroms) of input image
+                   --ang_range (0.) : Angular search range of operators (in degrees), overwrite rot-tilt-psi ranges if set to positive
+               --ang_rot_range (0.) : Angular (rot) search range of operators (in degrees)
+              --ang_tilt_range (0.) : Angular (tilt) search range of operators (in degrees)
+               --ang_psi_range (0.) : Angular (psi) search range of operators (in degrees)
+                    --ang_step (1.) : Angular search step of operators (in degrees)
+                        --bin (-1.) : Binning factor (<= 1 means no binning)
+             --ini_threshold (0.01) : Initial threshold for binarization
+                         --i_map () : Input 3D unsymmetrised map
+       --i_mask_info (maskinfo.txt) : Input file with mask filenames and rotational / translational operators (for local searches)
+            --i_op_mask_info (None) : Input file with mask filenames for all operators (for global searches)
+                            --n (2) : Create this number of masks according to the input density map
+                --offset_range (0.) : Translational search range of operators (in Angstroms), overwrite x-y-z ranges if set to positive
+              --offset_x_range (0.) : Translational (x) search range of operators (in Angstroms)
+              --offset_y_range (0.) : Translational (y) search range of operators (in Angstroms)
+              --offset_z_range (0.) : Translational (z) search range of operators (in Angstroms)
+                 --offset_step (1.) : Translational search step of operators (in Angstroms)
+                         --o_map () : Output 3D symmetrised map
+  --o_mask_info (maskinfo_refined.txt) : Output file with mask filenames and rotational / translational operators
+                         --psi (0.) : Third Euler angle (psi, in degrees)
+                         --rot (0.) : First Euler angle (rot, in degrees)
+          --sphere_percentage (-1.) : Diameter of spherical mask divided by the box size (< 0.99)
+                        --tilt (0.) : Second Euler angle (tilt, in degrees)
+                        --xoff (0.) : X-offset (in Angstroms)
+                        --yoff (0.) : Y-offset (in Angstroms)
+                        --zoff (0.) : Z-offset (in Angstroms)
+                     --verb (false) : Verbose output?
+====== Parameters (expert options - alphabetically ordered) ===== 
+                --i_mask (mask.mrc) : (DEBUG) Input mask
+  --i_mask_info_parsed_ext (parsed) : Extension of parsed input file with mask filenames and rotational / translational operators
+              --use_healpix (false) : Use Healpix for angular samplings?
+                       --width (5.) : Width of cosine soft edge (in pixels)
+                          --version : Print RELION version and exit
+
+# --- stderr ---

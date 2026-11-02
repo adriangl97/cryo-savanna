@@ -1,0 +1,8 @@
+# relion_mrc2vtk
+# rc=-6
+
+# --- stderr ---
+in: src/image.h, line 276
+ERROR: 
+Cannot read file --help It does not exist
+terminate called after throwing an instance of 'RelionError'

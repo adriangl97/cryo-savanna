@@ -1,0 +1,18 @@
+# relion_tomo_template_pick
+# rc=0
+
++++ RELION: command line arguments (with defaults for optional ones between parantheses) +++
+====== Complete optimisation set ===== 
+                             --i () : Optimisation set
+====== Individual optimisation components (overriding the optimisation set) ===== 
+                         --template : Template file name
+                                --o : Output directory
+                             --t () : Tomogram set
+                       --frad (100) : Fiducial marker radius [Å]
+                            --j (8) : Number of OMP threads
+====== Display options ===== 
+                  --theme (classic) : Select display theme
+              --list_themes (false) : List available themes and quit
+                          --version : Print RELION version and exit
+
+# --- stderr ---

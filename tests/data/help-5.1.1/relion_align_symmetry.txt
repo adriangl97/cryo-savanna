@@ -1,0 +1,23 @@
+# relion_align_symmetry
+# rc=0
++++ RELION: command line arguments (with defaults for optional ones between parantheses) +++
+====== Options ===== 
+                                --i : Input map to be aligned (OR: input model.star, from which input map will be selected)
+                              --sym : Target point group symmetry
+     --select_largest_class (false) : Select largest class from model.star; by default map with best symmetry will be selected
+     --select_highest_resol (false) : Select class with highest resolution from model.star; by default map with best symmetry will be selected
+                  --o (aligned.mrc) : Name for output aligned map)
+                    --box_size (64) : Working box size in pixels. Very small box (such that Nyquist is aroud 20 A) is usually sufficient.
+              --keep_centre (false) : Do not re-centre the input
+                      --angpix (-1) : Pixel size (in Angstroms)
+                 --only_rot (false) : Keep TILT and PSI fixed and search only ROT (rotation along the Z axis)
+                 --nr_uniform (400) : Randomly search this many orientations
+                      --maxres (-1) : Maximum resolution (in Angstrom) to consider in Fourier space (default Nyquist)
+           --local_search_range (2) : Local search range (1 + 2 * this number)
+            --local_search_step (2) : Local search step (in degrees)
+                          --pad (2) : Padding factor
+                --apply_sym (false) : Also apply the symmetry to the map
+                       --NN (false) : Use nearest-neighbour instead of linear interpolation
+                          --version : Print RELION version and exit
+
+# --- stderr ---

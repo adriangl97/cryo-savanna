@@ -1,0 +1,9 @@
+# relion_tomo_test
+# rc=-6
+reading: frames/bin4_0.mrc
+
+# --- stderr ---
+in: src/image.h, line 276
+ERROR: 
+Cannot read file frames/bin4_0.mrc It does not exist
+terminate called after throwing an instance of 'RelionError'

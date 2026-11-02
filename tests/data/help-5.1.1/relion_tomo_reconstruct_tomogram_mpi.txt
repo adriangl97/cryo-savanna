@@ -1,0 +1,49 @@
+# relion_tomo_reconstruct_tomogram_mpi
+# rc=0
+
++++ RELION: command line arguments (with defaults for optional ones between parantheses) +++
+====== Complete optimisation set ===== 
+                             --i () : Optimisation set
+====== Individual optimisation components (overriding the optimisation set) ===== 
+                             --t () : Tomogram set
+====== General options ===== 
+                                --o : Output filename (or output directory in case of reconstructing multiple tomograms)
+                                --w : Width
+                                --h : Height
+                                --d : Thickness
+                           --tn (*) : Tomogram name
+  --generate_split_tomograms (false) : Reconstruct tomograms from even/odd movie frames or tilt image index for denoising
+       --only_do_unfinished (false) : Only reconstruct those tomograms that haven't finished yet
+                        --bin (1.0) : Binning
+               --binned_angpix (-1) : OR: desired pixel size after binning
+             --tiltangle_offset (0) : Offset applied to all tilt angles (in deg)
+            --bfactor_per_edose (0) : B-factor dose-weighting per electron/A^2 dose (default is use Niko's model)
+                            --j (1) : Number of threads
+====== Weighted backprojection options ===== 
+                --no_weight (false) : Do not perform weighting in Fourier space using a Wiener filter
+               --pre_weight (false) : Pre-weight the 2D slices prior to backprojection
+                       --Fc (false) : Downsample the 2D images by Fourier cropping
+                         --SNR (10) : SNR assumed by the Wiener filter
+                      --ctf (false) : Perform CTF correction
+              --skip_wiener (false) : Do multiply images with CTF, but don't divide by CTF^2 in Wiener filter
+                --keep_mean (false) : Do not zero the DC component of each frame
+                         --td (0.0) : Tapering distance
+                         --tf (0.0) : Tapering falloff
+                         --x0 (0.0) : X origin
+                         --y0 (0.0) : Y origin
+                         --z0 (0.0) : Z origin
+====== Fourier inversion options ===== 
+                  --fourier (false) : Use a Fourier-inversion reconstruction algorithm
+      --skip_fourier_wiener (false) : Only CTF-premultiplication will be performed, but Wiener-type division is skipped
+                      --lambda (10) : Regularisation constant for CTF-correction of the SNRs in the Fourier-inversion algorithm
+    --ctf_intact_first_peak (false) : Leave CTFs intact until first peak
+====== 2D projection options ===== 
+                  --do_proj (false) : Use this to also generate 2D projection of the entire tomogram along the Z-axis
+                  --centre_proj (0) : Central Z-slice for 2D projection (in tomogram pixels from the middle)
+              --thickness_proj (10) : Thickness of the 2D projection (in tomogram pixels)
+====== Display options ===== 
+                  --theme (classic) : Select display theme
+              --list_themes (false) : List available themes and quit
+                          --version : Print RELION version and exit
+
+# --- stderr ---

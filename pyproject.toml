@@ -1,0 +1,45 @@
+[build-system]
+requires = ["setuptools>=77"]  # SPDX licence expression (PEP 639)
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "cryo-savanna"
+version = "0.9"
+description = "An alternative GUI for RELION 5.1 projects (SPA and tomography), not made by the RELION developers"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "GPL-2.0-or-later"
+license-files = ["LICENSE", "NOTICE.md"]
+authors = [{ name = "Adrián González-López" }]
+keywords = ["cryo-EM", "RELION", "GUI", "single particle analysis", "cryo-ET", "tomography"]
+classifiers = [  # the licence is given by `license` above (PEP 639), not by a classifier
+    "Development Status :: 3 - Alpha",
+    "Environment :: X11 Applications :: Qt",
+    "Intended Audience :: Science/Research",
+    "Operating System :: POSIX :: Linux",
+    "Operating System :: MacOS",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Topic :: Scientific/Engineering :: Bio-Informatics",
+]
+dependencies = [
+    "numpy>=1.24",
+    "mrcfile>=1.4",
+]
+
+[project.optional-dependencies]
+gui = ["qtpy>=2.4", "PySide6>=6.5", "pyqtgraph>=0.13", "tifffile"]
+dev = ["pytest>=7", "pytest-qt>=4"]
+
+[project.scripts]
+cryo-savanna = "cryo_savanna.app:main"
+savanna = "cryo_savanna.app:main"
+
+[tool.setuptools.packages.find]
+include = ["cryo_savanna*"]
+
+[tool.setuptools.package-data]
+"cryo_savanna.jobdefs" = ["*.json", "help/*/*.txt"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

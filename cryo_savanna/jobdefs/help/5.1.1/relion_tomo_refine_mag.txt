@@ -1,0 +1,30 @@
+# relion_tomo_refine_mag
+# rc=0
+
++++ RELION: command line arguments (with defaults for optional ones between parantheses) +++
+====== Complete optimisation set ===== 
+                             --i () : Optimisation set
+====== Individual optimisation components (overriding the optimisation set) ===== 
+                             --p () : Particle set
+                             --t () : Tomogram set
+                           --mot () : Particle trajectories set
+                          --ref1 () : Reference map, half 1
+                          --ref2 () : Reference map, half 2
+                          --mask () : Reference mask
+                           --fsc () : Star file containing the FSC of the reference
+                 --freq_cutoff (-1) : Explicit cutoff frequency (in Å; negative to turn off)
+             --fsc_thresh_width (5) : Width of the frq. weight flank
+           --use_SNR_weight (false) : Weight each shell proportionally to its reference-map confidence
+====== General refinement options ===== 
+                                --b : Box size
+                                --o : Output directory
+       --only_do_unfinished (false) : Only process tomograms for which no temporary output data can be found
+          --per_frame_noise (false) : Assume a different noise distribution for each frame
+                     --diag (false) : Write out diagnostic information
+                            --j (6) : Number of OMP threads
+====== Display options ===== 
+                  --theme (classic) : Select display theme
+              --list_themes (false) : List available themes and quit
+                          --version : Print RELION version and exit
+
+# --- stderr ---

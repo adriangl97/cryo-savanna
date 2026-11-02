@@ -1,0 +1,31 @@
+# generated from src/manualpicker.cpp (ManualPicker::read)
++++ RELION: command line arguments (with defaults for optional ones between parantheses) +++
+====== General options ===== 
+                                --i : Micrograph STAR file OR filenames from which to pick particles, e.g. "Micrographs/*.mrc"
+                --particle_diameter : Diameter of the circles that will be drawn around each picked particle (in Angstroms)
+               --odir (ManualPick/) : Output directory for coordinate files (default is to store next to micrographs)
+  --selection (micrographs_selected.star) : STAR file with selected micrographs
+            --pickname (manualpick) : Rootname for the picked coordinate files
+                     --angpix (-1.) : Pixel size in Angstroms
+                --coord_scale (1.0) : Scale coordinates before display
+           --pick_start_end (false) : Pick start-end coordinates of helices
+               --pick_lines (false) : Pick lines for curvy helices
+               --allow_save (false) : Allow saving of the selected micrographs
+                --fast_save (false) : Save a default selection of all micrographs immediately
+           --open_simultaneous (10) : Open this many of the next micrographs simultaneously when pressing CTRL and a Pick button
+====== Displaying options ===== 
+                        --scale (1) : Relative scale for the micrograph display
+                        --black (0) : Pixel value for black (default is auto-contrast)
+                        --white (0) : Pixel value for white (default is auto-contrast)
+               --sigma_contrast (0) : Set white and black pixel values this many times the image stddev from the mean (default is auto-contrast)
+                      --lowpass (0) : Lowpass filter in Angstroms for the micrograph (0 for no filtering)
+                     --highpass (0) : Highpass filter in Angstroms for the micrograph (0 for no filtering)
+            --topaz_denoise (false) : Or instead of filtering, use Topaz denoising before picking (on GPU 0)
+                    --ctf_scale (1) : Relative scale for the CTF-image display
+           --ctf_sigma_contrast (3) : Sigma-contrast for the CTF-image display
+        --minimum_pick_fom (-9999.) : Minimum value for rlnAutopickFigureOfMerit to display picks
+                    --color_star () : STAR file with a column for red-blue coloring (a subset of) the particles
+                   --color_label () : MetaDataLabel to color particles on (e.g. rlnParticleSelectZScore)
+                        --blue (1.) : Value of the blue color
+                         --red (0.) : Value of the red color
+                          --version : Print RELION version and exit

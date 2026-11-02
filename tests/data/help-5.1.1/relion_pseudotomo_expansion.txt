@@ -1,0 +1,11 @@
+# relion_pseudotomo_expansion
+# rc=0
++++ RELION: command line arguments (with defaults for optional ones between parantheses) +++
+====== General options ===== 
+                        --particles : Input particles STAR file
+                        --tomograms : Input tomography STAR file
+                           --motion : Input motions STAR file
+                                --o : Output STAR file
+                          --version : Print RELION version and exit
+
+# --- stderr ---

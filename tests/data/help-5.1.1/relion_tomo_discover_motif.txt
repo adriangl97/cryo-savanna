@@ -1,0 +1,29 @@
+# relion_tomo_discover_motif
+# rc=0
++++ RELION: command line arguments (with defaults for optional ones between parantheses) +++
+====== General options ===== 
+                                --p : Point cloud (.csv)
+                                --o : Output filename
+                         --d0 (6.5) : Min. lattice spacing
+                         --d1 (8.5) : Max. lattice spacing
+                            --n (6) : Number of neighbors
+                            --m (5) : Number of motifs to return
+                        --bin (8.0) : Binning of the point cloud
+                    --min_score (3) : Minimal score for a point to be used in motif refinement
+                       --tol (0.25) : Tolerance [Px]
+                        --reg (0.1) : Regularizer constant: inhibits movement of motif points during refinement
+                        --nm (1000) : Number of motifs to test
+                       --ne (10000) : Number of points to test against
+                 --ref-disc (false) : Refine motif locally during discovery
+               --no_ref-det (false) : Skip local refinement for motif detection
+                            --j (1) : Number of threads
+====== Distance histogram ===== 
+                       --dh (false) : Compute the distance density, then quit
+                       --dhmax (50) : Max. distance
+                        --dhb (256) : Number of bins
+====== Neighbor-count histogram ===== 
+                      --nch (false) : Compute neighbor-count histogram, then quit
+                      --nchmax (20) : Max. neighbor count
+                          --version : Print RELION version and exit
+
+# --- stderr ---

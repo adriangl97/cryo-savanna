@@ -1,0 +1,42 @@
+# relion_find_amyloid_mpi
+# rc=0
+RELION version: 5.1.1 
+
++++ RELION: command line arguments (with defaults for optional ones between parantheses) +++
+====== General options ===== 
+                                --i : Input image (.mrc) or STAR file with micrographs
+              --pickname (autopick) : Rootname for coordinate STAR files
+                 --odir (AutoPick/) : Output directory for coordinate files (default is to store next to micrographs)
+       --only_do_unfinished (false) : Only estimate CTFs for those tomograms for which there is not yet a logfile with Final values.
+                            --j (1) : Number of threads to us in parallel
+====== Filament searching options  ===== 
+                    --psi_step (5.) : Angular sampling rate (in degrees)
+                   --shift_step (5) : Step in shifts to search (in downscaled pixels)
+       --search_filament_width (50) : Width of searching image (in A)
+     --search_filament_length (250) : Length of searching image (in A)
+                 --skip_fom (false) : Skip FOM calculation.
+====== Filament tracing options  ===== 
+                  --threshold (0.5) : Threshold in Z-scores for coordinate picking
+       --trace_filament_width (100) : Minimum width occupied by a traced filaments (in A)
+      --trace_filament_length (300) : Minimum length of traced filaments (in A)
+          --psi_jump_threshold (45) : Maximum difference in PSI values between consecutive elements of a skeletonised branch (in degrees)
+                     --plot (false) : Display images with intermediate tracing results for each micrograph
+  --exe (relion_python_trace_amyloids) : Name of python script for filament tracing
+                    --other_args () : Other arguments for the python script
+      --model_path (amytracer-v2.0) : Name of the model to execute for filament tracing
+            --detect_carbon (false) : Detect carbon and ignore filaments on there.
+  --carbon_model_path (carbonpicker-v1.0) : Name of the model to execute for carbon detection
+           --carbon_threshold (0.9) : Threshold for carbon detection
+             --skip_tracing (false) : Skip tracing.
+                      --gpu (false) : Use GPU acceleration when availiable
+====== Expert options (typically no need to change) ===== 
+             --signal_minres (4.85) : Minimum resolution value for signal (in A)
+             --signal_maxres (4.65) : Maximum resolution value for signal (in A)
+           --nonsignal_minres (4.4) : Minimum resolution value for non-signal (in A)
+           --nonsignal_maxres (4.2) : Maximum resolution value for non-signal (in A)
+                --down_angpix (2.1) : Pixel size for downscaled images (needs to include signal frequency!)
+                --force_angpix (-1) : Force this pixel size, regardless of what is in the image header
+                         --verb (1) : Verbosity
+                          --version : Print RELION version and exit
+
+# --- stderr ---

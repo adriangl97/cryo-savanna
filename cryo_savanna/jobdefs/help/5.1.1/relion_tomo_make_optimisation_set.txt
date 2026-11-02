@@ -1,0 +1,22 @@
+# relion_tomo_make_optimisation_set
+# rc=0
++++ RELION: command line arguments (with defaults for optional ones between parantheses) +++
+====== General options ===== 
+====== Complete optimisation set ===== 
+                             --i () : Optimisation set
+====== Individual optimisation components (overriding the optimisation set) ===== 
+                                --o : Output file name
+                             --p () : Particle set
+                             --t () : Tomogram set
+                           --mot () : Particle trajectories set
+                           --man () : Manifolds set
+                          --ref1 () : Reference map, half 1
+                          --ref2 () : Reference map, half 2
+                          --mask () : Reference mask
+                           --fsc () : Star file containing the FSC of the reference
+                 --freq_cutoff (-1) : Explicit cutoff frequency (in Å; negative to turn off)
+             --fsc_thresh_width (5) : Width of the frq. weight flank
+           --use_SNR_weight (false) : Weight each shell proportionally to its reference-map confidence
+                          --version : Print RELION version and exit
+
+# --- stderr ---

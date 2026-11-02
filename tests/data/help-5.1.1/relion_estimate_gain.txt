@@ -1,0 +1,14 @@
+# relion_estimate_gain
+# rc=0
++++ RELION: command line arguments (with defaults for optional ones between parantheses) +++
+====== Options ===== 
+                                --i : Input movie STAR file
+                                --o : Output file name
+                            --j (1) : Number of threads
+                  --max_frames (-1) : Target number of frames to average (rounded to movies; -1 means use all)
+                   --random (false) : Randomise the order of input movies before taking subset
+              --dont_invert (false) : Don't take the inverse but simply writes the sum
+               --eer_upsampling (2) : EER upsampling (1 = physical or 2 = 2x super-resolution)
+                          --version : Print RELION version and exit
+
+# --- stderr ---

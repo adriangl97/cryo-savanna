@@ -1,0 +1,18 @@
+# relion_tomo_import_coordinates
+# rc=0
+
++++ RELION: command line arguments (with defaults for optional ones between parantheses) +++
+====== General options ===== 
+                                --i : Linux wildcard for set of coordinate files (in STAR or 3/6-column ASCII), or a STAR file with a list of coordinate files and their tomogram name
+                                --o : Name of the output directory
+              --remove_substring () : Remove this substring from the coordinate filenames to get the tomogram names
+             --remove_substring2 () : Remove also this substring from the coordinate filenames to get the tomogram names
+                 --centered (false) : Are the coordinates relative to the center of the tomogram?
+               --scale_factor (1.0) : Multiply coordinates with this factor
+                 --add_factor (0.0) : Add this value to final coordinates
+====== Display options ===== 
+                  --theme (classic) : Select display theme
+              --list_themes (false) : List available themes and quit
+                          --version : Print RELION version and exit
+
+# --- stderr ---

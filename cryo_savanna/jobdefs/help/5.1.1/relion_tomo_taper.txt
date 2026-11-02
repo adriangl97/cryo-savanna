@@ -1,0 +1,11 @@
+# relion_tomo_taper
+# rc=0
++++ RELION: command line arguments (with defaults for optional ones between parantheses) +++
+====== General options ===== 
+                                --i : Image to be tapered
+                                --o : Output filename
+                           --w (10) : Filter edge width
+                            --j (5) : Number of threads
+                          --version : Print RELION version and exit
+
+# --- stderr ---

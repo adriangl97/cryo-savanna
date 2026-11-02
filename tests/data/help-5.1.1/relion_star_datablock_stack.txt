@@ -1,0 +1,6 @@
+# relion_star_datablock_stack
+# rc=0
+
+# --- stderr ---
+seq: invalid floating point argument: ‘--help’
+Try 'seq --help' for more information.

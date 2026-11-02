@@ -1,0 +1,11 @@
+# relion_tomo_catalogue_tomos
+# rc=0
++++ RELION: command line arguments (with defaults for optional ones between parantheses) +++
+====== General options ===== 
+                                --t : Tomogram list
+                                --o : Output filename pattern
+                            --j (6) : Number of threads
+                          --bin (8) : Binning factor
+                          --version : Print RELION version and exit
+
+# --- stderr ---

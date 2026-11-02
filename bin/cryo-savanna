@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+# Copyright (C) 2026 Adrián González-López
+# SPDX-License-Identifier: GPL-2.0-or-later
+# Runs cryo-savanna from this checkout without installing it (development; an installed
+# environment has its own cryo-savanna and savanna commands).
+# Uses the env pointed to by CRYO_SAVANNA_ENV, else the checkout's ./env (README: Development),
+# else whatever python3 is first on PATH. RELION binaries come from PATH (module load relion).
+set -euo pipefail
+here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [[ -n "${CRYO_SAVANNA_ENV:-}" ]]; then
+    py="${CRYO_SAVANNA_ENV}/bin/python"
+elif [[ -x "${here}/../env/bin/python" ]]; then
+    py="${here}/../env/bin/python"
+else
+    py="$(command -v python3)"
+fi
+# The user's values, so that programs cryo-savanna starts (ChimeraX, RELION, napari) get them back
+# instead of cryo-savanna's own settings below (see cryo_savanna/env/child.py).
+export CRYO_SAVANNA_ORIG_QT_XCB_GL_INTEGRATION="${QT_XCB_GL_INTEGRATION-__unset__}"
+export CRYO_SAVANNA_ORIG_PYTHONPATH="${PYTHONPATH-__unset__}"
+export CRYO_SAVANNA_ORIG_QT_API="${QT_API-__unset__}"  # qtpy sets it to cryo-savanna's binding
+# Never use OpenGL over X11 in cryo-savanna itself: it is slow or broken when forwarded.
+export QT_XCB_GL_INTEGRATION="${QT_XCB_GL_INTEGRATION:-none}"
+export PYTHONPATH="${here}/..${PYTHONPATH:+:${PYTHONPATH}}"
+exec "${py}" -m cryo_savanna.app "$@"

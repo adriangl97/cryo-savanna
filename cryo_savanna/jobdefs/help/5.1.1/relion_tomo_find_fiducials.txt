@@ -1,0 +1,24 @@
+# relion_tomo_find_fiducials
+# rc=0
+
++++ RELION: command line arguments (with defaults for optional ones between parantheses) +++
+====== Complete optimisation set ===== 
+                             --i () : Optimisation set
+====== Individual optimisation components (overriding the optimisation set) ===== 
+                             --t () : Tomogram set
+====== General options ===== 
+                                --o : Output directory
+                            --d (5) : Detection threshold
+                           --r (50) : Bead radius [Å]
+                         --sp (1.5) : Minimal bead spacing (as a multiple of radius, L^inf distance)
+                         --bin0 (4) : Search binning level
+                         --bin1 (4) : CC binning level
+                     --diag (false) : Write out diagnostic information
+                      --max_MG (-1) : Last tilt series to consider
+                            --j (6) : Number of OMP threads
+====== Display options ===== 
+                  --theme (classic) : Select display theme
+              --list_themes (false) : List available themes and quit
+                          --version : Print RELION version and exit
+
+# --- stderr ---

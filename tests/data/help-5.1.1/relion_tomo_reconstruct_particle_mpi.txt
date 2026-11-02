@@ -1,0 +1,38 @@
+# relion_tomo_reconstruct_particle_mpi
+# rc=0
+
++++ RELION: command line arguments (with defaults for optional ones between parantheses) +++
+====== Complete optimisation set ===== 
+                             --i () : Optimisation set
+====== Individual optimisation components (overriding the optimisation set) ===== 
+                             --p () : Particle set
+                             --t () : Tomogram set
+                           --mot () : Particle trajectories set
+====== Reconstruction options ===== 
+                                --b : Box size
+                                --o : Output directory
+                        --crop (-1) : Size of (additionally output) cropped image
+                   --whiten (false) : Whiten the noise by flattening the power spectrum
+                   --no_ctf (false) : Do not apply CTFs
+                          --bin (1) : Binning factor
+                       --taper (10) : Taper against the sphere by this number of pixels (only if cropping)
+                         --SNR (-1) : Assumed signal-to-noise ratio (negative means use a heuristic)
+                         --sym (C1) : Symmetry group
+               --nr_helical_asu (1) : Number of helical asymmetrical units
+                --helical_rise (0.) : Helical rise (in Angstroms)
+               --helical_twist (0.) : Helical twist (in degrees, + for right-handedness)
+                         --mem (-1) : Max. amount of memory (in GB) to use for accumulation (--j_out will be reduced)
+       --only_do_unfinished (false) : Only process undone subtomograms
+                --no_backup (false) : Do not make backups (makes it impossible to use --only_do_unfinished)
+           --no_circle_crop (false) : Do not crop 2D images to a circle prior to insertion
+                            --j (6) : Number of OMP threads
+                         --j_in (3) : Number of inner threads (slower, needs less memory)
+                        --j_out (2) : Number of outer threads (faster, needs more memory)
+                 --no_recon (false) : Do not reconstruct the volume, only backproject (for benchmarking purposes)
+              --cutoff_fract (0.01) : Ignore shells for which the dose weight falls below this value
+====== Display options ===== 
+                  --theme (classic) : Select display theme
+              --list_themes (false) : List available themes and quit
+                          --version : Print RELION version and exit
+
+# --- stderr ---

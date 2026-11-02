@@ -1,0 +1,23 @@
+# relion_convert_to_tiff
+# rc=0
++++ RELION: command line arguments (with defaults for optional ones between parantheses) +++
+====== General Options ===== 
+                                --i : Input movie to be compressed (an MRC/MRCS file or a list of movies as .star or .lst)
+                           --o (./) : Directory for output TIFF files
+       --only_do_unfinished (false) : Only process non-converted movies.
+                            --j (1) : Number of threads (useful only for --estimate_gain)
+                          --gain () : Estimated gain map and its reliablity map (read)
+                      --thresh (50) : Number of success needed to consider a pixel reliable
+            --estimate_gain (false) : Estimate gain
+====== EER rendering options ===== 
+                --eer_grouping (40) : EER grouping
+               --eer_upsampling (1) : EER upsampling (1 = physical or 2 = 2x super-resolution)
+                    --short (false) : use unsigned short instead of signed byte for EER rendering
+====== TIFF writing options ===== 
+               --compression (auto) : compression type (none, auto, deflate (= zip), lzw)
+                --deflate_level (6) : deflate level. 1 (fast) to 9 (slowest but best compression)
+             --ignore_error (false) : Don't die on un-expected defect pixels (can be dangerous)
+             --line_by_line (false) : Use one strip per row
+                          --version : Print RELION version and exit
+
+# --- stderr ---

@@ -1,0 +1,23 @@
+# cryo-savanna and everything it needs. Install (from this directory):
+#   mamba env create -f environment.yml                  # or: conda env create -f environment.yml
+#   mamba env create -f environment.yml -p /opt/cryo-savanna   # for everyone: a fixed path
+# Then `conda activate cryo-savanna` (or put <env>/bin on PATH) and run `cryo-savanna` or `savanna`.
+# Updating after a git pull: mamba env update -f environment.yml (same -n / -p).
+# RELION itself is NOT part of this env: load it with `module load relion`.
+name: cryo-savanna
+channels:
+  - conda-forge
+dependencies:
+  - python>=3.11
+  - numpy>=1.24
+  - mrcfile>=1.4
+  - tifffile
+  - qtpy>=2.4
+  - pyside6>=6.5
+  - pyqtgraph>=0.13
+  # tests (python -m pytest in a checkout)
+  - pytest>=7
+  - pytest-qt>=4
+  - pip
+  - pip:
+      - .  # cryo-savanna itself: the cryo-savanna and savanna commands

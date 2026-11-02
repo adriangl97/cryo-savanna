@@ -1,0 +1,13 @@
+# relion_tomo_bin_stack
+# rc=0
++++ RELION: command line arguments (with defaults for optional ones between parantheses) +++
+====== General options ===== 
+                                --i : Tilt sequence image stack (e.g. *.st:mrc)
+                                --o : Output stack filename
+                      --0dc (false) : Zero the DC component of each frame
+                        --bin (8.0) : Binning (pixel spacing)
+                        --F (false) : Use Fourier cropping to downsample (warning: can produce an inexact aspect ratio)
+                            --j (1) : Number of threads
+                          --version : Print RELION version and exit
+
+# --- stderr ---

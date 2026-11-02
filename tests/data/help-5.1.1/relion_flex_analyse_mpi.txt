@@ -1,0 +1,26 @@
+# relion_flex_analyse_mpi
+# rc=0
++++ RELION: command line arguments (with defaults for optional ones between parantheses) +++
+====== General options ===== 
+                          --data () : The _data.star file with the orientations to be analysed
+                         --model () :  The corresponding _model.star file with the refined model
+                        --bodies () : The corresponding star file with the definition of the bodies
+                      --o (analyse) : Output rootname
+====== 3D model options ===== 
+                 --3dmodels (false) : Generate a 3D model for each experimental particles
+               --size_3dmodels (-1) : Output size of the 3D models (default is same as input particles)
+====== PCA options ===== 
+               --PCA_orient (false) : Perform a principal components analysis on the multibody orientations
+                  --do_maps (false) : Generate maps along the principal components
+                           --k (-1) : Number of principal components to generate maps for
+                         --v (0.75) : Or use as many principal components to explain this fraction of variance (<0,1])
+              --maps_per_movie (10) : Number of maps to use for the movie of each principal component
+                       --bins (100) : Number of bins in histograms of the eigenvalues for each principal component
+           --select_eigenvalue (-1) : Output a selection particle.star file based on eigenvalues along this eigenvector
+  --select_eigenvalue_min (-99999.) : Minimum for eigenvalue to include particles in selection output star file
+   --select_eigenvalue_max (99999.) : Maximum for eigenvalue to include particles in selection output star file
+    --write_pca_projections (false) : Write out a text file with all PCA projections for all particles
+                         --verb (1) : Verbosity
+                          --version : Print RELION version and exit
+
+# --- stderr ---

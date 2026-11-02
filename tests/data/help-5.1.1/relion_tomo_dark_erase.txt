@@ -1,0 +1,14 @@
+# relion_tomo_dark_erase
+# rc=0
++++ RELION: command line arguments (with defaults for optional ones between parantheses) +++
+====== General options ===== 
+                               --ts : Tilt sequence image stack (e.g. *.st:mrc)
+                                --o : Output filename
+                        --th (-2.5) : Threshold value (in sigma)
+                         --r (32.0) : Fill radius (in pixels)
+                      --vis (false) : Only write out a normalized stack to assist in finding an optimal threshold value
+                     --diag (false) : Write out diagnostic data
+                            --j (1) : Number of threads
+                          --version : Print RELION version and exit
+
+# --- stderr ---

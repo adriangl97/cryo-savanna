@@ -1,0 +1,13 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+# the development environment of README: Development (mamba env create -p ./env)
+/env/
+*.egg-info/
+build/
+dist/
+tools/extract_jobdefs/build/
+.DS_Store
+# validation runs (they name the machine they ran on)
+cryo_savanna_validation*/
+cryo_savanna_validation*.tar.gz

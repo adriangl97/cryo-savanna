@@ -1,0 +1,25 @@
+# relion_tomo_refine_ctf_mpi
+# rc=1
+
+# --- stderr ---
+in: src/jaz/tomography/apps/refine_ctf_mpi.cpp, line 14
+ERROR: 
+refine_ctf_mpi: this program needs to be run with at least two MPI processes!
+=== Backtrace  ===
+relion_tomo_refine_ctf_mpi(+0x94517) [0x5c69f7891517]
+relion_tomo_refine_ctf_mpi(+0xe152) [0x5c69f780b152]
+/lib/x86_64-linux-gnu/libc.so.6(+0x2a1ca) [0x7deea262a1ca]
+/lib/x86_64-linux-gnu/libc.so.6(__libc_start_main+0x8b) [0x7deea262a28b]
+relion_tomo_refine_ctf_mpi(+0x93c95) [0x5c69f7890c95]
+==================
+ERROR: 
+refine_ctf_mpi: this program needs to be run with at least two MPI processes!
+
+--------------------------------------------------------------------------
+MPI_ABORT was invoked on rank 0 in communicator MPI_COMM_WORLD
+with errorcode 1.
+
+NOTE: invoking MPI_ABORT causes Open MPI to kill all MPI processes.
+You may or may not see output from other processes, depending on
+exactly when Open MPI kills them.
+--------------------------------------------------------------------------

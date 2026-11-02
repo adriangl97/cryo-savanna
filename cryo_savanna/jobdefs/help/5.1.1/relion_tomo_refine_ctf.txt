@@ -1,0 +1,52 @@
+# relion_tomo_refine_ctf
+# rc=0
+
++++ RELION: command line arguments (with defaults for optional ones between parantheses) +++
+====== Complete optimisation set ===== 
+                             --i () : Optimisation set
+====== Individual optimisation components (overriding the optimisation set) ===== 
+                             --p () : Particle set
+                             --t () : Tomogram set
+                           --mot () : Particle trajectories set
+                          --ref1 () : Reference map, half 1
+                          --ref2 () : Reference map, half 2
+                          --mask () : Reference mask
+                           --fsc () : Star file containing the FSC of the reference
+                 --freq_cutoff (-1) : Explicit cutoff frequency (in Å; negative to turn off)
+             --fsc_thresh_width (5) : Width of the frq. weight flank
+           --use_SNR_weight (false) : Weight each shell proportionally to its reference-map confidence
+====== General refinement options ===== 
+                                --b : Box size
+                                --o : Output directory
+       --only_do_unfinished (false) : Only process tomograms for which no temporary output data can be found
+          --per_frame_noise (false) : Assume a different noise distribution for each frame
+                     --diag (false) : Write out diagnostic information
+                            --j (6) : Number of OMP threads
+====== Defocus refinement options ===== 
+               --do_defocus (false) : Refine the (astigmatic) defocus.
+           --do_reg_defocus (false) : Regularise defocus estimation (i.e. require tilts to have similar defoci).
+                   --lambda (0.001) : Defocus regularisation scale
+                       --d0 (-3000) : Min. defocus offset to test [Å]
+                        --d1 (3000) : Max. defocus offset to test [Å]
+                         --ds (100) : Number of defocus steps in-between
+                        --kmin (30) : Lowest spatial frequency to consider [Å]
+          --reset_to_common (false) : Reset the CTFs of all tilts to a common one prior to local refinement.
+====== Scale estimation options ===== 
+                 --do_scale (false) : Refine the contrast scale
+          --per_frame_scale (false) : Estimate the scale per frame (no Lambert fit)
+       --per_tomogram_scale (false) : Estimate the scale per tomogram (luminance may become unstable)
+====== Aberration refinement options ===== 
+      --do_even_aberrations (false) : Refine even higher-order aberrations
+       --do_odd_aberrations (false) : Refine odd higher-order aberrations
+                           --ne (4) : Maximal N for even aberrations
+                           --no (3) : Maximal N for odd aberrations
+====== Expert options ===== 
+                    --min_frame (0) : First frame to consider
+                   --max_frame (-1) : Last frame to consider
+              --cutoff_fract (0.02) : Ignore shells for which the relative dose or frequency weight falls below this fraction of the average
+====== Display options ===== 
+                  --theme (classic) : Select display theme
+              --list_themes (false) : List available themes and quit
+                          --version : Print RELION version and exit
+
+# --- stderr ---

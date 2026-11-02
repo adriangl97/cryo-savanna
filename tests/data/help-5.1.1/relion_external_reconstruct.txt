@@ -1,0 +1,17 @@
+# relion_external_reconstruct
+# rc=1
+
+# --- stderr ---
+in: src/apps/external_reconstruct.cpp, line 55
+ERROR: 
+ ERROR: input argument does not have a .star extension.
+=== Backtrace  ===
+relion_external_reconstruct(+0xc4ce7) [0x57db5a712ce7]
+relion_external_reconstruct(+0x90769) [0x57db5a6de769]
+relion_external_reconstruct(+0x85cc5) [0x57db5a6d3cc5]
+/lib/x86_64-linux-gnu/libc.so.6(+0x2a1ca) [0x727cce62a1ca]
+/lib/x86_64-linux-gnu/libc.so.6(__libc_start_main+0x8b) [0x727cce62a28b]
+relion_external_reconstruct(+0x85f75) [0x57db5a6d3f75]
+==================
+ERROR: 
+ ERROR: input argument does not have a .star extension.

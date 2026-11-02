@@ -1,0 +1,26 @@
+# relion_run_motioncorr_mpi
+# rc=1
+
+# --- stderr ---
+in: src/motioncorr_runner.cpp, line 141
+ERROR: 
+You have to choose either UCSF MotionCor2 or RELION's own implementation.
+=== Backtrace  ===
+relion_run_motioncorr_mpi(+0x9e237) [0x59ffd5aec237]
+relion_run_motioncorr_mpi(+0x137db) [0x59ffd5a617db]
+relion_run_motioncorr_mpi(+0x1007ab) [0x59ffd5b4e7ab]
+relion_run_motioncorr_mpi(+0x95951) [0x59ffd5ae3951]
+/lib/x86_64-linux-gnu/libc.so.6(+0x2a1ca) [0x7dadb4e2a1ca]
+/lib/x86_64-linux-gnu/libc.so.6(__libc_start_main+0x8b) [0x7dadb4e2a28b]
+relion_run_motioncorr_mpi(+0x95c15) [0x59ffd5ae3c15]
+==================
+ERROR: 
+You have to choose either UCSF MotionCor2 or RELION's own implementation.
+--------------------------------------------------------------------------
+MPI_ABORT was invoked on rank 0 in communicator MPI_COMM_WORLD
+with errorcode 1.
+
+NOTE: invoking MPI_ABORT causes Open MPI to kill all MPI processes.
+You may or may not see output from other processes, depending on
+exactly when Open MPI kills them.
+--------------------------------------------------------------------------

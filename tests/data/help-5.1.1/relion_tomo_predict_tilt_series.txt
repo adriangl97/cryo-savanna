@@ -1,0 +1,30 @@
+# relion_tomo_predict_tilt_series
+# rc=0
+
++++ RELION: command line arguments (with defaults for optional ones between parantheses) +++
+====== Complete optimisation set ===== 
+                             --i () : Optimisation set
+====== Individual optimisation components (overriding the optimisation set) ===== 
+                             --p () : Particle set
+                             --t () : Tomogram set
+                           --mot () : Particle trajectories set
+                          --ref1 () : Reference map, half 1
+                          --ref2 () : Reference map, half 2
+                          --mask () : Reference mask
+                           --fsc () : Star file containing the FSC of the reference
+                 --freq_cutoff (-1) : Explicit cutoff frequency (in Å; negative to turn off)
+             --fsc_thresh_width (5) : Width of the frq. weight flank
+           --use_SNR_weight (false) : Weight each shell proportionally to its reference-map confidence
+====== General options ===== 
+                                --b : Box size
+                               --tn : Tomogram name
+                                --o : Output filename
+                        --bin (1.0) : Output binning
+                      --sub (false) : Subtract predicted tilt series from the original
+                            --j (1) : Number of threads
+====== Display options ===== 
+                  --theme (classic) : Select display theme
+              --list_themes (false) : List available themes and quit
+                          --version : Print RELION version and exit
+
+# --- stderr ---

@@ -1,0 +1,5 @@
+# relion_merge_particles
+# rc=1
+
+# --- stderr ---
+usage: relion_merge_particles <input1> <input2> ... <inputN> <output>

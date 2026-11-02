@@ -1,0 +1,11 @@
+# relion_suggest_tvalue
+# rc=0
++++ RELION: command line arguments (with defaults for optional ones between parantheses) +++
+====== Options ===== 
+                              --map : Consensus map
+                             --mask : Mask used for focussed classification/refinement
+                            --T (4) : Standard T-value
+                         --try (10) : Number of times to position mask randomly to find a high-power density area
+                          --version : Print RELION version and exit
+
+# --- stderr ---

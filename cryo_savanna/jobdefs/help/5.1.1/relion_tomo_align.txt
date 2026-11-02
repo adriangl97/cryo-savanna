@@ -1,0 +1,64 @@
+# relion_tomo_align
+# rc=0
+
++++ RELION: command line arguments (with defaults for optional ones between parantheses) +++
+====== Complete optimisation set ===== 
+                             --i () : Optimisation set
+====== Individual optimisation components (overriding the optimisation set) ===== 
+                             --p () : Particle set
+                             --t () : Tomogram set
+                           --mot () : Particle trajectories set
+                          --ref1 () : Reference map, half 1
+                          --ref2 () : Reference map, half 2
+                          --mask () : Reference mask
+                           --fsc () : Star file containing the FSC of the reference
+                 --freq_cutoff (-1) : Explicit cutoff frequency (in Å; negative to turn off)
+             --fsc_thresh_width (5) : Width of the frq. weight flank
+           --use_SNR_weight (false) : Weight each shell proportionally to its reference-map confidence
+====== General refinement options ===== 
+                                --b : Box size
+                                --o : Output directory
+       --only_do_unfinished (false) : Only process tomograms for which no temporary output data can be found
+          --per_frame_noise (false) : Assume a different noise distribution for each frame
+                     --diag (false) : Write out diagnostic information
+                            --j (6) : Number of OMP threads
+====== General alignment options ===== 
+               --shift_only (false) : Only apply an optimal rigid shift to each frame (no iterative optimisation; useful for very badly aligned frames)
+  --shift_only_by_particles (false) : Estimate rigid shift by aligning only the particles instead of by predicting entire micrographs
+                           --r (20) : Max. particle shift allowed [Pixels]
+                  --const_p (false) : Keep the particle positions constant
+                  --const_a (false) : Keep the frame angles constant
+                  --const_s (false) : Keep the frame shifts constant
+                  --range_reg (0.0) : Value of the range regulariser
+                    --aniso (false) : Assume an anisotropic projection model
+           --per_tilt_aniso (false) : Fit independent view anisotropy for each tilt image
+                       --it (10000) : Max. number of iterations
+====== Motion estimation options ===== 
+                   --motion (false) : Estimate particle motion (expensive)
+                      --s_vel (0.5) : Velocity sigma [Å/dose]
+                   --s_div (5000.0) : Divergence sigma [Å]
+               --abs_params (false) : Do not scale the sigmas by the dose
+               --sq_exp_ker (false) : Use a square-exponential kernel instead of an exponential one
+                      --max_ed (-1) : Maximum number of eigendeformations
+====== Deformation estimation options ===== 
+              --deformation (false) : Estimate 2D deformations
+                        --def_w (3) : Number of horizontal sampling points for the deformation grid
+                        --def_h (3) : Number of vertical sampling points for the deformation grid
+               --def_model (spline) : Type of model to use (linear, spline or Fourier)
+                    --def_reg (0.0) : Value of the deformation regulariser
+    --per_frame_deformation (false) : Model separate 2D deformations for all tilts
+====== Expert options ===== 
+                          --pad (1) : Apply Fourier padding to the cross-correlation images
+                --no_whiten (false) : Do not not whiten the noise spectra
+               --whiten_abs (false) : Divide by the square root of the power spectrum
+                          --hp (-1) : High-pass filter the cross-correlation images by this sigma
+                          --srp (0) : Noise variance is divided by k^this during whitening
+                    --min_frame (0) : First frame to consider
+                   --max_frame (-1) : Last frame to consider
+              --cutoff_fract (0.02) : Ignore shells for which the relative dose or frequency weight falls below this fraction of the average
+====== Display options ===== 
+                  --theme (classic) : Select display theme
+              --list_themes (false) : List available themes and quit
+                          --version : Print RELION version and exit
+
+# --- stderr ---

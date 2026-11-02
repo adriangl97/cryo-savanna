@@ -1,0 +1,12 @@
+# Copyright (C) 2026 Adrián González-López
+# SPDX-License-Identifier: GPL-2.0-or-later
+# The source distribution is the whole source: the tools that generate the bundled job definitions
+# and help texts from RELION (GPL: the scripts used to make them), the tests with their fixtures and
+# data, the docs, the launchers and the conda environments.
+include LICENSE NOTICE.md README.md environment.yml environment.lock.yml environment-pyqt5.yml
+graft tools
+graft tests
+graft docs
+graft bin
+global-exclude __pycache__ *.py[cod] .DS_Store
+prune tools/extract_jobdefs/build

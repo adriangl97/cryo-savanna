@@ -1,0 +1,18 @@
+# relion_tomo_find_lattice
+# rc=0
++++ RELION: command line arguments (with defaults for optional ones between parantheses) +++
+====== General options ===== 
+                                --t : Tomogram
+                                --d : Lattice spacing [Å]
+                           --angpix : Pixel size [Å]
+                                --o : Output filename
+                         --f (10.0) : Filter width [~Px]
+                       --mv (0.333) : Minimal abs. value of bandpass filtered image
+                         --md (0.0) : Minimal lattice density
+                         --td (0.0) : Tapering distance [Px]
+                           --ot (0) : Number of overtones
+                    --noise (false) : Replace tomogram contents by white noise
+                            --j (1) : Number of threads
+                          --version : Print RELION version and exit
+
+# --- stderr ---

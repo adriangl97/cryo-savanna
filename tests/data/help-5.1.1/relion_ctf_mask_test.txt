@@ -1,0 +1,15 @@
+# relion_ctf_mask_test
+# rc=0
++++ RELION: command line arguments (with defaults for optional ones between parantheses) +++
+====== General options ===== 
+                                --i : Input particle *.star file
+                                --s : Image size
+                                --r : Particle radius
+                                --t : Frequency step
+                               --tw : Filter step width
+                                --o : Output path
+                            --j (1) : Number of threads
+                           --mg (0) : Micrograph index
+                          --version : Print RELION version and exit
+
+# --- stderr ---

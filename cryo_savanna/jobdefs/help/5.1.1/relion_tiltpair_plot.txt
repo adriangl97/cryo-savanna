@@ -1,0 +1,17 @@
+# relion_tiltpair_plot
+# rc=0
++++ RELION: command line arguments (with defaults for optional ones between parantheses) +++
+====== General options ===== 
+                                --u : Input STAR file with untilted particles
+                                --t : Input STAR file with tilted particles
+                 --o (tiltpair.eps) : Output EPS file 
+                         --sym (C1) : Symmetry point group
+                    --exp_tilt (0.) : Choose symmetry operator that gives tilt angle closest to this value
+                    --exp_beta (0.) : Choose symmetry operator that gives beta angle closest to this value
+             --dist_from_alpha (0.) : Direction (alpha angle) of tilt axis from which to calculate distance
+              --dist_from_tilt (0.) : Tilt angle from which to calculate distance
+                   --max_tilt (90.) : Maximum tilt angle to plot in the EPS file
+                  --spot_radius (3) : Radius in pixels of the spots in the tiltpair plot
+                          --version : Print RELION version and exit
+
+# --- stderr ---

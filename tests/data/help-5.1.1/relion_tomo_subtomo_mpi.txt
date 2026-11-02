@@ -1,0 +1,53 @@
+# relion_tomo_subtomo_mpi
+# rc=0
+
++++ RELION: command line arguments (with defaults for optional ones between parantheses) +++
+====== Complete optimisation set ===== 
+                             --i () : Optimisation set
+====== Individual optimisation components (overriding the optimisation set) ===== 
+                             --p () : Particle set
+                             --t () : Tomogram set
+                           --mot () : Particle trajectories set
+====== Reconstruction options ===== 
+                                --o : Output filename pattern
+                           --b (-1) : Binned projection box size
+                        --crop (-1) : Output box size
+                          --bin (1) : Binning factor
+                  --box_size_A (-1) : OR: Final (cropped) box size (in Angstrom)
+              --precrop_size_A (-1) : OR: Pre-cropped box size for extraction from tilt series (in Angstrom)
+             --binned_size_pix (-1) : OR: Binned box size (in pixels)
+                  --stack2d (false) : Write out 2D stacks of cropped images for each particle, instead of pseudo-subtomograms
+                    --multi (false) : Write out multiplicity volumes
+                         --SNR (-1) : Assumed signal-to-noise ratio (negative means use a heuristic)
+                   --min_frames (1) : Minimum number of lowest-dose tilt series frames that needs to be inside the box
+                    --max_dose (-1) : Maximum dose (in e/A^2) of tilt series frames to be included (negative means use all frames)
+              --cone_weight (false) : Weight down a double cone along Z
+                  --cone_angle (10) : Opening angle of the cone in degrees
+                    --cone_sig0 (2) : Cone width at Z = 0
+           --no_circle_crop (false) : Do not crop 2D images to a circle
+           --circle_precrop (false) : Crop 2D images to the large circle (--b) prior to CTF modulation
+             --grid_precorr (false) : Perform gridding pre-correction on 2D images
+                        --taper (5) : Taper against the sphere by this number of pixels
+                         --env (-1) : Sigma of a Gaussian envelope applied before cropping
+                   --whiten (false) : Whiten the noise by flattening the power spectrum
+                --no_center (false) : Do not subtract the mean from the voxel values
+                    --no_ic (false) : Do not invert contrast (keep particles dark)
+                   --no_ctf (false) : Do not apply CTFs
+                  --no_comb (false) : Do not write the concatenated CTF-multiplicity image
+                      --ctf (false) : Write 3D CTFs
+                      --div (false) : Write CTF-corrected subtomograms
+                      --nrm (false) : Write multiplicity-normalised subtomograms
+       --dont_apply_offsets (false) : By default, rlnOriginX/Y/ZAngst are combined with rlnCoordinateX/Y/Z to construct the particles in their refined translations. Use this argument to skip that.
+       --apply_orientations (false) : rlnAngle<Rot/Tilt/Psi> are combined with rlnTomoSubtomogram<Rot/Tilt/Psi> to construct the particles in their refined orientations. This will also apply translations!
+       --only_do_unfinished (false) : Only process undone subtomograms
+                  --float16 (false) : Write in half-precision 16 bit floating point numbers (MRC mode 12), instead of 32 bit (MRC mode 0).
+                     --diag (false) : Write out diagnostic information
+                            --j (6) : Number of OMP threads
+              --cutoff_fract (0.01) : Ignore shells for which the dose weight falls below this value
+             --real_subtomo (false) : Extract true subtomograms and write those out as 3D volumes, together with their 3D CTFs and 2D projections along Z
+====== Display options ===== 
+                  --theme (classic) : Select display theme
+              --list_themes (false) : List available themes and quit
+                          --version : Print RELION version and exit
+
+# --- stderr ---

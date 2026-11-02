@@ -1,0 +1,28 @@
+# relion_find_tiltpairs
+# rc=0
++++ RELION: command line arguments (with defaults for optional ones between parantheses) +++
+====== General Options ===== 
+                                --u : STAR file with the untilted xy-coordinates
+                                --t : STAR file with the untilted xy-coordinates
+                             --size : Largest dimension of the micrograph (in pixels), e.g. 4096
+                              --acc : Allowed accuracy (in pixels), e.g. half the particle diameter
+                        --dim (200) : Dimension of boxed particles (for EMAN .box files in pixels)
+                    --tilt (99999.) : Fix tilt angle (in degrees)
+                     --rot (99999.) : Fix direction of the tilt axis (in degrees), 0 = along y, 90 = along x
+                 --dont_opt (false) : Skip optimization of the transformation matrix
+====== Specified tilt axis and translational search ranges ===== 
+                       --tilt0 (0.) : Minimum tilt angle (in degrees)
+                   --tiltF (99999.) : Maximum tilt angle (in degrees)
+                    --tiltStep (1.) : Tilt angle step size (in degrees)
+                        --rot0 (0.) : Minimum rot angle (in degrees)
+                    --rotF (99999.) : Maximum rot angle (in degrees)
+                     --rotStep (1.) : Rot angle step size (in degrees)
+                      --x0 (-99999) : Minimum X offset (pixels)
+                       --xF (99999) : Maximum X offset (pixels)
+                       --xStep (-1) : X offset step size (pixels)
+                      --y0 (-99999) : Minimum Y offset (pixels)
+                       --yF (99999) : Maximum Y offset (pixels)
+                       --yStep (-1) : Y offset step size (pixels)
+                          --version : Print RELION version and exit
+
+# --- stderr ---
