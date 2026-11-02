@@ -14,6 +14,8 @@ from cryo_savanna.images.mrc import ImageRef
 from cryo_savanna.project.star import loop_columns, loop_rows, read_star
 from cryo_savanna.results.tables import Table, optics_value
 
+CLASS = "rlnClassNumber"
+
 MIC = "rlnMicrographName"
 MOVIE = "rlnMicrographMovieName"
 COORDS = "rlnMicrographCoordinates"
@@ -105,9 +107,16 @@ class Picks:
     x: np.ndarray
     y: np.ndarray
     fom: np.ndarray | None = None  # rlnAutopickFigureOfMerit
+    cls: np.ndarray | None = None  # rlnClassNumber (particle files of classification jobs)
 
     def __len__(self) -> int:
         return len(self.x)
+
+    def in_classes(self, classes: set[int] | None) -> np.ndarray:
+        """Which picks belong to one of the classes (all of them for None, or without class numbers)."""
+        if classes is None or self.cls is None:
+            return np.ones(len(self), bool)
+        return np.isin(self.cls, list(classes))
 
 
 @dataclass
@@ -118,6 +127,8 @@ class PickSet:
     source: str
     micrographs: list[str]
     coord_files: dict[str, str] = field(default_factory=dict)  # micrograph -> coordinate STAR (relative)
+    pixel_size: float | None = None  # of the micrographs, from a particle file's optics
+    classes: dict[int, int] = field(default_factory=dict)  # class -> particles (particle files with classes)
     _from_particles: dict[str, Picks] | None = None
     _cache: dict[str, tuple[tuple, Picks]] = field(default_factory=dict, repr=False)
 
@@ -140,9 +151,9 @@ class PickSet:
         self._cache[mic] = (key, p)
         return p
 
-    def count(self, mic: str) -> int | None:
+    def count(self, mic: str, classes: set[int] | None = None) -> int | None:
         if self._from_particles is not None:
-            return len(self.picks(mic))
+            return int(self.picks(mic).in_classes(classes).sum())
         rel = self.coord_files.get(mic)
         if not rel:
             return 0
@@ -179,16 +190,27 @@ def read_picks(project_dir: str | os.PathLike, star_rel: str) -> PickSet:
         mics = r[1][MIC]
         coords = r[1].get(COORDS, [""] * len(mics))
         return PickSet(project_dir, star_rel, list(mics), dict(zip(mics, coords)))
-    labels = [MIC, "rlnCoordinateX", "rlnCoordinateY", "rlnAutopickFigureOfMerit"]
+    labels = [MIC, "rlnCoordinateX", "rlnCoordinateY", "rlnAutopickFigureOfMerit", CLASS]
     r = loop_columns(path, "particles", labels)
     if r is None or MIC not in r[1] or "rlnCoordinateX" not in r[1]:
         raise ValueError(f"{star_rel}: no coordinates")
     t = Table("particles", list(r[1]), r[1])
     x, y = t.numeric("rlnCoordinateX"), t.numeric("rlnCoordinateY")
     fom = t.numeric("rlnAutopickFigureOfMerit") if t.has("rlnAutopickFigureOfMerit") else None
+    cls = t.numeric(CLASS).astype(int) if t.has(CLASS) else None
     order: dict[str, list[int]] = {}
     for i, m in enumerate(t.column(MIC)):
         order.setdefault(m, []).append(i)
-    per = {m: Picks(x[idx], y[idx], fom[idx] if fom is not None else None)
+    per = {m: Picks(x[idx], y[idx], fom[idx] if fom is not None else None, cls[idx] if cls is not None else None)
            for m, idx in ((m, np.array(v)) for m, v in order.items())}
-    return PickSet(project_dir, star_rel, list(order), _from_particles=per)
+    px = optics_value(path, "rlnMicrographPixelSize") or optics_value(path, "rlnMicrographOriginalPixelSize")
+    return PickSet(project_dir, star_rel, list(order), pixel_size=px, classes=class_counts(cls),
+                   _from_particles=per)
+
+
+def class_counts(cls: np.ndarray | None) -> dict[int, int]:
+    """class -> number of particles, in class order."""
+    if cls is None or not len(cls):
+        return {}
+    nums, counts = np.unique(cls, return_counts=True)
+    return {int(n): int(c) for n, c in zip(nums, counts)}

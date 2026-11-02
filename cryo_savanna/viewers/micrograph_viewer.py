@@ -4,7 +4,8 @@
 
 Optional side panels: the CTF power spectrum with its fit (CtfFind), the motion track (MotionCorr),
 and particle picks drawn as circles (AutoPick, ManualPick, or the particles of an Extract job on
-their micrographs), with a figure-of-merit threshold.
+their micrographs), with a figure-of-merit threshold and, for particles of several classes, the
+classes to show.
 """
 
 from __future__ import annotations
@@ -12,7 +13,6 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-import numpy as np
 from qtpy.QtCore import Qt, Signal
 from qtpy.QtWidgets import (
     QCheckBox,
@@ -34,6 +34,7 @@ from cryo_savanna.results.micrographs import (
     read_micrographs,
     read_picks,
 )
+from cryo_savanna.viewers.class_filter import ClassFilter
 from cryo_savanna.viewers.image_canvas import ImageCanvas
 from cryo_savanna.viewers.plots import FigureGrid
 from cryo_savanna.viewers.star_table import RowFilter, TableModel, make_table_view
@@ -106,10 +107,12 @@ class MicrographViewer(QWidget):
         self.min_fom.setSpecialValueText("all FOM")
         self.min_fom.setToolTip("Hide picks with a lower figure of merit (rlnAutopickFigureOfMerit)")
         self.min_fom.valueChanged.connect(lambda _: self._draw_picks())
+        self.classes = ClassFilter()
+        self.classes.changed.connect(self._on_classes)
         self.pick_info = QLabel()
         pb = QHBoxLayout()
         pb.setContentsMargins(0, 0, 0, 0)
-        for w in (self.show_picks, self.circle, self.min_fom, self.pick_info):
+        for w in (self.show_picks, self.circle, self.min_fom, self.classes, self.pick_info):
             pb.addWidget(w)
         pb.addStretch(1)
         self.pick_bar = QWidget()
@@ -187,6 +190,7 @@ class MicrographViewer(QWidget):
                 if keep:
                     ms.table.data = {c: [v[i] for i in keep] for c, v in ms.table.data.items()}
                     ms.table._numeric.clear()
+            self.classes.set_counts(ps.classes)
             self._init_circle()
         cols = [(ms.name_col, "Movie" if ms.kind == "movies" else "Micrograph")] + ms.metric_columns()
         self.model.set_table(ms.table, cols)
@@ -204,7 +208,7 @@ class MicrographViewer(QWidget):
     def _init_circle(self) -> None:
         if self.circle.value() > 1:
             return
-        px = self.mics.pixel_size if self.mics else None
+        px = (self.mics.pixel_size if self.mics else None) or (self.pickset.pixel_size if self.pickset else None)
         d = None
         if self.diameter_A and px:
             d = self.diameter_A / px
@@ -216,17 +220,18 @@ class MicrographViewer(QWidget):
         self.circle.setValue(d or 100)
 
     def _count_picks(self) -> None:
-        ps, names = self.pickset, list(self.mics.names)
+        ps, names, classes = self.pickset, list(self.mics.names), self.classes.selected()
+        which = self.classes.describe()
 
         def count():
-            return [ps.count(n) for n in names]
+            return [ps.count(n, classes) for n in names]
 
         def done(counts) -> None:
             if isinstance(counts, TaskError) or self.mics is None or list(self.mics.names) != names:
                 return
             self.model.set_extra("_picks", "Picks", counts)
             total = sum(c or 0 for c in counts)
-            self.count.setText(f"{len(names)} micrographs, {total} picks")
+            self.count.setText(f"{len(names)} micrographs, {total} picks" + (f" ({which})" if which else ""))
 
         self.tasks.run(count, done, channel="counts")
 
@@ -287,6 +292,12 @@ class MicrographViewer(QWidget):
         self.min_fom.setEnabled(bool(has_fom))
         self._draw_picks()
 
+    def _on_classes(self) -> None:
+        """Other classes chosen: the picks on this micrograph, and the counts in the list."""
+        self._draw_picks()
+        if self.pickset is not None and self.mics is not None:
+            self._count_picks()
+
     def _draw_picks(self) -> None:
         p = self._picks
         if p is None:
@@ -295,10 +306,14 @@ class MicrographViewer(QWidget):
             self.canvas.set_points([], [], 1)
             self.pick_info.setText(f"{len(p)} picks (hidden)")
             return
-        keep = np.ones(len(p), bool)
+        in_classes = p.in_classes(self.classes.selected())
+        keep = in_classes.copy()
         if p.fom is not None and self.min_fom.value() > self.min_fom.minimum():
-            keep = p.fom >= self.min_fom.value()
-        self.canvas.set_points(p.x[keep], p.y[keep], self.circle.value())
-        hidden = len(p) - int(keep.sum())
-        self.pick_info.setText(f"{int(keep.sum())} picks" + (f" ({hidden} below the FOM threshold)" if hidden else ""))
+            keep &= p.fom >= self.min_fom.value()
+        colors = self.classes.colors(p.cls[keep] if p.cls is not None else None)
+        self.canvas.set_points(p.x[keep], p.y[keep], self.circle.value(), colors)
+        shown, below = int(keep.sum()), int(in_classes.sum() - keep.sum())
+        which = self.classes.describe()
+        notes = [n for n in (which, f"{below} below the FOM threshold" if below else "") if n]
+        self.pick_info.setText(f"{shown} picks" + (f" ({'; '.join(notes)})" if notes else ""))
 

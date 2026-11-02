@@ -152,6 +152,49 @@ def test_tilt_series_viewer(qtbot, tomo_project, settle):
     assert "5 tilt series, 205 tilt images" in v.info.text()
 
 
+def test_one_picks_tab_for_several_particle_files(tomo_project, tmp_path):
+    """A continued job lists its earlier particle files too: one Picks tab, for the newest."""
+    import os
+    import shutil
+    project = tmp_path / "tomo"
+    shutil.copytree(tomo_project, project, symlinks=True)
+    job = "Refine3D/job011/"
+    older = job + "run_it005_data.star"
+    shutil.copy(project / job / "run_data.star", project / older)
+    os.utime(project / older, ns=(1, 1))
+    snap = ProjectLoader(project).refresh(force=True)
+    ctx = R.context_for(project, snap.jobs[job], snap.pipeline, JobStar.read(project / job / "job.star").options)
+    ctx.outputs = [(older, "ParticleGroupMetadata.star.relion.refine3d")] + ctx.outputs
+    picks = [v for v in R.views_for(ctx) if v.title == "Picks"]
+    assert len(picks) == 1 and picks[0].args["picks"] == job + "run_data.star"
+
+
+def test_tomogram_picks_of_chosen_classes(qtbot, tomo_project, settle, tmp_path):
+    from cryo_savanna.project.star import StarBlock, read_star, write_star
+    from cryo_savanna.viewers.tomo_viewer import TomogramViewer
+    blocks = read_star(tomo_project / "Picks/job008/particles.star")
+    parts = blocks["particles"]
+    n = len(parts.rows)
+    classes = [i % 3 + 1 for i in range(n)]
+    cols = list(parts.columns) + ["rlnClassNumber"]
+    blocks["particles"] = StarBlock.from_records("particles", cols, [list(r) + [c] for r, c in zip(parts.rows, classes)])
+    star = tmp_path / "run_it010_data.star"  # as a tomography Class3D writes them
+    write_star(star, list(blocks.values()))
+    picks = read_tomo_picks(tomo_project, str(star))
+    assert picks.classes == {c: classes.count(c) for c in (1, 2, 3)}
+    v = show(qtbot, TomogramViewer(tomo_project, "Denoise/job007/tomograms.star", picks=str(star), diameter=60))
+    settle()
+    assert v.classes.isVisible() and v.classes.list.count() == 3
+    every = len(v.picks_voxels())
+    v.classes.set_selected({2})
+    name = v.set.names[v.current]
+    assert len(v.picks_voxels()) == picks.count(name, {2}) < every
+    assert len(v.xz.dots.data) == picks.count(name, {2})
+    assert "(class 2)" in v.info.text()
+    v.classes.set_selected({1, 3})
+    assert len(v.picks_voxels()) == every - picks.count(name, {2})
+
+
 def test_tomogram_viewer_slab_side_views_and_picks(qtbot, tomo_project, settle):
     from qtpy.QtCore import Qt
     from cryo_savanna.viewers.tomo_viewer import TomogramViewer

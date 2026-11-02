@@ -256,6 +256,29 @@ def test_viewers_per_job(spa_project):
     assert titles("Polish/job015/") == ["Files"]  # running, nothing written yet
 
 
+def test_classification_jobs_get_picks_of_their_particles(spa_project):
+    c2 = views(spa_project, "Class2D/job006/")
+    picks = next(v for v in c2 if v.title == "Picks")
+    assert picks.kind == R.MICROGRAPHS and picks.args == {"picks": "Class2D/job006/run_it200_data.star",
+                                                          "diameter": 200.0}
+    assert [v.title for v in c2][2:] == ["Picks", "Particles", "Files"]  # the particles keep their tab
+    assert "Picks" in [v.title for v in views(spa_project, "Class3D/job009/")]
+    assert "Picks" not in [v.title for v in views(spa_project, "Refine3D/job011/")]  # one class
+
+
+def test_picks_from_particles_carry_their_classes(spa_project):
+    ps = read_picks(spa_project, "Class3D/job009/run_it025_data.star")
+    assert set(ps.classes) <= {1, 2, 3, 4} and sum(ps.classes.values()) == 24 * 25
+    assert ps.pixel_size == 0.885  # the micrographs' (rlnMicrographOriginalPixelSize)
+    mic = ps.micrographs[0]
+    p = ps.picks(mic)
+    assert p.cls is not None and len(p.cls) == len(p) == 25
+    assert ps.count(mic, {1, 2}) == int(np.isin(p.cls, [1, 2]).sum())
+    assert ps.count(mic, set()) == 0 and ps.count(mic) == 25
+    coords = read_picks(spa_project, "AutoPick/job004/autopick.star")  # coordinate files: no classes
+    assert coords.classes == {} and coords.picks(coords.micrographs[0]).in_classes({1}).all()
+
+
 def test_cache_limit_covers_all_projects_and_emptying_keeps_other_files(tmp_path):
     """$CRYO_SAVANNA_CACHE may be a directory with other things in it: only cryo-savanna's own files go."""
     import os

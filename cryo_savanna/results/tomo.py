@@ -20,6 +20,7 @@ import numpy as np
 from cryo_savanna.images.mrc import ImageRef
 from cryo_savanna.project.star import loop_columns, read_star
 from cryo_savanna.results.curves import Curve, Figure
+from cryo_savanna.results.micrographs import CLASS, class_counts
 from cryo_savanna.results.tables import Table
 
 TOMO_NAME = "rlnTomoName"
@@ -203,9 +204,22 @@ class TomoPicks:
     source: str
     by_tomo: dict[str, np.ndarray]  # tomogram -> [n, 3] (x, y, z)
     centered_angst: bool = True  # else unbinned tilt-series pixels from the corner
+    cls_by_tomo: dict[str, np.ndarray] | None = None  # tomogram -> rlnClassNumber of its particles
+    classes: dict[int, int] = field(default_factory=dict)  # class -> particles
 
-    def count(self, name: str) -> int:
-        return len(self.by_tomo.get(name, ()))
+    def count(self, name: str, classes: set[int] | None = None) -> int:
+        return int(self.in_classes(name, classes).sum())
+
+    def class_numbers(self, name: str) -> np.ndarray | None:
+        return None if self.cls_by_tomo is None else self.cls_by_tomo.get(name, np.empty(0, int))
+
+    def in_classes(self, name: str, classes: set[int] | None) -> np.ndarray:
+        """Which of a tomogram's particles belong to one of the classes (all of them for None)."""
+        n = len(self.by_tomo.get(name, ()))
+        cls = self.class_numbers(name)
+        if classes is None or cls is None:
+            return np.ones(n, bool)
+        return np.isin(cls, list(classes))
 
     def voxels(self, name: str, voxel: float, shape: tuple[int, int, int], binning: float | None = None) -> np.ndarray:
         """Coordinates of a tomogram's particles in its voxels: [n, 3] (x, y, z)."""
@@ -230,7 +244,7 @@ def read_tomo_picks(project_dir: str | os.PathLike, star_rel: str) -> TomoPicks:
     path = Path(project_dir) / star_rel
     centred = ["rlnCenteredCoordinateXAngst", "rlnCenteredCoordinateYAngst", "rlnCenteredCoordinateZAngst"]
     corner = ["rlnCoordinateX", "rlnCoordinateY", "rlnCoordinateZ"]
-    r = loop_columns(path, "particles", [TOMO_NAME] + centred + corner)
+    r = loop_columns(path, "particles", [TOMO_NAME] + centred + corner + [CLASS])
     if r is None or TOMO_NAME not in r[1]:
         raise ValueError(f"{star_rel}: no tomogram particles (rlnTomoName)")
     t = Table("particles", list(r[1]), r[1])
@@ -240,7 +254,9 @@ def read_tomo_picks(project_dir: str | os.PathLike, star_rel: str) -> TomoPicks:
     xyz = np.stack([t.numeric(c) for c in cols], axis=1)
     names = np.array(t.column(TOMO_NAME))
     by = {str(n): xyz[names == n] for n in dict.fromkeys(names.tolist())}
-    return TomoPicks(star_rel, by, cols is centred)
+    cls = t.numeric(CLASS).astype(int) if t.has(CLASS) else None
+    cls_by = {k: cls[names == k] for k in by} if cls is not None else None
+    return TomoPicks(star_rel, by, cols is centred, cls_by, class_counts(cls))
 
 
 def tomograms_for_particles(project_dir: Path, particles_rel: str, options: dict[str, str]) -> str | None:

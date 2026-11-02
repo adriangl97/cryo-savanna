@@ -37,7 +37,8 @@ and can be used interchangeably, even at the same time, on the same project.
 
 **Results inside the GUI** (see [Results](#results) for the full list)
 
-- Micrographs with their per-micrograph values, CTF spectra and fits, motion tracks, and picks.
+- Micrographs with their per-micrograph values, CTF spectra and fits, motion tracks, and picks;
+  for classification jobs, the picks of any set of classes, coloured by class.
 - 2D class averages and 3D class sections per iteration, sortable by distribution, resolution,
   particle count or class score.
 - Plots: CTF and motion histograms and scatter plots, FSC, Guinier, convergence per iteration,
@@ -147,7 +148,9 @@ Each job's results open as tabs next to its Overview and Options:
   astigmatism, max. resolution, FOM, picks), and the selected one large. CtfFind adds the power
   spectrum with its fit, MotionCorr the motion track.
 - **Picks**: AutoPick and ManualPick picks as circles, with a figure-of-merit threshold. Extract
-  jobs show their particles on their micrographs.
+  jobs show their particles on their micrographs, and so do Class2D, Class3D and InitialModel jobs
+  with several classes. For particles of several classes, "Classes" chooses which classes' picks
+  are shown (all, one, or any set of them), each class in its own colour.
 - **Classes**: the class averages of each Class2D iteration, and the central sections of 3D
   classes. They can be sorted by distribution, resolution, particles or class score, and selected.
 - **Particles**: any particle file, as a paged grid.
@@ -174,8 +177,9 @@ Each job's results open as tabs next to its Overview and Options:
   alignment), the tilt image and its CTF spectrum, and the per-tilt values against the tilt angle.
 - **Tomograms** (ReconstructTomograms, Denoise, ...): an XY slab of a few averaged sections, moved
   with the Z slider, at full resolution; XZ and YZ side views; denoised and raw side by side.
-- **Picks** (Pick tomograms, Extract subtomos, tomography Refine3D): the particles in their
-  tomograms, as circles where the slab cuts them, with counts per tomogram.
+- **Picks** (Pick tomograms, Extract subtomos, tomography Class3D and Refine3D): the particles in
+  their tomograms, as circles where the slab cuts them, with counts per tomogram; for particles of
+  several classes, the classes to show, as for micrographs.
 - **Selection** (Select and Exclude tilt images jobs): the job's choice, shown read-only in the
   same view as the selection window; "Change selection…" opens the window again.
 - **Files**: every file of the job. STAR files open as sortable tables with column plots; MRC

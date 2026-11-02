@@ -235,13 +235,19 @@ class ImageCanvas(QWidget):
 
     # ------------------------------------------------------------------ overlays
     def set_points(self, x: np.ndarray, y: np.ndarray, diameter, color=(60, 220, 60)) -> None:
-        """Circles of the given diameter (image pixels; one for all, or one per point) centred on (x, y)."""
+        """Circles of the given diameter (image pixels; one for all, or one per point) centred on (x, y),
+        in one colour or one per point (a list of colours)."""
         if len(x) == 0:
             self.points.clear()
             return
         size = np.asarray(diameter, float) if np.ndim(diameter) else float(diameter)
+        if isinstance(color, list):
+            pens = {c: pg.mkPen(c, width=2) for c in set(color)}
+            pen = [pens[c] for c in color]
+        else:
+            pen = pg.mkPen(color, width=2)
         self.points.setData(x=np.asarray(x, float), y=np.asarray(y, float), size=size, symbol="o",
-                            pen=pg.mkPen(color, width=2), brush=None)
+                            pen=pen, brush=None)
 
     def _on_mouse(self, pos) -> None:
         if self.full_shape is None:

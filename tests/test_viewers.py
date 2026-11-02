@@ -136,6 +136,43 @@ def test_extracted_particles_on_their_micrographs(window, spa_project, qtbot):
     assert p.gallery.model.rowCount() == 24 * 40 and p.gallery.model.loaded() > 0
 
 
+def test_picks_of_chosen_classes(window, spa_project, qtbot):
+    from cryo_savanna.viewers.class_filter import PICK_COLOR, class_color
+    w = window(spa_project)
+    v = open_view(w, qtbot, "Class3D/job009/", "Picks")
+    f, p = v.classes, v._picks
+    assert f.isVisible() and f.list.count() == len(v.pickset.classes) > 1 and f.text() == "Classes: all"
+    assert len(v.canvas.points.data) == len(p) == 25
+    pens = {tuple(pt.pen().color().getRgb()[:3]) for pt in v.canvas.points.points()}
+    assert pens == {class_color(n) for n in set(p.cls.tolist())}  # coloured by class
+    f.set_selected({1, 3})
+    shown = int(np.isin(p.cls, [1, 3]).sum())
+    assert len(v.canvas.points.data) == shown and f.text() == "Classes: 1, 3"
+    assert v.pick_info.text().startswith(f"{shown} picks (classes 1, 3")
+    settle(qtbot)
+    col = v.model.columnCount() - 1
+    assert v.model.headerData(col, Qt.Horizontal) == "Picks"
+    assert v.model.data(v.model.index(v.current, col)) in (shown, str(shown))
+    assert "(classes 1, 3)" in v.count.text()
+    f.color_by_class.setChecked(False)
+    assert {tuple(pt.pen().color().getRgb()[:3]) for pt in v.canvas.points.points()} <= {PICK_COLOR}
+    f._invert()
+    assert len(v.canvas.points.data) == len(p) - shown
+    f._tick_all(False)
+    assert len(v.canvas.points.data) == 0 and f.text() == "Classes: none"
+    v.select(v.current + 1)  # the choice stays for the next micrograph
+    settle(qtbot)
+    assert f.selected() == set() and len(v.canvas.points.data) == 0
+    f._tick_all(True)
+    assert f.selected() is None and len(v.canvas.points.data) == len(v._picks)
+
+
+def test_no_class_choice_for_picks_of_one_class(window, spa_project, qtbot):
+    w = window(spa_project)
+    v = open_view(w, qtbot, "AutoPick/job004/", "Picks")
+    assert not v.classes.isVisible() and v.classes.selected() is None
+
+
 def test_class_gallery_sort_select_and_iterations(window, spa_project, qtbot):
     w = window(spa_project)
     v: ClassesView = open_view(w, qtbot, "Class2D/job006/", "Classes")

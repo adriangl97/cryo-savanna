@@ -16,8 +16,8 @@ from pathlib import Path
 
 from cryo_savanna.project.summary import base_type
 from cryo_savanna.project.selection import interactive_kind
-from cryo_savanna.results.classes import iterations, latest_iteration_maps
-from cryo_savanna.results.tomo import has_tomograms, is_tomo_particles, tomograms_for_particles
+from cryo_savanna.results.classes import data_star_for, iterations, latest_iteration_maps
+from cryo_savanna.results.tomo import TOMO_NAME, columns_of, has_tomograms, is_tomo_particles, tomograms_for_particles
 
 # viewer kinds
 MICROGRAPHS = "micrographs"  # list + image (+ CTF spectrum / motion track / picks)
@@ -99,6 +99,14 @@ def pick_diameter(ctx: JobContext) -> float | None:
     return None
 
 
+def _float(v: str | None) -> float | None:
+    try:
+        f = float(v or "")
+    except ValueError:
+        return None
+    return f if f > 0 else None
+
+
 def tomo_pick_diameter(ctx: JobContext) -> float | None:
     """Circle size for tomogram particles (Å): the job's particle diameter, else half the box."""
     for key, scale in (("particle_diameter", 1.0), ("box_size_angst", 0.5)):
@@ -111,12 +119,38 @@ def tomo_pick_diameter(ctx: JobContext) -> float | None:
     return None
 
 
+def class_job_particles(ctx: JobContext) -> str | None:
+    """The micrograph particles of an SPA classification job with several classes, for its Picks tab: its
+    output, else (while it runs) those of its latest iteration. Tomography particles get theirs as any
+    tomogram particles do."""
+    try:
+        if int(ctx.options.get("nr_classes", "1")) < 2:
+            return None
+    except ValueError:
+        return None
+    data = ctx.output("ParticleGroupMetadata")
+    if not data:
+        its = iterations(ctx.job_dir)
+        data = ctx.name + data_star_for(its[-1][1]).name if its else None
+    if not data or not ctx.exists(data):
+        return None
+    try:
+        cols = columns_of(ctx.project_dir / data, "particles") or []
+    except OSError:
+        return None
+    if TOMO_NAME in cols or "rlnMicrographName" not in cols or "rlnCoordinateX" not in cols:
+        return None
+    return data
+
+
 def views_for(ctx: JobContext) -> list[ViewSpec]:
     t = base_type(ctx.type_label)
     views: list[ViewSpec] = []
     seen_files: set[str] = set()
 
     def add(kind: str, title: str, **args) -> None:
+        if title == "Picks" and any(v.title == "Picks" for v in views):
+            return  # one Picks tab per job, whatever else could show picks
         views.append(ViewSpec(kind, title, args))
         for v in args.values():
             if isinstance(v, str):
@@ -189,6 +223,13 @@ def views_for(ctx: JobContext) -> list[ViewSpec]:
         if iterations(ctx.job_dir):
             add(PLOTS, "Convergence", job=ctx.name, figures="convergence")
             add(ANGLES, "Angular distribution", job=ctx.name)
+    if t in ("relion.class2d", "relion.class3d", "relion.initialmodel"):
+        parts = class_job_particles(ctx)
+        if parts:
+            # the particles on their micrographs, with the classes to show; no micrograph list in a
+            # particle file, so the micrographs it names
+            add(MICROGRAPHS, "Picks", picks=parts, diameter=_float(ctx.options.get("particle_diameter")))
+            seen_files.discard(parts)  # still gets its Particles tab below
     elif t in ("relion.refine3d", "relion.multibody"):
         # the full map before the half maps
         add_job_maps(sorted(density, key=lambda n: "half" in n), ctx.options.get("fn_mask", ""))
@@ -217,7 +258,11 @@ def views_for(ctx: JobContext) -> list[ViewSpec]:
     elif t == "relion.excludetilts" and interactive_kind(ctx.type_label, ctx.options) == "tilts":
         add(SELECTION, "Selection", job=ctx.name, what="tilts")
 
-    # anything else a viewer can show
+    # anything else a viewer can show; of several tomogram particle files (a continued job lists its
+    # earlier ones too), the newest gets the Picks tab
+    tomo_parts = [n for n, nt in ctx.outputs if nt.split(".", 1)[0] == "ParticleGroupMetadata"
+                  and n not in seen_files and ctx.exists(n) and is_tomo_particles(ctx.project_dir / n)]
+    newest_parts = max(tomo_parts, key=lambda n: (ctx.project_dir / n).stat().st_mtime_ns, default=None)
     for node, nt in ctx.outputs:
         kind = nt.split(".", 1)[0]
         if node in seen_files or not ctx.exists(node):
@@ -227,8 +272,8 @@ def views_for(ctx: JobContext) -> list[ViewSpec]:
                 add(TOMOGRAMS, "Tomograms", star=node)
             else:
                 add(TILT_SERIES, "Tilt series", star=node, tool="tilts", tool_arg=node)
-        elif kind == "ParticleGroupMetadata" and is_tomo_particles(ctx.project_dir / node):
-            tomograms = tomograms_for_particles(ctx.project_dir, node, ctx.options)
+        elif node in tomo_parts:
+            tomograms = tomograms_for_particles(ctx.project_dir, node, ctx.options) if node == newest_parts else None
             if tomograms:
                 add(TOMOGRAMS, "Picks", star=tomograms, picks=node, diameter=tomo_pick_diameter(ctx))
         elif kind == "ParticleGroupMetadata":

@@ -83,7 +83,7 @@ Each job gets the tabs that fit what it made:
 | Tab | For | What |
 |---|---|---|
 | Micrographs / Movies | Import, MotionCorr, CtfFind, Select | List with per-micrograph values (sort, filter); the image, zoomable to full detail; CTF spectrum, motion track |
-| Picks / On micrographs | AutoPick, ManualPick, Extract | Particles as circles; FOM threshold, circle size |
+| Picks / On micrographs | AutoPick, ManualPick, Extract, Class2D, Class3D, InitialModel | Particles as circles; FOM threshold, circle size; for particles of several classes, which classes to show (any set of them, each in its own colour) |
 | CTF / Motion plots | CtfFind, MotionCorr | Histograms or scatter; a clicked point shows its micrograph |
 | Classes | Class2D, Class3D, InitialModel, Select | Class averages (or central sections) per iteration; sort, size, select |
 | Particles | any particle file | Paged grid |
@@ -92,7 +92,7 @@ Each job gets the tabs that fit what it made:
 | Convergence | Class2D, Class3D, InitialModel, Refine3D, MultiBody | Resolution, class occupancy, accuracies and changes per iteration |
 | Angular distribution | Refine3D, Class3D, InitialModel, MultiBody | The particles' viewing directions as a 2D map (tilt against rot), and in 3D: the map's surface with RELION's .bild cylinders around it (longer and redder: more particles), for the final map or any iteration and class; drag to rotate, wheel to zoom |
 | Tilt series | tomography Import … AlignTiltSeries | Tilt series, their tilts and values, the tilt image and CTF spectrum, values against tilt angle |
-| Tomograms / Picks | ReconstructTomograms, Denoise, Pick, Extract | Z slab with side views, denoised and raw side by side, particles where the slab cuts them |
+| Tomograms / Picks | ReconstructTomograms, Denoise, Pick, Extract, Class3D | Z slab with side views, denoised and raw side by side, particles where the slab cuts them (of the classes chosen) |
 | Files | every job | Every file: STAR tables (with plots), images, stacks, volumes, text |
 
 "Open in napari" starts RELION's own `relion_python_tomo_view`; "Open in ChimeraX" starts

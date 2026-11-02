@@ -49,6 +49,7 @@ from cryo_savanna.results.tomo import (
     series_summary,
     tilt_figures,
 )
+from cryo_savanna.viewers.class_filter import ClassFilter
 from cryo_savanna.viewers.external import launch_detached, napari_command
 from cryo_savanna.viewers.image_canvas import ImageCanvas
 from cryo_savanna.viewers.plots import FigureGrid
@@ -356,12 +357,14 @@ class TomogramViewer(QWidget):
         self.diameter.setSuffix(" Å")
         self.diameter.setVisible(bool(picks))
         self.diameter.valueChanged.connect(lambda _: self._draw_picks())
+        self.classes = ClassFilter()  # shown for particles of several classes (Class3D, ...)
+        self.classes.changed.connect(self._on_classes)
         self.napari = NapariButton(self.project_dir, self._report)
         self.info = QLabel("Reading…")
 
         bar = QHBoxLayout()
         bar.setContentsMargins(0, 0, 0, 0)
-        for w in (self.kind, self.compare, self.slab, self.sigma, self.show_picks, self.diameter):
+        for w in (self.kind, self.compare, self.slab, self.sigma, self.show_picks, self.diameter, self.classes):
             bar.addWidget(w)
         bar.addStretch(1)
         bar.addWidget(self.napari)
@@ -452,11 +455,8 @@ class TomogramViewer(QWidget):
         cols = [("rlnTomoName", "Tomogram")] + [(c, t) for c, t in SERIES_COLUMNS if ts.table.has(c)]
         self.model.set_table(ts.table, cols)
         if picks is not None:
-            self.model.set_extra("_picks", "Picks", [picks.count(n) for n in ts.names], position=1)
-            unknown = sum(len(v) for k, v in picks.by_tomo.items() if k not in ts.names)
-            note = f"   ·   {unknown} particles in tomograms not in this set" if unknown else ""
-            total = sum(len(v) for v in picks.by_tomo.values())
-            self.info.setText(f"{len(ts)} tomograms, {total} particles   ·   {self.picks_rel}{note}")
+            self.classes.set_counts(picks.classes)
+            self._count_picks()
         else:
             self.info.setText(f"{len(ts)} tomograms   ·   {self.star}")
         self.table.resizeColumnsToContents()
@@ -567,14 +567,37 @@ class TomogramViewer(QWidget):
             canvas.set_array(img, keep_view=not refit)
 
     # ------------------------------------------------------------------ picks
-    def picks_voxels(self) -> np.ndarray:
+    def _count_picks(self) -> None:
+        """The Picks column and the totals, for the classes shown."""
+        ts, picks, classes = self.set, self.picks, self.classes.selected()
+        self.model.set_extra("_picks", "Picks", [picks.count(n, classes) for n in ts.names], position=1)
+        unknown = sum(picks.count(k, classes) for k in picks.by_tomo if k not in ts.names)
+        note = f"   ·   {unknown} particles in tomograms not in this set" if unknown else ""
+        total = sum(picks.count(k, classes) for k in picks.by_tomo)
+        which = self.classes.describe()
+        self.info.setText(f"{len(ts)} tomograms, {total} particles" + (f" ({which})" if which else "") +
+                          f"   ·   {self.picks_rel}{note}")
+
+    def _on_classes(self) -> None:
+        if self.picks is not None and self.set is not None:
+            self._count_picks()
+        self._draw_picks()
+
+    def _shown_picks(self) -> tuple[np.ndarray, np.ndarray | None]:
+        """The current tomogram's particles of the classes shown, in its voxels, and their classes."""
         if self.picks is None or self.shape is None or self.set is None or not self.voxel:
-            return np.empty((0, 3))
+            return np.empty((0, 3)), None
         name = self.set.names[self.current]
-        return self.picks.voxels(name, self.voxel, self.shape, self.set.binning(self.current))
+        xyz = self.picks.voxels(name, self.voxel, self.shape, self.set.binning(self.current))
+        keep = self.picks.in_classes(name, self.classes.selected())
+        cls = self.picks.class_numbers(name)
+        return xyz[keep], cls[keep] if cls is not None and len(cls) == len(keep) else None
+
+    def picks_voxels(self) -> np.ndarray:
+        return self._shown_picks()[0]
 
     def _draw_picks(self) -> None:
-        xyz = self.picks_voxels()
+        xyz, cls = self._shown_picks()
         if not self.show_picks.isChecked() or not len(xyz):
             for c in (self.canvas, self.raw):
                 c.set_points([], [], 1)
@@ -585,8 +608,15 @@ class TomogramViewer(QWidget):
         dz = np.abs(xyz[:, 2] - (self.z + 0.5))
         cut = dz < r  # the slab passes through these particles: circles as big as the cut
         size = 2 * np.sqrt(np.maximum(r * r - dz[cut] ** 2, 0))
+        colors = self.classes.colors(cls)
+        cut_colors = [c for c, k in zip(colors, cut) if k] if isinstance(colors, list) else colors
         for c in (self.canvas, self.raw):
-            c.set_points(xyz[cut, 0], xyz[cut, 1], np.maximum(size, 2))
-        self.xz.dots.setData(x=xyz[:, 0], y=xyz[:, 2])
-        self.yz.dots.setData(x=xyz[:, 1], y=xyz[:, 2])
+            c.set_points(xyz[cut, 0], xyz[cut, 1], np.maximum(size, 2), cut_colors)
+        if isinstance(colors, list):
+            brushes = {c: pg.mkBrush(*c, 160) for c in set(colors)}
+            brush = [brushes[c] for c in colors]
+        else:
+            brush = pg.mkBrush(*colors, 160)
+        self.xz.dots.setData(x=xyz[:, 0], y=xyz[:, 2], brush=brush)
+        self.yz.dots.setData(x=xyz[:, 1], y=xyz[:, 2], brush=brush)
         self.cut_count = int(cut.sum())
