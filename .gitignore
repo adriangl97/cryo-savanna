@@ -1,7 +1,7 @@
 __pycache__/
 *.pyc
 .pytest_cache/
-# the development environment of README: Development (mamba env create -p ./env)
+# the development environment of docs/development.md (mamba env create -p ./env)
 /env/
 *.egg-info/
 build/

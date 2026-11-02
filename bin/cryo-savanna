@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
 # Runs cryo-savanna from this checkout without installing it (development; an installed
 # environment has its own cryo-savanna and savanna commands).
-# Uses the env pointed to by CRYO_SAVANNA_ENV, else the checkout's ./env (README: Development),
+# Uses the env pointed to by CRYO_SAVANNA_ENV, else the checkout's ./env (docs/development.md),
 # else whatever python3 is first on PATH. RELION binaries come from PATH (module load relion).
 set -euo pipefail
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
