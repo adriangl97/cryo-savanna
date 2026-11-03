@@ -45,7 +45,7 @@ class FigureGrid(pg.GraphicsLayoutWidget):
         cols = 1 if len(figures) == 1 else columns
         for k, fig in enumerate(figures):
             axes = {"bottom": ResolutionAxis("bottom")} if fig.x_resolution else {}
-            title = fig.title + (f"<br><span style='font-size:9pt;color:#555'>{' · '.join(fig.notes)}</span>"
+            title = fig.title + (f"<br><span style='font-size:9pt;color:gray'>{' · '.join(fig.notes)}</span>"
                                  if fig.notes else "")
             p = self.addPlot(row=k // cols, col=k % cols, title=title, axisItems=axes)
             p.setLabel("bottom", fig.xlabel)
@@ -157,7 +157,7 @@ class TablePlot(QWidget):
                 if len(v):
                     y, x = np.histogram(v, bins=min(80, max(10, int(np.sqrt(len(v))))))
                     p.plot(x, y, stepMode="center", fillLevel=0, brush=(0, 114, 178, 120), pen=series_pen(0))
-                    p.setTitle(f"{c.removeprefix('rln')}<br><span style='font-size:9pt;color:#555'>"
+                    p.setTitle(f"{c.removeprefix('rln')}<br><span style='font-size:9pt;color:gray'>"
                                f"median {np.median(v):.4g} · mean {v.mean():.4g} · n={len(v)}</span>")
             self.info.setText(f"{len(t)} rows")
             return

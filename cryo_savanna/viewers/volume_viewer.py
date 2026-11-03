@@ -20,7 +20,7 @@ from pathlib import Path
 import numpy as np
 import pyqtgraph as pg
 from qtpy.QtCore import QRectF, Qt, QTimer, Signal
-from qtpy.QtGui import QColor, QImage, QLinearGradient, QPainter, QPixmap
+from qtpy.QtGui import QColor, QImage, QLinearGradient, QPainter, QPalette, QPixmap
 from qtpy.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -272,7 +272,7 @@ class SurfaceView(QWidget):
 
     def paintEvent(self, _ev) -> None:
         p = QPainter(self)
-        p.fillRect(self.rect(), QColor(255, 255, 255))
+        p.fillRect(self.rect(), self.palette().color(QPalette.Base))
         if self.image is not None:
             side = min(self.width(), self.height())
             target = QRectF((self.width() - side) / 2, (self.height() - side) / 2, side, side)
@@ -281,7 +281,7 @@ class SurfaceView(QWidget):
             p.drawImage(target, self.image)
             self.paint_layer(p, target, front=True)
         if self.message:
-            p.setPen(QColor(90, 90, 90))
+            p.setPen(self.palette().color(QPalette.PlaceholderText))
             p.drawText(self.rect(), Qt.AlignCenter, self.message)
         p.end()
 

@@ -10,7 +10,7 @@ over X11 forwarding.
 
 from __future__ import annotations
 
-from qtpy.QtCore import QPoint, QPointF, QRectF, Qt, Signal
+from qtpy.QtCore import QEvent, QPoint, QPointF, QRectF, Qt, Signal
 from qtpy.QtGui import (
     QColor,
     QFont,
@@ -347,6 +347,12 @@ class JobGraphView(QGraphicsView):
         self.show_all_links = on
         for e in self.edges:
             e.setVisible(e.primary or on or e.highlighted)
+
+    def changeEvent(self, e) -> None:
+        super().changeEvent(e)
+        if e.type() == QEvent.PaletteChange:  # Preferences → Theme: the cards are painted from the palette,
+            for edge in self.edges:  # the links keep a colour
+                edge.set_highlight(edge.highlighted)
 
     def set_dimmed(self, visible: set[str] | None) -> None:
         """Fade jobs not in ``visible`` (the tree filter); None shows everything normally."""

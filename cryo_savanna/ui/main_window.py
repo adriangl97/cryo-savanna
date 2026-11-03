@@ -13,6 +13,7 @@ from qtpy.QtCore import QObject, QRunnable, QSettings, Qt, QThread, QThreadPool,
 from qtpy.QtGui import QKeySequence
 from qtpy.QtWidgets import (
     QAction,
+    QApplication,
     QCheckBox,
     QToolButton,
     QComboBox,
@@ -144,6 +145,7 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.settings = settings if settings is not None else QSettings("cryo-savanna", "cryo-savanna")
         apply_environment(self.settings)
+        style.apply_theme(QApplication.instance(), setting(self.settings, "theme"))  # before the plots are made
         # None: from the preferences (the command line's --poll / --queue-poll win)
         poll_s = setting(self.settings, "poll_s") if poll_s is None else poll_s
         queue_poll_s = setting(self.settings, "queue_poll_s") if queue_poll_s is None else queue_poll_s
@@ -342,6 +344,7 @@ class MainWindow(QMainWindow):
         if self.info.cache is not None:
             self.info.cache.max_disk = setting(s, "cache_mb") * 1024 * 1024
         apply_environment(s)
+        style.apply_theme(QApplication.instance(), setting(s, "theme"))
         self._update_status()
 
     def show_shortcuts(self) -> None:

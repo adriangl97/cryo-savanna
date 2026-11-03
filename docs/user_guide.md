@@ -126,7 +126,7 @@ show the same way.
 
 ## Preferences (Ctrl+,)
 
-Polling interval (at least 0.5 s), SLURM polling (at least 5 s, or none), the size of the image cache
+Theme (light, dark, or as the system:), polling interval (at least 0.5 s), SLURM polling (at least 5 s, or none), the size of the image cache
 for all projects together (`$CRYO_SAVANNA_CACHE`, else `$XDG_CACHE_HOME/cryo-savanna`, i.e.
 `~/.cache/cryo-savanna`) and emptying it (only cryo-savanna's own files there are deleted), ChimeraX.
 Help → Keyboard shortcuts (F1) lists every key.

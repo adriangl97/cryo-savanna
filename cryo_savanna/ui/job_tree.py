@@ -167,7 +167,7 @@ class JobTreeView(QTreeView):
             item.setText(text)
             item.setData(text, SORT_ROLE)
         item.setToolTip(details)
-        item.setForeground(style.QUEUE_COLORS[kind] if kind else self.palette().text().color())
+        item.setData(style.QUEUE_COLORS[kind] if kind else None, Qt.ForegroundRole)  # None: the palette's
 
     def refresh_times(self) -> None:
         if self._snapshot is None:

@@ -9,6 +9,7 @@ import os
 from qtpy.QtCore import QSettings, Qt
 from qtpy.QtGui import QKeySequence
 from qtpy.QtWidgets import (
+    QComboBox,
     QDialog,
     QDialogButtonBox,
     QDoubleSpinBox,
@@ -24,6 +25,7 @@ from qtpy.QtWidgets import (
 )
 
 from cryo_savanna.images.cache import cache_root, cache_size_mb, clear_cache
+from cryo_savanna.ui.style import THEMES
 
 # key, default, what it is
 DEFAULTS = {
@@ -31,6 +33,7 @@ DEFAULTS = {
     "queue_poll_s": 20.0,  # seconds between looks at the SLURM queue (0 = off)
     "cache_mb": 2048,  # micrograph previews kept on disk
     "chimerax": "",  # ChimeraX to use instead of the one on PATH
+    "theme": "system",  # colours of the window: system, light or dark (style.THEMES)
 }
 
 # keys handled inside the viewers (not QActions, so not found by shortcuts_html's scan)
@@ -62,7 +65,10 @@ def setting(settings: QSettings, key: str):
             return int(float(v))
         except (TypeError, ValueError):
             return default
-    return str(v or "")
+    v = str(v or "")
+    if key == "theme" and v not in THEMES:
+        return default
+    return v
 
 
 _set_here: str | None = None  # the CRYO_SAVANNA_CHIMERAX value these preferences put in the environment
@@ -89,6 +95,12 @@ class PreferencesDialog(QDialog):
         self.setWindowTitle("Preferences")
         self.settings = settings
         form = QFormLayout()
+        self.theme = QComboBox()
+        for key, text in THEMES.items():
+            self.theme.addItem(text, key)
+        self.theme.setCurrentIndex(self.theme.findData(setting(settings, "theme")))
+        self.theme.setToolTip("Light or dark colours; as the system follows its dark mode where Qt can tell")
+        form.addRow("Theme", self.theme)
         self.poll = QDoubleSpinBox()
         self.poll.setRange(0.5, 600)
         self.poll.setSuffix(" s")
@@ -145,6 +157,7 @@ class PreferencesDialog(QDialog):
         s.setValue("queue_poll_s", self.queue.value())
         s.setValue("cache_mb", self.cache.value())
         s.setValue("chimerax", self.chimerax.text().strip())
+        s.setValue("theme", self.theme.currentData())
         super().accept()
 
 

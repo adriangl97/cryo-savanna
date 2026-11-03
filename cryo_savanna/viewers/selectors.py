@@ -18,8 +18,8 @@ from __future__ import annotations
 from pathlib import Path
 
 import numpy as np
-from qtpy.QtCore import QItemSelectionModel, Qt, Signal
-from qtpy.QtGui import QBrush, QColor, QKeySequence
+from qtpy.QtCore import QEvent, QItemSelectionModel, Qt, Signal
+from qtpy.QtGui import QBrush, QKeySequence
 from qtpy.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
@@ -45,6 +45,7 @@ from cryo_savanna.project.selection import (
 )
 from cryo_savanna.results.classes import read_model_classes
 from cryo_savanna.results.tomo import tilt_figures
+from cryo_savanna.ui import style
 from cryo_savanna.viewers.gallery import GalleryItem, GalleryView
 from cryo_savanna.viewers.tasks import TaskError, Tasks
 from cryo_savanna.viewers.tomo_viewer import TiltSeriesViewer
@@ -309,6 +310,11 @@ class TiltExclusion(QWidget):
         self._paint_rows()
         self._update_series_counts()
 
+    def changeEvent(self, ev) -> None:
+        super().changeEvent(ev)
+        if ev.type() == QEvent.PaletteChange and hasattr(self, "viewer"):  # Preferences → Theme
+            self._paint_rows()
+
     def _paint_rows(self) -> None:
         """Excluded tilts in red (the model's background role)."""
         model = self.viewer.tilt_model
@@ -316,7 +322,8 @@ class TiltExclusion(QWidget):
         if name is None or model.table is None:
             return
         m = self.mask(name, len(model.table))
-        model.row_brushes = {i: QBrush(QColor(250, 200, 200)) for i in np.nonzero(~m)[0]}
+        red = QBrush(style.excluded_row_color(self.palette()))
+        model.row_brushes = {i: red for i in np.nonzero(~m)[0]}
         model.dataChanged.emit(model.index(0, 0), model.index(model.rowCount() - 1, model.columnCount() - 1))
         # and in the plots: a red line at each excluded tilt angle
         t = model.table

@@ -51,6 +51,53 @@ def test_preferences_dialog_applies_at_once(qtbot, tmp_path, spa_project, monkey
     assert P.setting(s, "poll_s") == 4.0
 
 
+
+def test_theme_preference(qtbot, tmp_path, spa_project, monkeypatch):
+    import pyqtgraph as pg
+    from qtpy.QtGui import QPalette
+    from qtpy.QtWidgets import QApplication
+
+    from cryo_savanna.ui import style
+    app = QApplication.instance()
+    s = QSettings(str(tmp_path / "s.ini"), QSettings.IniFormat)
+    s.setValue("theme", "nonsense")
+    assert P.setting(s, "theme") == "system"
+    w = make(qtbot, spa_project, s)
+    w.load_now()
+    plot = pg.PlotWidget()  # an open plot follows the theme
+    qtbot.addWidget(plot)
+    plot.setTitle("FSC")
+
+    def choose(theme):
+        def fake_exec(dlg):
+            dlg.theme.setCurrentIndex(dlg.theme.findData(theme))
+            dlg.accept()
+            return P.PreferencesDialog.Accepted
+        monkeypatch.setattr(P.PreferencesDialog, "exec", fake_exec)
+        w.show_preferences()
+        app.processEvents()  # the widgets take the new palette from a posted event
+
+    try:
+        choose("dark")
+        assert P.setting(s, "theme") == "dark"
+        assert style.is_dark(app.palette()) and style.is_dark(w.palette())
+        text = app.palette().color(QPalette.Text)
+        assert plot.backgroundBrush().color() == app.palette().color(QPalette.Base)
+        assert plot.getPlotItem().getAxis("left").pen().color() == text
+        assert text.name() in plot.getPlotItem().titleLabel.item.toHtml()
+        assert style.excluded_row_color(app.palette()).lightness() < 128
+        assert w.graph.edges and all(e.pen().color().rgb() == text.rgb() for e in w.graph.edges if not e.highlighted)
+        style.apply_theme(app, "system")
+        w2 = make(qtbot, spa_project, s)  # and at the next start
+        app.processEvents()
+        assert style.is_dark(w2.palette())
+        choose("light")
+        assert not style.is_dark(app.palette())
+        assert plot.backgroundBrush().color() == app.palette().color(QPalette.Base)
+    finally:
+        style.apply_theme(app, "system")
+
+
 def test_chimerax_preference_and_the_shell(monkeypatch, tmp_path):
     s = QSettings(str(tmp_path / "s.ini"), QSettings.IniFormat)
     monkeypatch.delenv("CRYO_SAVANNA_CHIMERAX", raising=False)
