@@ -82,6 +82,40 @@ def test_filter_keeps_ancestors_and_dims_graph(window, spa_project):
     assert len(visible) == 16
 
 
+def test_star_marks_and_filters_jobs(window, spa_copy):
+    from cryo_savanna.project.stars import Stars
+    from cryo_savanna.ui import style
+    from cryo_savanna.ui.job_tree import COL_JOB
+
+    w = window(spa_copy)
+    w.select_job("PostProcess/job013/")
+    assert w.actions.act_star.isEnabled() and not w.actions.act_star.isChecked()
+    w.actions.act_star.trigger()
+    w.load_now()
+    assert Stars(spa_copy).starred() == {"PostProcess/job013/"}
+    assert w.actions.act_star.isChecked()
+    row = w.tree._items["PostProcess/job013/"]
+    assert row[COL_JOB].text().startswith(style.STAR)
+    assert not w.tree._items["MaskCreate/job012/"][COL_JOB].text().startswith(style.STAR)
+    assert w.graph.nodes["PostProcess/job013/"].info.starred
+
+    w.starred_only.setChecked(True)  # the starred job and the jobs it comes from
+    visible = w.tree.visible_jobs()
+    assert "PostProcess/job013/" in visible and "Import/job001/" in visible
+    assert "MaskCreate/job012/" not in visible and "Class2D/job018/" not in visible
+    assert w.graph.nodes["Class2D/job018/"].opacity() < 1
+    w.search.setText(style.STAR)  # the star is in the text, so the search finds it too
+    w.starred_only.setChecked(False)
+    assert "PostProcess/job013/" in w.tree.visible_jobs()
+    assert "MaskCreate/job012/" not in w.tree.visible_jobs()
+    w.search.clear()
+
+    w.actions.act_star.trigger()  # and off again
+    w.load_now()
+    assert Stars(spa_copy).starred() == set()
+    assert not row[COL_JOB].text().startswith(style.STAR)
+
+
 def test_filter_finds_the_program_of_external_jobs(window, spa_copy):
     from cryo_savanna.jobdefs.cli_tools import runner_command
     from tests.fixtures.make_fixtures import JobSpec

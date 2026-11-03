@@ -30,6 +30,8 @@ and can be used interchangeably, even at the same time, on the same project.
   counts as the main one can be changed per job.
 - A filter (Ctrl+F) by name, alias, job type, the program behind External jobs, or SLURM state and
   node, plus a status menu and "Hide failed/aborted".
+- Stars (Ctrl+B) to mark jobs, shown in the list and the tree, with a "Starred"
+  filter. The filter follows the the tree, fading non-related jobs.
 - An Options tab for every job, with the settings that differ from the defaults in bold.
 - Live updates: jobs started from RELION's GUI or a script appear on their own, and the views of a
   running job follow its new files.
@@ -116,6 +118,7 @@ Right-click a job in the list or the tree for its menu.
 | Ctrl+2 | Tree | Del | Delete |
 | Ctrl+0 | Fit tree | Ctrl+E | Job editor |
 | Ctrl+Shift+P | Viewer in its own window | Ctrl+, | Preferences |
+| Ctrl+B | Star / unstar the job | | |
 
 Help → Keyboard shortcuts (F1) lists them all.
 
@@ -138,6 +141,7 @@ flagged.
 
 - `<project>/.cryo-savanna/runs/`: a record of the pipeliner runs cryo-savanna starts.
 - `<project>/.cryo-savanna/main_inputs.json`: the main inputs chosen with "make main input".
+- `<project>/.cryo-savanna/stars.json`: the starred jobs.
 - Micrograph previews are cached in `$CRYO_SAVANNA_CACHE`, else `$XDG_CACHE_HOME/cryo-savanna/`
   (`~/.cache/cryo-savanna/`), 2 GB at most for all projects together (Preferences).
 

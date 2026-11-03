@@ -90,6 +90,8 @@ STATUS_COLORS = {
     "Aborted": QColor("#d9861c"),
 }
 UNKNOWN_COLOR = QColor("#888888")
+STAR = "★"  # starred jobs (project/stars.py)
+STAR_COLOR = QColor("#e0a100")
 
 _icons: dict[tuple[str, bool], QIcon] = {}
 

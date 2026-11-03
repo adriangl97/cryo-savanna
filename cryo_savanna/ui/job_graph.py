@@ -40,6 +40,7 @@ from cryo_savanna.ui.graph_layout import ARROW, GraphLayout, layout_graph
 
 PAD_L, PAD_R, PAD_V = 15.0, 10.0, 6.0  # text padding inside a card (left includes the status strip)
 MIN_CARD_W = 230.0
+STAR_W = 16.0  # kept free right of the header for the star, so a star does not change the layout
 
 
 class CardFonts:
@@ -66,7 +67,7 @@ def card_lines(info: JobInfo, type_names: dict[str, str]) -> tuple[str, str | No
 def card_size(info: JobInfo, type_names: dict[str, str], fonts: CardFonts) -> tuple[float, float]:
     """Width fits the header and the full alias; height fits every line the card can show."""
     header, alias, n_summary = card_lines(info, type_names)
-    w = max(MIN_CARD_W, fonts.fm_header.horizontalAdvance(header) + PAD_L + PAD_R,
+    w = max(MIN_CARD_W, fonts.fm_header.horizontalAdvance(header) + PAD_L + PAD_R + STAR_W,
             fonts.fm_body.horizontalAdvance(alias) + PAD_L + PAD_R if alias else 0)
     lines = 2 + (alias is not None) + n_summary  # header, [alias], job number + status, summary
     return float(w), lines * fonts.line + 2 * PAD_V
@@ -101,6 +102,8 @@ class JobNodeItem(QGraphicsItem):
     def _update_tooltip(self) -> None:
         pr = self.info.process
         tip = [pr.name, pr.type_label, style.status_text(self.info.status, self.info.pending_update)]
+        if self.info.starred:
+            tip.append("starred")
         if self.summary is not None:
             tip += self.summary.lines()
         if self.queue_text:
@@ -163,15 +166,19 @@ class JobNodeItem(QGraphicsItem):
         header, alias, n_summary = card_lines(self.info, self.view.type_names)
         dim = pal.color(QPalette.PlaceholderText)
 
-        def line(text: str, font: QFont, fm: QFontMetrics, pen, elide: bool = True) -> None:
+        def line(text: str, font: QFont, fm: QFontMetrics, pen, elide: bool = True, w: float = width) -> None:
             nonlocal y
             p.setFont(font)
             p.setPen(pen)
-            shown = fm.elidedText(text, Qt.ElideRight, int(width)) if elide else text
-            p.drawText(QRectF(x, y, width, fonts.line), Qt.AlignLeft | Qt.AlignVCenter, shown)
+            shown = fm.elidedText(text, Qt.ElideRight, int(w)) if elide else text
+            p.drawText(QRectF(x, y, w, fonts.line), Qt.AlignLeft | Qt.AlignVCenter, shown)
             y += fonts.line
 
-        line(header, fonts.header, fonts.fm_header, pal.color(QPalette.Text))
+        if self.info.starred:
+            p.setFont(fonts.header)
+            p.setPen(style.STAR_COLOR)
+            p.drawText(QRectF(x, y, width, fonts.line), Qt.AlignRight | Qt.AlignVCenter, style.STAR)
+        line(header, fonts.header, fonts.fm_header, pal.color(QPalette.Text), w=width - STAR_W)
         if alias is not None:
             line(alias, fonts.body, fonts.fm_body, pal.color(QPalette.Text), elide=False)  # card is sized to fit it
         line(self.job_line(), fonts.small, fonts.fm_small, color if self.info.status != "Succeeded" else dim)

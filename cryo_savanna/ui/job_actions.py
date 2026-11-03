@@ -140,6 +140,7 @@ class JobActions(QObject):
     changed = Signal()  # the project was changed: refresh now
     select = Signal(str)  # select this job once it shows up
     message = Signal(str)  # short status message
+    star = Signal(str, bool)  # star or unstar this job
 
     def __init__(self, window: QMainWindow, defs: JobDefs, env: RelionEnv, type_names: dict[str, str],
                  tomo: bool, readonly: bool, flag_source=None):
@@ -218,6 +219,10 @@ class JobActions(QObject):
                                        tip="Stop a repeating run of scheduled jobs after its current job")
         self.act_abort = self._act("Abort", self.abort_job, tip="Ask the selected running job to stop")
         self.act_alias = self._act("Set alias…", self.set_alias, "F2")
+        self.act_star = self._act("Star", lambda on: self.current and self.star.emit(self.current, on), "Ctrl+B",
+                                  "Mark the job, to find it with the Starred filter (for everyone who opens "
+                                  "the project)")
+        self.act_star.setCheckable(True)
         self.act_finished = self._act("Mark as finished", lambda: self.mark(False))
         self.act_failed = self._act("Mark as failed", lambda: self.mark(True))
         self.act_gentle = self._act("Clean (gentle)", lambda: self.clean(False),
@@ -244,8 +249,8 @@ class JobActions(QObject):
         self.job_menu = QMenu("Job", self.window)
         self.job_menu.addMenu(self.new_menu)
         for a in (self.act_clone, self.act_continue, self.act_overwrite, self.act_run, self.act_stop_runs, None,
-                  self.act_abort, self.act_alias, self.act_finished, self.act_failed, None, self.act_gentle,
-                  self.act_harsh, None, self.act_delete, self.act_delete_all, self.act_undelete):
+                  self.act_abort, self.act_alias, self.act_star, self.act_finished, self.act_failed, None,
+                  self.act_gentle, self.act_harsh, None, self.act_delete, self.act_delete_all, self.act_undelete):
             self.job_menu.addSeparator() if a is None else self.job_menu.addAction(a)
 
     def context_menu(self, job: str | None, pos: QPoint) -> None:
@@ -254,7 +259,7 @@ class JobActions(QObject):
         m = QMenu(self.window)
         m.addMenu(self.new_menu)
         for a in (self.act_clone, self.act_continue, self.act_overwrite, self.act_run, None, self.act_abort, self.act_alias,
-                  self.act_finished, self.act_failed, None, self.act_gentle, self.act_harsh, None,
+                  self.act_star, self.act_finished, self.act_failed, None, self.act_gentle, self.act_harsh, None,
                   self.act_delete, self.act_delete_all):
             m.addSeparator() if a is None else m.addAction(a)
         m.exec(pos)
@@ -348,6 +353,8 @@ class JobActions(QObject):
         self.act_gentle.setEnabled(writable and has_pipeliner and info is not None and status != "Running")
         self.act_harsh.setEnabled(self.act_gentle.isEnabled())
         self.act_undelete.setEnabled(writable and self._has_trash)
+        self.act_star.setEnabled(info is not None)  # read-only too: for the session only (project/stars.py)
+        self.act_star.setChecked(info is not None and info.starred)
         self.editor.set_permissions(self.readonly, has_pipeliner, why)
 
     # ------------------------------------------------------------------ helpers

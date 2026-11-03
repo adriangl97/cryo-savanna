@@ -37,6 +37,7 @@ from cryo_savanna.jobdefs.model import JobDefs
 from cryo_savanna.project.main_inputs import MainInputs
 from cryo_savanna.project.slurm import QueueState, SlurmClient, SlurmError, SlurmMonitor
 from cryo_savanna.project.snapshot import ProjectLoader, ProjectSnapshot, job_type_names
+from cryo_savanna.project.stars import Stars
 from cryo_savanna.project.summary import JobSummary, SummaryReader
 from cryo_savanna.ui import style
 from cryo_savanna.ui.job_actions import JobActions
@@ -211,13 +212,17 @@ class MainWindow(QMainWindow):
         self.status_filter = QComboBox()
         self.status_filter.addItems(list(STATUS_FILTERS))
         self.hide_failed = QCheckBox("Hide failed/aborted")
+        self.starred_only = QCheckBox(f"{style.STAR} Starred")
+        self.starred_only.setToolTip("Only starred jobs (and the jobs they come from); Job → Star marks one")
         self.search.textChanged.connect(self._apply_filter)
         self.status_filter.currentIndexChanged.connect(self._apply_filter)
         self.hide_failed.toggled.connect(self._apply_filter)
+        self.starred_only.toggled.connect(self._apply_filter)
         filt = QHBoxLayout()
         filt.setContentsMargins(0, 0, 0, 0)
         filt.addWidget(self.search, 1)
         filt.addWidget(self.status_filter)
+        filt.addWidget(self.starred_only)
         filt.addWidget(self.hide_failed)
 
         self.views = QTabWidget()
@@ -244,6 +249,7 @@ class MainWindow(QMainWindow):
         self.actions.changed.connect(self._force_refresh)
         self.actions.select.connect(self._select_soon)
         self.actions.message.connect(lambda m: self.statusBar().showMessage(m, 6000))
+        self.actions.star.connect(self.set_star)
 
         tb = QToolBar("Main")
         tb.setObjectName("main_toolbar")
@@ -381,9 +387,10 @@ class MainWindow(QMainWindow):
 
     # ------------------------------------------------------------------ project loading
     def open_project(self, project_dir: Path) -> None:
-        # main inputs chosen here are the project's (read-only: for this session only)
-        loader = ProjectLoader(project_dir, self.defs,
-                               main_inputs=MainInputs(Path(project_dir).resolve(), persist=not self.readonly))
+        # main inputs chosen and stars given here are the project's (read-only: for this session only)
+        root = Path(project_dir).resolve()
+        loader = ProjectLoader(project_dir, self.defs, main_inputs=MainInputs(root, persist=not self.readonly),
+                               stars=Stars(root, persist=not self.readonly))
         if not loader.is_project():
             QMessageBox.warning(self, "Not a RELION project",
                                 f"{loader.project_dir} has no {loader.pipeline_path.name}.")
@@ -682,6 +689,16 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(f"{job.rstrip('/')}: main input {node or 'back to the default'}", 6000)
         self._force_refresh()
 
+    def set_star(self, job: str, on: bool) -> None:
+        try:
+            self.loader.stars.set(job, on)
+        except OSError as e:
+            QMessageBox.warning(self, "Star", f"Cannot save the star: {e}")
+            self.actions.update_state()  # the action back as it was
+            return
+        self.statusBar().showMessage(f"{job.rstrip('/')}: {'starred' if on else 'star removed'}", 6000)
+        self.refresh()  # a new stars stamp: a quick rebuild, no new read of the pipeline
+
     # ------------------------------------------------------------------ selection
     def _select_soon(self, name: str) -> None:
         """Select a job now, or as soon as it shows up in the pipeline."""
@@ -712,7 +729,7 @@ class MainWindow(QMainWindow):
 
     def _apply_filter(self) -> None:
         statuses = STATUS_FILTERS[self.status_filter.currentText()]
-        self.tree.set_filter(self.search.text(), statuses, self.hide_failed.isChecked())
+        self.tree.set_filter(self.search.text(), statuses, self.hide_failed.isChecked(), self.starred_only.isChecked())
         self.graph.set_dimmed(None if not self.tree.proxy.is_active() else set(self.tree.visible_jobs()))
 
     def _choose_project(self) -> None:

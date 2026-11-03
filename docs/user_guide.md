@@ -30,6 +30,9 @@ sent, so a slow connection stays usable.
   session only). The tree draws the same links as a graph; references and masks are dashed, for the selected job or for all
   with "All links". The filter (Ctrl+F) finds jobs by name, alias, type, the program of External
   jobs, and SLURM state or node; the status menu and "Hide failed/aborted" narrow it further.
+  **Job → Star** (Ctrl+B, or right-click) marks a job with ★ in the list and on its card in the tree;
+  "★ Starred" shows only the starred jobs and the jobs they come from. Stars are saved in the project
+  (`.cryo-savanna/stars.json`, for everyone who opens it; with `--readonly`, for the session only).
 - **Right, top: the selected job.** Overview (status, results, inputs and outputs with links to the
   jobs that made or used them, SLURM history), Options (the job's settings, changed ones in bold),
   then its results (below). ⧉ or Ctrl+Shift+P opens a result in its own window.
@@ -49,7 +52,7 @@ polling interval (Preferences, or `--poll`), and views of running jobs read new 
 - **Clone** (Ctrl+D), **Continue**, **Overwrite** (the job goes to Trash/ and runs again in the same
   directory with new settings), **Schedule**, **Run scheduled** (Ctrl+R), **Stop repeating runs** (a repeating run stops after its
   current job), **Abort**, **Clean**,
-  **Set alias** (F2), **Mark as finished / failed**, **Delete** (Del, to Trash/), **Undelete**.
+  **Set alias** (F2), **Star** (Ctrl+B), **Mark as finished / failed**, **Delete** (Del, to Trash/), **Undelete**.
   Trash/ keeps one copy per job directory: overwriting or deleting a job whose earlier version is
   already there (after an overwrite) deletes that version for good, and the confirmation says so.
   A job whose directory was removed by hand can still be deleted (there is then nothing to undelete).

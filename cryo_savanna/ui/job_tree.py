@@ -16,6 +16,7 @@ from cryo_savanna.ui import style
 
 NAME_ROLE = Qt.UserRole + 1  # job name ("Class2D/job005/") on column 0
 SORT_ROLE = Qt.UserRole + 2
+STARRED_ROLE = Qt.UserRole + 3  # on column 0
 COLUMNS = ("Job", "Type", "Status", "Queue", "Summary", "Modified", "Also uses")
 COL_JOB, COL_TYPE, COL_STATUS, COL_QUEUE, COL_SUMMARY, COL_MODIFIED, COL_ALSO = range(len(COLUMNS))
 
@@ -30,7 +31,7 @@ STATUS_FILTERS = {
 
 
 class JobFilterProxy(QSortFilterProxyModel):
-    """Text and status filter. Ancestors of matching jobs stay visible so the lineage is readable."""
+    """Text, status and star filter. Ancestors of matching jobs stay visible so the lineage is readable."""
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -39,12 +40,14 @@ class JobFilterProxy(QSortFilterProxyModel):
         self._text = ""
         self._statuses: set[str] | None = None
         self._hide_dead = False
+        self._starred = False
 
-    def set_filter(self, text: str, statuses: set[str] | None, hide_failed: bool) -> None:
+    def set_filter(self, text: str, statuses: set[str] | None, hide_failed: bool, starred: bool = False) -> None:
         def change() -> None:
             self._text = text.strip().lower()
             self._statuses = statuses
             self._hide_dead = hide_failed
+            self._starred = starred
         self.refilter(change)
 
     def refilter(self, change=None) -> None:
@@ -60,7 +63,7 @@ class JobFilterProxy(QSortFilterProxyModel):
             self.invalidateFilter()
 
     def is_active(self) -> bool:
-        return bool(self._text) or self._statuses is not None or self._hide_dead
+        return bool(self._text) or self._statuses is not None or self._hide_dead or self._starred
 
     def filterAcceptsRow(self, row: int, parent: QModelIndex) -> bool:
         m = self.sourceModel()
@@ -69,6 +72,8 @@ class JobFilterProxy(QSortFilterProxyModel):
         if self._hide_dead and status in ("Failed", "Aborted"):
             return False
         if self._statuses is not None and status not in self._statuses:
+            return False
+        if self._starred and not name_idx.data(STARRED_ROLE):
             return False
         if self._text:
             hay = " ".join(str(m.index(row, c, parent).data(Qt.DisplayRole) or "")
@@ -207,8 +212,8 @@ class JobTreeView(QTreeView):
             self.scrollTo(idx)
         return True
 
-    def set_filter(self, text: str, statuses: set[str] | None, hide_failed: bool) -> None:
-        self.proxy.set_filter(text, statuses, hide_failed)
+    def set_filter(self, text: str, statuses: set[str] | None, hide_failed: bool, starred: bool = False) -> None:
+        self.proxy.set_filter(text, statuses, hide_failed, starred)
         if self.proxy.is_active():
             self.expandAll()
 
@@ -230,11 +235,12 @@ class JobTreeView(QTreeView):
     def _fill_row(self, row: list[QStandardItem], info: JobInfo, snap: ProjectSnapshot) -> None:
         pr = info.process
         job = row[COL_JOB]
-        job.setText(style.job_label(pr.name, pr.alias))
+        job.setText((style.STAR + " " if info.starred else "") + style.job_label(pr.name, pr.alias))
         job.setData(pr.name, NAME_ROLE)
+        job.setData(info.starred, STARRED_ROLE)
         job.setData(pr.job_number or 0, SORT_ROLE)
         job.setIcon(style.status_icon(info.status, info.pending_update))
-        job.setToolTip(pr.name + (f"\nalias: {pr.alias}" if pr.has_alias else ""))
+        job.setToolTip(pr.name + (f"\nalias: {pr.alias}" if pr.has_alias else "") + ("\nstarred" if info.starred else ""))
         t = row[COL_TYPE]
         t.setText(style.job_type(info, self.type_names))
         t.setData(t.text(), SORT_ROLE)

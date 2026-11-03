@@ -20,6 +20,7 @@ from cryo_savanna.project.jobstar import JobStar
 from cryo_savanna.project.lineage import primary_parents
 from cryo_savanna.project.main_inputs import MainInputs
 from cryo_savanna.project.pipeline import Pipeline, Process
+from cryo_savanna.project.stars import Stars
 from cryo_savanna.relion_consts import (
     RELION_JOB_EXIT_ABORTED,
     RELION_JOB_EXIT_FAILURE,
@@ -56,6 +57,7 @@ class JobInfo:
     pending_update: bool = False  # finished on disk, pipeline still says Running
     modified: float | None = None  # latest activity in the job directory (epoch seconds)
     program: str = ""  # External jobs: the program they run (shown with the type, found by the filter)
+    starred: bool = False  # starred in cryo-savanna (project/stars.py)
 
     @property
     def name(self) -> str:
@@ -87,12 +89,15 @@ class ProjectLoader:
     """Builds ProjectSnapshots for one project. Not thread-safe: use from one thread at a time."""
 
     def __init__(self, project_dir: str | os.PathLike, defs: JobDefs | None = None, pipeline_name: str = "default",
-                 main_inputs: MainInputs | None = None):
+                 main_inputs: MainInputs | None = None, stars: Stars | None = None):
         """``main_inputs``: the main inputs chosen in cryo-savanna (project/main_inputs.py); a change to
-        them is picked up by the next refresh, like a change of the pipeline."""
+        them is picked up by the next refresh, like a change of the pipeline. ``stars``: the starred
+        jobs (project/stars.py), also picked up by the next refresh."""
         self.project_dir = Path(project_dir).resolve()
         self.main_inputs = main_inputs
         self._main_stamp = None
+        self.stars = stars
+        self._stars_stamp = None
         self.defs = defs or JobDefs.load()
         self.pipeline_path = self.project_dir / f"{pipeline_name}_pipeline.star"
         self.pipeline_name = pipeline_name
@@ -126,7 +131,8 @@ class ProjectLoader:
             self._main_stamp = main  # after the load: a failed one is tried again
             return self._snapshot
         live = self._live_stamps(old)
-        if live != self._live:
+        starred = self.stars.stamp() if self.stars is not None else None
+        if live != self._live or starred != self._stars_stamp:
             self._snapshot = self._rebuild(old.pipeline, old.pipeline_stamp, old)
             return self._snapshot
         return None
@@ -144,11 +150,14 @@ class ProjectLoader:
         else:
             parents = primary_parents(pipeline, self.project_dir, self.defs, self.read_jobstar,
                                       self.main_inputs.choices() if self.main_inputs is not None else None)
+        if self.stars is not None:
+            self._stars_stamp = self.stars.stamp()
+        starred = self.stars.starred() if self.stars is not None else set()
         jobs: dict[str, JobInfo] = {}
         for name, pr in pipeline.processes.items():
             primary = parents[name]
             others = [x for x in pipeline.parents(name) if x not in (primary, name)]
-            jobs[name] = JobInfo(pr, primary, others, program=self._program(pr))
+            jobs[name] = JobInfo(pr, primary, others, program=self._program(pr), starred=name in starred)
         roots = []
         for name, info in jobs.items():
             if info.primary_parent is None or info.primary_parent not in jobs:
