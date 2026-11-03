@@ -45,7 +45,8 @@ polling interval (Preferences, or `--poll`), and views of running jobs read new 
 ## Running jobs
 
 - **New job** (toolbar, Job menu, right-click): RELION's job list, SPA or tomography. The job
-  editor (Ctrl+E) has RELION's tabs and options, with its help below; changed options are marked,
+  editor (Ctrl+E) opens in its own window (or docked in the main window: Preferences → Job editor;
+  an open editor moves at once). It has RELION's tabs and options, with its help below; changed options are marked,
   "Defaults" resets them. New jobs start from the settings last used in this project, like RELION.
 - **Additional arguments** lists every flag of the program the job runs, with its default and help:
   tick a flag or type a value and it is added to the arguments.
@@ -129,7 +130,8 @@ show the same way.
 
 ## Preferences (Ctrl+,)
 
-Theme (light, dark, or as the system:), polling interval (at least 0.5 s), SLURM polling (at least 5 s, or none), the size of the image cache
+Theme (light, dark, or as the system:), where the job editor opens (its own window, the default, or
+docked in the main window), polling interval (at least 0.5 s), SLURM polling (at least 5 s, or none), the size of the image cache
 for all projects together (`$CRYO_SAVANNA_CACHE`, else `$XDG_CACHE_HOME/cryo-savanna`, i.e.
 `~/.cache/cryo-savanna`) and emptying it (only cryo-savanna's own files there are deleted), ChimeraX.
 Help → Keyboard shortcuts (F1) lists every key.

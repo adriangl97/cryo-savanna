@@ -98,6 +98,44 @@ def test_theme_preference(qtbot, tmp_path, spa_project, monkeypatch):
         style.apply_theme(app, "system")
 
 
+
+def test_job_editor_opens_in_its_own_window_or_docked(qtbot, tmp_path, spa_project, monkeypatch):
+    s = QSettings(str(tmp_path / "s.ini"), QSettings.IniFormat)
+    w = make(qtbot, spa_project, s)
+    w.load_now()
+    a = w.actions
+    assert P.setting(s, "editor") == "window"  # the default
+    w.select_job("Class3D/job009/")
+    a.clone_job()
+    assert a.editor.window() is a.editor_window and a.editor_window.isWindow()
+    assert a.editor_shown() and w.act_editor.isChecked() and a.dock.isHidden()
+    a.editor.closed.emit()  # its Close button
+    assert not a.editor_shown() and not w.act_editor.isChecked()
+    w.act_editor.trigger()
+    assert a.editor_window.isVisible()
+
+    def choose(place):
+        def fake_exec(dlg):
+            dlg.editor.setCurrentIndex(dlg.editor.findData(place))
+            dlg.accept()
+            return P.PreferencesDialog.Accepted
+        monkeypatch.setattr(P.PreferencesDialog, "exec", fake_exec)
+        w.show_preferences()
+
+    choose("docked")  # the open editor moves into the main window
+    assert P.setting(s, "editor") == "docked"
+    assert a.editor.window() is w and a.dock.widget() is a.editor
+    assert a.editor_shown() and a.editor_window.isHidden() and w.act_editor.isChecked()
+    w.act_editor.trigger()
+    assert a.dock.isHidden() and not w.act_editor.isChecked()
+    w2 = make(qtbot, spa_project, s)  # and at the next start
+    assert w2.actions.editor_place == "docked" and not w2.actions.editor_shown()
+    choose("window")
+    assert a.editor.window() is a.editor_window and not a.editor_shown()
+    s.setValue("editor", "floating")  # not a choice
+    assert P.setting(s, "editor") == "window"
+
+
 def test_chimerax_preference_and_the_shell(monkeypatch, tmp_path):
     s = QSettings(str(tmp_path / "s.ini"), QSettings.IniFormat)
     monkeypatch.delenv("CRYO_SAVANNA_CHIMERAX", raising=False)
@@ -131,7 +169,7 @@ def test_shortcuts_and_about(qtbot, tmp_path, spa_project):
     about = next(d for d in dialogs if d.windowTitle().startswith("About")).text.toPlainText()
     assert "RELION 5.1.1" in about and str(spa_project) in about
     w.act_editor.trigger()
-    assert w.actions.dock.isVisibleTo(w)
+    assert w.actions.editor_shown()
 
 
 def test_command_line_defaults(monkeypatch):

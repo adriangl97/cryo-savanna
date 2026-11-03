@@ -34,7 +34,11 @@ DEFAULTS = {
     "cache_mb": 2048,  # micrograph previews kept on disk
     "chimerax": "",  # ChimeraX to use instead of the one on PATH
     "theme": "system",  # colours of the window: system, light or dark (style.THEMES)
+    "editor": "window",  # where the job editor opens (EDITOR_PLACES)
 }
+
+EDITOR_PLACES = {"window": "In its own window", "docked": "Docked in the main window"}
+CHOICES = {"theme": THEMES, "editor": EDITOR_PLACES}  # preferences with a fixed set of values
 
 # keys handled inside the viewers (not QActions, so not found by shortcuts_html's scan)
 VIEWER_KEYS = [
@@ -66,7 +70,7 @@ def setting(settings: QSettings, key: str):
         except (TypeError, ValueError):
             return default
     v = str(v or "")
-    if key == "theme" and v not in THEMES:
+    if key in CHOICES and v not in CHOICES[key]:
         return default
     return v
 
@@ -101,6 +105,12 @@ class PreferencesDialog(QDialog):
         self.theme.setCurrentIndex(self.theme.findData(setting(settings, "theme")))
         self.theme.setToolTip("Light or dark colours; as the system follows its dark mode where Qt can tell")
         form.addRow("Theme", self.theme)
+        self.editor = QComboBox()
+        for key, text in EDITOR_PLACES.items():
+            self.editor.addItem(text, key)
+        self.editor.setCurrentIndex(self.editor.findData(setting(settings, "editor")))
+        self.editor.setToolTip("Where New job, Clone, Continue and the Job editor action (Ctrl+E) open the job editor")
+        form.addRow("Job editor", self.editor)
         self.poll = QDoubleSpinBox()
         self.poll.setRange(0.5, 600)
         self.poll.setSuffix(" s")
@@ -158,6 +168,7 @@ class PreferencesDialog(QDialog):
         s.setValue("cache_mb", self.cache.value())
         s.setValue("chimerax", self.chimerax.text().strip())
         s.setValue("theme", self.theme.currentData())
+        s.setValue("editor", self.editor.currentData())
         super().accept()
 
 

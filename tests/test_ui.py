@@ -350,7 +350,7 @@ def test_a_relion_value_relion_refuses_is_shown_not_fatal(qtbot, tmp_path, spa_p
     assert "Class2D/job006" in w.info.overview.toPlainText()
     assert "RELION_QUEUE_USE" in w.info.options.topLevelItem(0).text(0)
     w.actions.new_job("relion.class2d")
-    assert shown and "RELION_QUEUE_USE" in shown[0] and not w.actions.dock.isVisible()
+    assert shown and "RELION_QUEUE_USE" in shown[0] and not w.actions.editor_shown()
 
 
 CLOSE_DURING_SLOW_READ = """

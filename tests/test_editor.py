@@ -233,7 +233,7 @@ def test_clone_opens_editor_with_the_jobs_settings(window, spa_project):
     w = window(spa_project)
     w.select_job("Class3D/job009/")
     w.actions.clone_job()
-    assert w.actions.dock.isVisibleTo(w)
+    assert w.actions.editor_shown()
     js = JobStar.read(spa_project / "Class3D/job009/job.star")
     assert w.actions.editor.jobstar().options == js.options and not w.actions.editor.jobstar().is_continue
 

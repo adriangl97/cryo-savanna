@@ -278,8 +278,9 @@ class MainWindow(QMainWindow):
         act_quit = self._action(None, "Quit", QKeySequence.Quit, self.close)
 
         self.act_prefs = self._action(None, "Preferences…", "Ctrl+,", self.show_preferences)  # no standard key on Linux
-        self.act_editor = self.actions.dock.toggleViewAction()
+        self.act_editor = self.actions.act_editor
         self.act_editor.setShortcut(QKeySequence("Ctrl+E"))
+        self.addAction(self.act_editor)
         self.act_popout = self._action(None, "Open viewer in its own window", "Ctrl+Shift+P", self.info.pop_out)
         self.act_shortcuts = self._action(None, "Keyboard shortcuts", QKeySequence.HelpContents, self.show_shortcuts)
         self.act_about = self._action(None, "About cryo-savanna", None, self.show_about)
@@ -351,6 +352,7 @@ class MainWindow(QMainWindow):
             self.info.cache.max_disk = setting(s, "cache_mb") * 1024 * 1024
         apply_environment(s)
         style.apply_theme(QApplication.instance(), setting(s, "theme"))
+        self.actions.set_editor_place(setting(s, "editor"))
         self._update_status()
 
     def show_shortcuts(self) -> None:
@@ -751,7 +753,10 @@ class MainWindow(QMainWindow):
         self.views.setCurrentIndex(int(s.value("view", 0)))
         if s.value("state"):
             self.restoreState(s.value("state"))  # where the job editor dock was
-        self.actions.dock.hide()
+        if s.value("editor_geometry"):  # and its own window
+            self.actions.editor_window.placed = self.actions.editor_window.restoreGeometry(s.value("editor_geometry"))
+        self.actions.set_editor_place(setting(s, "editor"))
+        self.actions.hide_editor()
 
     def closeEvent(self, e) -> None:
         s = self.settings
@@ -760,6 +765,8 @@ class MainWindow(QMainWindow):
         s.setValue("right", self.right.saveState())
         s.setValue("view", self.views.currentIndex())
         s.setValue("state", self.saveState())
+        if self.actions.editor_window.placed:
+            s.setValue("editor_geometry", self.actions.editor_window.saveGeometry())
         s.sync()  # now: the program may end without the usual clean-up (app.run_gui)
         self.poll_timer.stop()
         self.queue_timer.stop()

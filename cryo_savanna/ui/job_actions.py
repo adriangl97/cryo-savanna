@@ -32,6 +32,7 @@ from qtpy.QtWidgets import (
     QMessageBox,
     QSpinBox,
     QVBoxLayout,
+    QWidget,
 )
 
 from cryo_savanna.env.relion_env import RelionEnv, RelionEnvError
@@ -58,6 +59,33 @@ from cryo_savanna.project.snapshot import ProjectSnapshot
 from cryo_savanna.relion_consts import RELION_JOB_EXIT_ABORTED, RELION_JOB_EXIT_FAILURE, RELION_JOB_EXIT_SUCCESS
 from cryo_savanna.ui import style
 from cryo_savanna.ui.job_editor import MODE_CONTINUE, MODE_OVERWRITE, JobEditor
+
+
+class EditorWindow(QWidget):
+    """The job editor in its own window (Preferences → Job editor), instead of the dock."""
+
+    shown = Signal(bool)
+
+    def __init__(self, window):
+        super().__init__(window, Qt.Window)  # its own window, closed with the main one
+        self.setWindowTitle("Job editor")
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(0, 0, 0, 0)
+        self.placed = False  # given a size and a place (settings, or next to the main window)
+
+    def showEvent(self, e) -> None:
+        if not self.placed:
+            self.placed = True
+            main = self.parentWidget().frameGeometry()
+            self.resize(760, max(600, min(900, main.height())))
+            self.move(main.center() - self.rect().center())
+        super().showEvent(e)
+        self.shown.emit(True)
+
+    def hideEvent(self, e) -> None:
+        super().hideEvent(e)
+        if not e.spontaneous():  # not when minimised
+            self.shown.emit(False)
 
 
 # ---------------------------------------------------------------------------- background tasks
@@ -171,14 +199,23 @@ class JobActions(QObject):
         self.editor = JobEditor(env, type_names, flag_source=flag_source)
         self.cli = CliCatalog(defs, env, self.editor.flag_source)
         self.editor.submit.connect(self._on_submit)
+        # the editor goes in its own window or in the dock (Preferences → Job editor: set_editor_place)
         self.dock = QDockWidget("Job editor", window)
         self.dock.setObjectName("job_editor_dock")
-        self.dock.setWidget(self.editor)
         self.dock.setFeatures(QDockWidget.DockWidgetMovable | QDockWidget.DockWidgetFloatable
                               | QDockWidget.DockWidgetClosable)
         window.addDockWidget(Qt.RightDockWidgetArea, self.dock)
         self.dock.hide()
-        self.editor.closed.connect(self.dock.hide)
+        self.editor_window = EditorWindow(window)
+        self.editor_place = ""
+        self.act_editor = QAction("Job editor", window)  # shows or hides it, wherever it is
+        self.act_editor.setCheckable(True)
+        self.act_editor.triggered.connect(lambda on: self._show_editor() if on else self.hide_editor())
+        self.editor_window.addAction(self.act_editor)  # Ctrl+E there too (set by the main window)
+        self.dock.visibilityChanged.connect(lambda _: self._sync_editor_action())
+        self.editor_window.shown.connect(lambda _: self._sync_editor_action())
+        self.set_editor_place("window")
+        self.editor.closed.connect(self.hide_editor)
 
         self._build_actions()
 
@@ -271,7 +308,7 @@ class JobActions(QObject):
         self.ops = PipelineOps(project_dir)
         self.snapshot, self.current, self._structure = None, None, None
         self.editor.set_project(self.project_dir, None)
-        self.dock.hide()
+        self.hide_editor()
         self._look_at_project()
         self.update_state()
 
@@ -398,9 +435,44 @@ class JobActions(QObject):
         info = self.snapshot.jobs.get(job) if self.snapshot else None
         return style.job_label(job, info.process.alias) if info else job
 
+    # ------------------------------------------------------------------ where the editor is
+    def editor_container(self) -> QWidget:
+        return self.dock if self.editor_place == "docked" else self.editor_window
+
+    def editor_shown(self) -> bool:
+        return not self.editor_container().isHidden()
+
+    def set_editor_place(self, place: str) -> None:
+        """"window" (its own window) or "docked" (in the main window); an open editor moves there."""
+        place = "docked" if place == "docked" else "window"
+        if place == self.editor_place:
+            return
+        was_shown = bool(self.editor_place) and self.editor_shown()
+        self.hide_editor()
+        self.editor_place = place
+        if place == "docked":
+            self.dock.setWidget(self.editor)
+        else:
+            self.dock.setWidget(None)
+            self.editor_window.layout().addWidget(self.editor)
+        if was_shown:
+            self._show_editor()
+        self._sync_editor_action()
+
+    def hide_editor(self) -> None:
+        self.dock.hide()
+        self.editor_window.hide()
+
     def _show_editor(self) -> None:
-        self.dock.show()
-        self.dock.raise_()
+        c = self.editor_container()
+        c.show()
+        c.raise_()
+        if c is self.editor_window:
+            c.activateWindow()
+        self._sync_editor_action()
+
+    def _sync_editor_action(self) -> None:
+        self.act_editor.setChecked(self.editor_shown())
 
     def _edit(self, title: str, fn: Callable, *args) -> None:
         """Fill the editor with fn(*args) and show it; a RELION_* value RELION itself refuses is reported instead."""
