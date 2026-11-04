@@ -210,6 +210,43 @@ def test_cli_tool_mpi_keeps_to_the_local_limit(qtbot, tmp_path, spa_project, mon
     assert len(warned) == 1 and "5 parallel MPI processes" in warned[0] and "RELION_ERROR_LOCAL_MPI" in warned[0]
 
 
+
+def test_editor_closes_when_its_job_starts(window, spa_project, monkeypatch):
+    from types import SimpleNamespace
+    w = window(spa_project)
+    a, ed = w.actions, w.actions.editor
+    pending = []  # (done, result) of the runs started, as _run would call them once finished
+
+    def fake_run(what, fn, done=None, on_error=None):
+        res = SimpleNamespace(job="Class2D/job019/", warnings=[])
+        pending.append((done, (res, None if "Schedule" in what else object())))
+    monkeypatch.setattr(a, "_run", fake_run)
+
+    def finish():
+        done, result = pending.pop()
+        done(result)
+
+    a.new_job("relion.class2d")
+    ed.schedule_btn.click()
+    finish()
+    assert a.editor_shown() and "scheduled" in ed.status.text()  # kept open for the next one
+    ed.run_btn.click()
+    finish()
+    assert not a.editor_shown() and not w.act_editor.isChecked()
+
+    w.select_job("Class2D/job018/")  # Continue closes it too
+    a.continue_job()
+    ed.run_btn.click()
+    finish()
+    assert not a.editor_shown()
+
+    a.new_job("relion.class2d")
+    ed.run_btn.click()
+    a.new_job("relion.class3d")  # another job opened while the first one waits for RELION's lock
+    finish()
+    assert a.editor_shown() and ed.variant.label == "relion.class3d"
+
+
 def test_helpers():
     assert qt_file_filter("STAR files (*.star) \t Maps (*.{mrc,map})") == \
         "STAR files (*.star);;Maps (*.mrc *.map);;All files (*)"

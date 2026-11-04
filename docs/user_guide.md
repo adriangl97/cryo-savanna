@@ -46,7 +46,7 @@ polling interval (Preferences, or `--poll`), and views of running jobs read new 
 
 - **New job** (toolbar, Job menu, right-click): RELION's job list, SPA or tomography. The job
   editor (Ctrl+E) opens in its own window (or docked in the main window: Preferences → Job editor;
-  an open editor moves at once). It has RELION's tabs and options, with its help below; changed options are marked,
+  an open editor moves at once), and closes once the job it runs has started. It has RELION's tabs and options, with its help below; changed options are marked,
   "Defaults" resets them. New jobs start from the settings last used in this project, like RELION.
 - **Additional arguments** lists every flag of the program the job runs, with its default and help:
   tick a flag or type a value and it is added to the arguments.

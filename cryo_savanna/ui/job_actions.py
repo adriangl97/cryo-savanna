@@ -216,6 +216,7 @@ class JobActions(QObject):
         self.editor_window.shown.connect(lambda _: self._sync_editor_action())
         self.set_editor_place("window")
         self.editor.closed.connect(self.hide_editor)
+        self._edits = 0  # times the editor was filled: a job started from it closes it only if still shown
 
         self._build_actions()
 
@@ -481,7 +482,16 @@ class JobActions(QObject):
         except RelionEnvError as e:
             self._env_error(title, e)
             return
+        self._edits += 1
         self._show_editor()
+
+    def _started(self, edit: int, text: str) -> None:
+        """A job submitted from the editor started: close the editor, unless another job was opened in it
+        meanwhile (Schedule keeps it open: see the callers)."""
+        self.message.emit(text)
+        self.editor.status.setText(text)
+        if edit == self._edits:
+            self.hide_editor()
 
     def _env_error(self, title: str, e: Exception) -> None:
         QMessageBox.warning(self.window, title, f"{e}.\n\nCorrect it in the shell (or the RELION module) that "
@@ -599,12 +609,17 @@ class JobActions(QObject):
             rec = None if schedule_only else pl.run([res.job])
             return res, rec
 
+        edit = self._edits
+
         def done(result):
             res, rec = result
             self.select.emit(res.job)
             verb = "scheduled" if rec is None else "started"
-            self.editor.status.setText(f"{res.job.rstrip('/')} overwritten and {verb}."
-                                       + (" " + " ".join(res.warnings) if res.warnings else ""))
+            text = f"{res.job.rstrip('/')} overwritten and {verb}." + (" " + " ".join(res.warnings) if res.warnings else "")
+            if rec is None:
+                self.editor.status.setText(text)
+            else:
+                self._started(edit, text)
 
         self._run(f"Overwrite {self._label(job)}", overwrite_and_run, done)
 
@@ -645,7 +660,9 @@ class JobActions(QObject):
             if info is not None and info.status == "Running":
                 QMessageBox.warning(self.window, "Continue", f"{self._label(job)} is still running.")
                 return
-            self._run(f"Continue {self._label(job)}", lambda: pl.continue_job(job, js))
+            edit = self._edits
+            self._run(f"Continue {self._label(job)}", lambda: pl.continue_job(job, js),
+                      lambda _: self._started(edit, f"{job.rstrip('/')} continued."))
             return
         if alias and self.snapshot is not None:  # relion_pipeliner --setJobAlias checks again
             try:
@@ -665,11 +682,17 @@ class JobActions(QObject):
             rec = None if schedule_only else pl.run([res.job])
             return res, rec
 
+        edit = self._edits
+
         def done(result):
             res, rec = result
             self.select.emit(res.job)
             verb = "scheduled" if rec is None else "started"
-            self.editor.status.setText(f"{res.job.rstrip('/')} {verb}." + (" " + " ".join(res.warnings) if res.warnings else ""))
+            text = f"{res.job.rstrip('/')} {verb}." + (" " + " ".join(res.warnings) if res.warnings else "")
+            if rec is None:  # scheduled: kept open, to schedule the next job from it
+                self.editor.status.setText(text)
+            else:
+                self._started(edit, text)
 
         self._run("Schedule job" if schedule_only else "Run job", add_and_run, done)
 
