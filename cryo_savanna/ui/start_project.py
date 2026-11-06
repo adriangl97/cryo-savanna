@@ -1,6 +1,9 @@
 # Copyright (C) 2026 Adrián González-López
 # SPDX-License-Identifier: GPL-2.0-or-later
-"""At startup, in a directory that is not a RELION project: start one there, open another, or quit."""
+"""At startup, in a directory that is not a RELION project: start one there, open another, or quit.
+
+A directory with RELION job folders but no default_pipeline.star (lost, or the jobs were run from the
+command line) is offered a pipeline generated from those folders instead (project/rebuild.py)."""
 
 from __future__ import annotations
 
@@ -13,8 +16,9 @@ from qtpy.QtGui import QCursor
 from qtpy.QtWidgets import QApplication, QFileDialog, QMessageBox, QWidget
 
 from cryo_savanna.project.new_project import NewProjectError, create_project, is_project
+from cryo_savanna.project.rebuild import find_job_dirs
 
-NEW, OTHER, QUIT = "new", "other", "quit"
+NEW, OTHER, QUIT, GENERATE = "new", "other", "quit", "generate"
 
 
 def ask(folder: Path, readonly: bool, parent: QWidget | None = None) -> str:
@@ -50,6 +54,20 @@ def show_error(text: str, parent: QWidget | None = None) -> None:
     QMessageBox.critical(parent, "cryo-savanna: new project", text)
 
 
+def ask_generate(folder: Path, n_jobs: int, readonly: bool) -> str:
+    from cryo_savanna.ui.rebuild_dialog import ask_generate as ask
+
+    return ask(folder, n_jobs, readonly)
+
+
+def generate(folder: Path) -> bool:
+    """Review the jobs found in ``folder`` and write its default_pipeline.star; False when cancelled."""
+    from cryo_savanna.jobdefs.model import JobDefs
+    from cryo_savanna.ui.rebuild_dialog import run_rebuild
+
+    return run_rebuild(folder, JobDefs.load(), new=True) is not None
+
+
 def choose_project(
     folder: Path,
     readonly: bool = False,
@@ -57,16 +75,22 @@ def choose_project(
     pick_folder: Callable[[Path], Path | None] = pick_folder,
     create: Callable[[Path], str] = create_project,
     show_error: Callable[[str], None] = show_error,
+    ask_generate: Callable[[Path, int, bool], str] = ask_generate,
+    generate: Callable[[Path], bool] = generate,
 ) -> Path | None:
     """The project to open, starting from ``folder``; None to close cryo-savanna.
 
     A different folder that is not a project either gets the same question; cancelling the folder
-    dialog asks again about the folder before.
+    dialog asks again about the folder before. A folder with job folders is offered a generated
+    pipeline instead of a new project (its job numbers would clash with the new project's).
     """
     folder = Path(folder)
     while not is_project(folder):
-        answer = ask(folder, readonly)
-        if answer == NEW and not readonly:
+        jobs = find_job_dirs(folder)
+        answer = ask_generate(folder, len(jobs), readonly) if jobs else ask(folder, readonly)
+        if answer == GENERATE and jobs and not readonly:
+            generate(folder)  # cancelled or failed: asked again
+        elif answer == NEW and not readonly and not jobs:
             QApplication.setOverrideCursor(QCursor(Qt.CursorShape.WaitCursor))  # relion takes a few seconds
             try:
                 how, error = create(folder), None

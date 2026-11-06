@@ -23,6 +23,19 @@ project is made by the installed RELION (`relion --do_projdir`, whose window sho
 without `relion` on PATH, by cryo-savanna writing the same files (`.gui_projectdir`, `.TMP_runfiles/`
 and an empty `default_pipeline.star`). With `--readonly` no project is started.
 
+A folder that has RELION job folders (`Class2D/job005/` and so on) but no `default_pipeline.star`
+(it was lost, or the jobs were run from the command line) is offered a pipeline generated from those
+folders instead of a new project. The jobs found are listed for review first: untick a job to leave it out, change its
+status, and see in the tooltip which inputs and outputs were found and what is uncertain. The same
+happens for **Project → Open project…**.
+
+**Project → Add jobs run outside the pipeline…** does the same for an open project: it lists the job
+folders the pipeline does not have (a job run by hand into `Refine3D/job042/`, say), linked to the
+jobs whose files they used, and adds the ticked ones. A command run with an output folder of its
+own (`relion_refine --o Refine3D/bigbox/run …`) can be added with **Add folder as job…**: the folder
+moves to the next free `<Type>/jobNNN/`, and a link is left at its old place (as the job's alias
+when it was right inside the type folder), so paths in its files and in other files still work.
+
 Over `ssh -X` it needs no OpenGL; images are reduced to the size they are shown at before they are
 sent, so a slow connection stays usable.
 

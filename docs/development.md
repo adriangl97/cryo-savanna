@@ -40,6 +40,7 @@ The Qt tests run offscreen (`QT_QPA_PLATFORM=offscreen`), so no display is neede
 | `tools/extract_jobdefs/` | Regenerates the job definitions from a RELION source tree |
 | `tools/bundle_help.py` | Regenerates the bundled `--help` texts from the validation dumps and the RELION source |
 | `tools/pipeline_ops_ref/` | RELION's own alias/mark/delete/undelete code as a small program, to test `project/ops.py` against |
+| `cryo_savanna/project/rebuild.py`, `cryo_savanna/ui/rebuild_dialog.py` | A pipeline rebuilt from job folders (lost `default_pipeline.star`, jobs run from the command line), and its review |
 | `cryo_savanna/project/selection.py`, `cryo_savanna/viewers/selectors.py` | Class selection and tilt-image exclusion done in cryo-savanna, writing RELION's files |
 | `environment.yml`, `environment.lock.yml`, `environment-pyqt5.yml` | conda/mamba environments that install cryo-savanna |
 | `bin/cryo-savanna`, `bin/savanna` (a link to it) | Run cryo-savanna from a checkout without installing it (development) |
