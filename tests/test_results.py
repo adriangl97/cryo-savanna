@@ -246,7 +246,7 @@ def test_viewers_per_job(spa_project):
     assert titles("Refine3D/job011/")[:4] == ["Maps", "FSC", "Convergence", "Angular distribution"]
     assert titles("PostProcess/job013/") == ["FSC", "Maps", "Files"]
     assert titles("Select/job007/") == ["Selection", "Selected classes", "Particles", "Files"]
-    assert titles("CtfRefine/job014/") == ["Particles", "Files"]  # any particle output
+    assert titles("CtfRefine/job014/") == ["CTF refinement", "Per-particle CTF", "Aberrations", "Particles", "Files"]
     mask = views(spa_project, "MaskCreate/job012/")[0]
     assert mask.title == "Maps" and mask.args == {
         "maps": ["Refine3D/job011/run_class001.mrc", "MaskCreate/job012/mask.mrc"],
@@ -385,3 +385,101 @@ def test_read_compact_keeps_numbers_as_arrays(spa_project, monkeypatch):
     f.write_text("data_x\nloop_\n_a #1\n_b #2\n" + "".join(f"{i} 1.5\n" for i in range(10)) + "x 2\n")
     t = tables.read_compact(f, "x")
     assert t.column("a")[-1] == "x" and t.column("a")[3] == "3" and isinstance(t.column("b"), np.ndarray)
+
+
+# ---------------------------------------------------------------------------- CtfRefine
+
+def test_ctf_refine_optics_before_and_after(spa_project):
+    from cryo_savanna.results import ctfrefine as C
+    out = spa_project / "CtfRefine/job014/particles_ctf_refine.star"
+    g, = C.read_optics(out, spa_project / "Refine3D/job011/run_data.star")
+    assert (g.number, g.name, g.pixel_size, g.box) == (1, "opticsGroup1", 3.54, 64)
+    assert g.tilt_before == (0.0, 0.0) or g.tilt_before is None
+    assert g.tilt_after == (0.42, -0.27) and g.tilt_changed
+    assert [(z.n, z.m, z.name) for z in g.odd][2] == (3, -3, "trefoil")
+    assert [z.after for z in g.odd] == [0.0, 0.0, 0.05, -0.31, 0.19, 0.08] and g.odd[0].before is None
+    assert next(z for z in g.even if (z.n, z.m) == (4, 0)).after == 0.35
+    assert g.mag_after is None
+
+
+def test_zernike_order_is_relions():
+    from cryo_savanna.results.ctfrefine import even_index, odd_index, parse_vector
+    assert [odd_index(i) for i in range(6)] == [(1, -1), (1, 1), (3, -3), (3, -1), (3, 1), (3, 3)]
+    assert [even_index(i) for i in range(9)] == [(0, 0), (2, -2), (2, 0), (2, 2), (4, -4), (4, -2), (4, 0),
+                                                 (4, 2), (4, 4)]
+    assert parse_vector("[0.1,-2e-3,3]") == [0.1, -0.002, 3.0] and parse_vector("[]") == []
+
+
+def test_magnification_anisotropy_and_scale():
+    from cryo_savanna.results.ctfrefine import Magnification
+    m = Magnification(np.array([[1.01, 0.0], [0.0, 0.99]]))
+    assert m.anisotropy == pytest.approx(2.0) and m.mean == pytest.approx(1.0)
+    assert Magnification(np.eye(2)).is_identity
+
+
+def test_ctf_refine_particle_changes_match_by_image_name(spa_project):
+    from cryo_savanna.results import ctfrefine as C
+    out = spa_project / "CtfRefine/job014/particles_ctf_refine.star"
+    inp = spa_project / "Refine3D/job011/run_data.star"
+    ch = C.read_particle_changes(out, inp)
+    t = ch.table
+    assert ch.matched == len(t) == 288 and ch.has_changes  # the output is in another order than the input
+    before = Table.read(inp, "particles")
+    pos = {n: i for i, n in enumerate(before.column("rlnImageName"))}
+    k = 5
+    j = pos[t.column("rlnImageName")[k]]
+    u0, v0 = before.numeric("rlnDefocusU")[j], before.numeric("rlnDefocusV")[j]
+    u, v = t.numeric("rlnDefocusU")[k], t.numeric("rlnDefocusV")[k]
+    assert t.numeric(C.D_DEFOCUS)[k] == pytest.approx((u + v) / 2 - (u0 + v0) / 2)
+    assert t.numeric(C.D_ASTIG)[k] == pytest.approx(abs(u - v) - abs(u0 - v0))
+    assert np.all(np.abs(t.numeric(C.D_ANGLE)) <= 90)
+    s = C.stat(t, C.D_DEFOCUS)
+    assert s.n == 288 and 50 < s.sd < 500
+    mics = C.per_micrograph(t, [C.D_DEFOCUS])
+    assert len(mics.names) == 24 and mics.particles.sum() == 288
+    # without the input, only the new values
+    alone = C.read_particle_changes(out)
+    assert alone.matched == 0 and not alone.has_changes and alone.table.has(C.DEFOCUS)
+
+
+def test_ctf_refine_aberration_images(tmp_path, spa_project):
+    from cryo_savanna.results import ctfrefine as C
+    sets = C.aberration_images(spa_project, "CtfRefine/job014/")
+    assert [s.group for s in sets] == [1]
+    rows = sets[0].rows
+    assert [r.title.split(" (")[0] for r in rows] == ["Antisymmetric aberrations", "Symmetric aberrations"]
+    assert rows[0].fit.path.endswith("iter-fit_optics-group_1_N-3.mrc") and rows[0].order == 3
+    assert rows[1].observed.path == "CtfRefine/job014/aberr_delta-phase_per-pixel_optics-group_1.mrc"
+    # magnification, and group 1 not mistaken for group 11; of two fits the higher order
+    job = tmp_path / "CtfRefine/job020"
+    job.mkdir(parents=True)
+    for name in ("mag_disp_x_optics-group_1.mrc", "mag_disp_x_fit_optics-group_1.mrc",
+                 "mag_disp_y_optics-group_1.mrc", "mag_disp_y_fit_optics-group_1.mrc",
+                 "beamtilt_delta-phase_per-pixel_optics-group_11.mrc",
+                 "beamtilt_delta-phase_iter-fit_optics-group_11.mrc",
+                 "beamtilt_delta-phase_iter-fit_optics-group_11_N-3.mrc"):
+        write_mrc(job / name, np.zeros((4, 4)))
+    sets = C.aberration_images(tmp_path, "CtfRefine/job020/")
+    assert [s.group for s in sets] == [1, 11]
+    assert [r.title for r in sets[0].rows] == ["Magnification: X displacement", "Magnification: Y displacement"]
+    assert sets[0].rows[0].observed.kind == "displacement"
+    assert sets[1].rows[0].fit.path.endswith("_N-3.mrc")
+    res = C.residual(np.array([3.0]), np.array([-3.0]), "phase")
+    assert res[0] == pytest.approx(6.0 - 2 * np.pi)
+
+
+def test_ctf_refine_what_was_fitted():
+    from cryo_savanna.results.ctfrefine import fits_ctf, fitted
+    opts = {"do_ctf": "Yes", "do_defocus": "Per-particle", "do_astig": "No", "do_bfactor": "Per-micrograph",
+            "do_phase": "No", "do_tilt": "Yes", "do_trefoil": "No", "do_4thorder": "No", "do_aniso_mag": "No"}
+    assert fitted(opts) == [("Defocus", "per-particle"), ("B-factor", "per-micrograph"),
+                            ("Beam tilt", "per optics group")]
+    assert fits_ctf(opts) and fits_ctf({})
+    aniso = dict(opts, do_aniso_mag="Yes")  # RELION then fits the magnification only
+    assert fitted(aniso) == [("Anisotropic magnification", "per optics group")] and not fits_ctf(aniso)
+    assert fitted(dict(opts, do_ctf="No", do_tilt="No")) == []
+
+
+def test_ctf_refine_running_job_counts_finished_micrographs(spa_project):
+    from cryo_savanna.results.ctfrefine import micrographs_done
+    assert micrographs_done(spa_project / "CtfRefine/job014") == 3

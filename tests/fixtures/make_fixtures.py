@@ -332,8 +332,60 @@ def w_postprocess(d: Path, ctx: Ctx) -> None:
     star(d / "postprocess.star", gen, tab, gui)
 
 
+def ctf_phase_images(n: int, pixel: float, tilt: tuple[float, float], trefoil: tuple[float, float],
+                     spherical: float, rng: np.random.Generator) -> dict[str, np.ndarray]:
+    """Phase differences in Fourier space as relion_ctf_refine writes them (origin in the middle): coma
+    from beam tilt and trefoil (antisymmetric), a 4th-order term (symmetric); observed = model + noise."""
+    ky, kx = (np.mgrid[:n, :n] - n // 2) / (n * pixel)  # 1/Å
+    k = np.hypot(kx, ky) * 2 * pixel  # 0 at the origin, 1 at Nyquist
+    phi = np.arctan2(ky, kx)
+    asym = 2.5 * k ** 3 * (tilt[0] * np.cos(phi) + tilt[1] * np.sin(phi)) \
+        + 1.5 * k ** 3 * (trefoil[0] * np.cos(3 * phi) + trefoil[1] * np.sin(3 * phi))
+    sym = spherical * k ** 4
+    noise = lambda: rng.normal(0, 0.15 + 0.6 * k)  # noisier towards Nyquist  # noqa: E731
+    wrap = lambda a: (a + np.pi) % (2 * np.pi) - np.pi  # noqa: E731
+    return {"beamtilt_delta-phase_per-pixel_optics-group_1.mrc": wrap(asym + noise()),
+            "beamtilt_delta-phase_lin-fit_optics-group_1_N-3.mrc": wrap(asym * 0.9),
+            "beamtilt_delta-phase_iter-fit_optics-group_1_N-3.mrc": wrap(asym),
+            "aberr_delta-phase_per-pixel_optics-group_1.mrc": wrap(sym + noise()),
+            "aberr_delta-phase_iter-fit_optics-group_1_N-4.mrc": wrap(sym)}
+
+
 def w_ctfrefine(d: Path, ctx: Ctx) -> None:
-    particles_star(d / "particles_ctf_refine.star", ctx, 12, "Extract/job005")
+    """The particles of Refine3D/job011 with refined CTFs (per-particle defocus, per-micrograph
+    astigmatism), beam tilt, trefoil and 4th-order aberrations; the output grouped by micrograph in
+    another order than the input, as relion_ctf_refine may."""
+    rng = np.random.default_rng(14)
+    blocks = read_star(ctx.root / "Refine3D/job011/run_data.star")
+    parts = blocks["particles"]
+    iu, iv, ia, im = (parts.col_index(c) for c in ("rlnDefocusU", "rlnDefocusV", "rlnDefocusAngle",
+                                                   "rlnMicrographName"))
+    mic_shift = {m: float(rng.normal(0, 150)) for m in dict.fromkeys(parts.column("rlnMicrographName"))}
+    rows = []
+    for r in parts.rows:
+        r = list(r)
+        dz = mic_shift[r[im]] + float(rng.normal(0, 60)) + 0.002 * (float(r[0]) - 1900)  # a tilted ice layer
+        da = float(rng.normal(0, 30))
+        r[iu], r[iv] = float(r[iu]) + dz + da, float(r[iv]) + dz - da
+        r[ia] = (float(r[ia]) + float(rng.normal(0, 5))) % 180
+        rows.append(r)
+    order = {m: k for k, m in enumerate(reversed(list(mic_shift)))}
+    rows.sort(key=lambda r: order[r[im]])
+    optics = blocks["optics"]
+    tilt, trefoil = (0.42, -0.27), (0.08, 0.05)
+    odd = [0.0, 0.0, trefoil[1], -0.31, 0.19, trefoil[0]]
+    even = [0.0, 0.0, 0.0, 0.0, 0.01, -0.02, 0.35, 0.03, -0.01]
+    vec = lambda v: "[" + ",".join(f"{x:.6g}" for x in v) + "]"  # noqa: E731
+    optics = StarBlock.from_records(
+        "optics", optics.columns + ["rlnBeamTiltX", "rlnBeamTiltY", "rlnOddZernike", "rlnEvenZernike"],
+        [r + [tilt[0], tilt[1], vec(odd), vec(even)] for r in optics.rows])
+    star(d / "particles_ctf_refine.star", optics, StarBlock.from_records("particles", parts.columns, rows))
+    for m in list(mic_shift)[:3]:  # per-micrograph fits, where the micrographs' folders are
+        stem = Path(m).relative_to("MotionCorr/job002").with_suffix("")
+        star(d / f"{stem}_defocus_fit.star", StarBlock.from_records(
+            "particles", parts.columns, [r for r in rows if r[im] == m]))
+    for name, img in ctf_phase_images(64, 3.54, tilt, trefoil, 0.35, rng).items():
+        mrc(d / name, img, 3.54)
     (d / "logfile.pdf").write_bytes(PDF_PLACEHOLDER)
 
 
@@ -427,7 +479,10 @@ def spa_jobs() -> list[JobSpec]:
                 [("logfile.pdf", "LogFile.pdf.relion.ctfrefine"),
                  ("particles_ctf_refine.star", "ParticleGroupMetadata.star.relion.ctfrefine")],
                 inputs=["Refine3D/job011/run_data.star", "PostProcess/job013/postprocess.star"],
-                options={"fn_data": "Refine3D/job011/run_data.star", "fn_post": "PostProcess/job013/postprocess.star"},
+                options={"fn_data": "Refine3D/job011/run_data.star", "fn_post": "PostProcess/job013/postprocess.star",
+                         "do_ctf": "Yes", "do_defocus": "Per-particle", "do_astig": "Per-micrograph",
+                         "do_bfactor": "No", "do_phase": "No", "do_tilt": "Yes", "do_trefoil": "Yes",
+                         "do_4thorder": "Yes", "minres": "30"},
                 write=w_ctfrefine),
         JobSpec(15, "relion.polish",
                 [("opt_params_all_groups.txt", "ParamsData.txt.relion.polish"),

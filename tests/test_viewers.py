@@ -405,3 +405,44 @@ def test_files_tab_keeps_the_file_shown_when_files_are_added(window, spa_copy, q
     f.tasks.wait()
     assert f.volume is vol and f.stack.currentWidget() is vol and vol.level.value() == pytest.approx(0.123)
     assert f.select_file("run_it016_half1_model.star")
+
+
+def test_ctf_refine_tabs(window, spa_project, qtbot):
+    from cryo_savanna.results import ctfrefine as C
+    from cryo_savanna.viewers.ctfrefine_view import AberrationsView, CtfChangesView, CtfRefineSummary
+    w = window(spa_project)
+    job = "CtfRefine/job014/"
+    s: CtfRefineSummary = open_view(w, qtbot, job, "CTF refinement")
+    text = s.text.toPlainText()
+    for part in ("288 particles on 24 micrographs", "Per-particle", "Defocus change", "Beam tilt X (mrad)",
+                 "0.42", "trefoil", "Trefoil magnitude", "spherical aberration"):
+        assert part.lower() in text.lower(), part
+    assert "B-factor" not in text  # not fitted: no row for it
+    assert s.log_btn.isEnabled()
+    ch: CtfChangesView = open_view(w, qtbot, job, "Per-particle CTF")
+    assert ch.plot.default_columns[:2] == [C.D_DEFOCUS, C.D_ASTIG]
+    assert ch.map.mic.count() == 24 and ch.map.value.currentData() == C.D_DEFOCUS
+    assert ch.map.info.text().startswith("12 particles on ")
+    ch.map.step(1)
+    assert ch.map.mic.currentIndex() == 1
+    ch.map.value.setCurrentIndex(ch.map.value.findData(C.DEFOCUS))
+    assert "Defocus" in ch.map.info.text()
+    ab: AberrationsView = open_view(w, qtbot, job, "Aberrations")
+    assert ab.group.count() == 1 and len(ab.images) == 2
+    assert all(o is not None and f is not None for _, o, f in ab.images)
+    assert "2 aberrations fitted" in ab.info.text()
+    ab.range.setCurrentIndex(1)
+    ab.zoom.setCurrentIndex(1)
+    w.info.refresh_viewers()
+
+
+def test_ctf_refine_summary_while_running(qtbot, tmp_path):
+    from cryo_savanna.viewers.ctfrefine_view import CtfRefineSummary
+    job = tmp_path / "CtfRefine/job030/Movies"
+    job.mkdir(parents=True)
+    (job / "a_defocus_fit.star").write_text("")
+    s = CtfRefineSummary(tmp_path, "CtfRefine/job030/", options={"do_ctf": "Yes", "do_defocus": "Per-particle"})
+    qtbot.addWidget(s)
+    settle(qtbot)
+    assert "Per-micrograph fits done for 1 micrograph." in s.text.toPlainText()
+    assert not s.log_btn.isEnabled()

@@ -659,6 +659,13 @@ def build_view(spec: R.ViewSpec, ctx: R.JobContext, cache: ThumbCache | None, re
     if spec.kind == R.SELECTION:
         from cryo_savanna.viewers.selectors import SelectionView
         return SelectionView(project, a["job"], a["what"], request_tool=request_tool)
+    if spec.kind in (R.CTF_REFINE, R.CTF_CHANGES, R.ABERRATIONS):
+        from cryo_savanna.viewers import ctfrefine_view as V
+        if spec.kind == R.CTF_REFINE:
+            return V.CtfRefineSummary(project, a["job"], a.get("star", ""), a.get("input", ""), ctx.options)
+        if spec.kind == R.CTF_CHANGES:
+            return V.CtfChangesView(project, a["star"], a.get("input", ""))
+        return V.AberrationsView(project, a["job"], a.get("star", ""))
     if spec.kind == R.FILES:
         return FilesView(project, a["job"], cache)
     return _message(f"No viewer for {spec.kind}")

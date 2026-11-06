@@ -114,6 +114,9 @@ Each job gets the tabs that fit what it made:
 | FSC | Refine3D, MultiBody, PostProcess | Gold-standard FSC of the half maps; PostProcess also the Guinier plot |
 | Convergence | Class2D, Class3D, InitialModel, Refine3D, MultiBody | Resolution, class occupancy, accuracies and changes per iteration |
 | Angular distribution | Refine3D, Class3D, InitialModel, MultiBody | The particles' viewing directions as a 2D map (tilt against rot), and in 3D: the map's surface with RELION's .bild cylinders around it (longer and redder: more particles), for the final map or any iteration and class; drag to rotate, wheel to zoom |
+| CTF refinement | CtfRefine | What the job fitted; mean, spread and range of the particles' defocus, astigmatism, B-factor and scale changes; per optics group beam tilt, magnification anisotropy and overall magnification (flagged when it changes the pixel size) and the Zernike coefficients, before and after; Open logfile.pdf |
+| Per-particle CTF | CtfRefine | Histograms or scatter of the new values and of their changes from the input particles; the particles of a micrograph at their positions, coloured by a value (as RELION's per-micrograph plots); the mean change on every micrograph (click one to show it) |
+| Aberrations | CtfRefine | Per optics group, the phase differences in Fourier space for beam tilt and trefoil, 4th-order aberrations and the magnification displacements: observed, fitted and residuals, at ±1 rad or ±π |
 | Tilt series | tomography Import … AlignTiltSeries | Tilt series, their tilts and values, the tilt image and CTF spectrum, values against tilt angle |
 | Tomograms / Picks | ReconstructTomograms, Denoise, Pick, Extract, Class3D | Z slab with side views, denoised and raw side by side, particles where the slab cuts them (of the classes chosen) |
 | Files | every job | Every file: STAR tables (with plots), images, stacks, volumes, text |

@@ -17,6 +17,7 @@ from pathlib import Path
 from cryo_savanna.project.summary import base_type
 from cryo_savanna.project.selection import interactive_kind
 from cryo_savanna.results.classes import data_star_for, iterations, latest_iteration_maps
+from cryo_savanna.results.ctfrefine import aberration_images, fits_ctf
 from cryo_savanna.results.tomo import (
     TOMO_NAME,
     columns_of,
@@ -37,6 +38,9 @@ VOLUME = "volume"  # 3D map: sections, projections, surface (+ mask outline, loc
 TILT_SERIES = "tilt_series"  # tomography: tilt series, their tilts and per-tilt values
 TOMOGRAMS = "tomograms"  # tomography: Z slabs and side views of tomograms (+ picked particles)
 SELECTION = "selection"  # what an interactive Select / Exclude tilt images job chose, read-only
+CTF_REFINE = "ctf_refine"  # CtfRefine: what it fitted, optics before/after, statistics of the changes
+CTF_CHANGES = "ctf_changes"  # CtfRefine: per-particle CTF changes, and per micrograph
+ABERRATIONS = "aberrations"  # CtfRefine: phase images of beam tilt / trefoil / 4th order, magnification
 FILES = "files"  # every file of the job: STAR tables, images, stacks
 
 
@@ -267,6 +271,19 @@ def views_for(ctx: JobContext) -> list[ViewSpec]:
         avg = ctx.file("class_averages.star")
         if avg:
             add(CLASSES, "Selected classes", star=avg)
+    elif t == "relion.ctfrefine":
+        parts = ctx.output("ParticleGroupMetadata") or ""
+        source = _option_file(ctx, "fn_data") or ""
+        add(CTF_REFINE, "CTF refinement", job=ctx.name, star=parts, input=source)
+        if parts and fits_ctf(ctx.options):
+            add(CTF_CHANGES, "Per-particle CTF", star=parts, input=source)
+        o = ctx.options
+        # the images come at the end of the job: while it runs, a tab that waits for them
+        if aberration_images(ctx.project_dir, ctx.name) or (
+                ctx.status == "Running" and any(o.get(k) == "Yes" for k in ("do_aniso_mag", "do_tilt", "do_4thorder"))):
+            add(ABERRATIONS, "Aberrations", job=ctx.name)
+        if parts:
+            add(PARTICLES, "Particles", star=parts)
     elif t == "relion.excludetilts" and interactive_kind(ctx.type_label, ctx.options) == "tilts":
         add(SELECTION, "Selection", job=ctx.name, what="tilts")
 
