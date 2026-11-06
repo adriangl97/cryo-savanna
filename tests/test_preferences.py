@@ -152,6 +152,121 @@ def test_chimerax_preference_and_the_shell(monkeypatch, tmp_path):
     assert os.environ["CRYO_SAVANNA_CHIMERAX"] == "/shell/chimerax"
 
 
+def test_scratch_directory_preference_and_the_shell(qtbot, tmp_path, spa_project, monkeypatch):
+    s = QSettings(str(tmp_path / "s.ini"), QSettings.IniFormat)
+    s.setValue("scratch_dir", "/ssd/me")
+    env = RelionEnv({})
+    w = MainWindow(spa_project, env=env, flag_source=FlagSource(which=lambda p: None), settings=s,
+                   slurm=SlurmClient(which=lambda p: None))
+    qtbot.addWidget(w)
+    class3d = w.defs.variant("relion.class3d")
+    assert class3d.default_values(env)["scratch_dir"] == "/ssd/me"
+
+    def fake_exec(dlg):
+        dlg.scratch.setText("  ")
+        dlg.accept()
+        return P.PreferencesDialog.Accepted
+    monkeypatch.setattr(P.PreferencesDialog, "exec", fake_exec)
+    w.show_preferences()
+    assert class3d.default_values(env)["scratch_dir"] == ""  # RELION's own default again
+
+    shell = RelionEnv({"RELION_SCRATCH_DIR": "/shell/scratch"})
+    s.setValue("scratch_dir", "/ssd/me")
+    P.apply_relion_defaults(s, shell)
+    assert class3d.default_values(shell)["scratch_dir"] == "/shell/scratch"  # set in the shell: it wins
+    assert "/shell/scratch" in P.PreferencesDialog(s, None, shell).scratch.placeholderText()
+
+
+def test_job_editor_shows_the_scratch_directory_of_the_preferences(qtbot, tmp_path, spa_copy, monkeypatch):
+    from cryo_savanna.project.jobstar import JobStar
+
+    remembered = JobStar.read(spa_copy / "Class3D/job009/job.star")  # RELION's .gui file: the last job's settings
+    remembered.options["scratch_dir"] = ""
+    remembered.options["nr_classes"] = "7"
+    remembered.write(spa_copy / ".gui_class3djob.star")
+    s = QSettings(str(tmp_path / "s.ini"), QSettings.IniFormat)
+    w = make(qtbot, spa_copy, s)
+    ed = w.actions.editor
+
+    def set_scratch(path):
+        def fake_exec(dlg):
+            dlg.scratch.setText(path)
+            dlg.accept()
+            return P.PreferencesDialog.Accepted
+        monkeypatch.setattr(P.PreferencesDialog, "exec", fake_exec)
+        w.show_preferences()
+
+    w.actions.new_job("relion.class3d")
+    assert ed.values()["scratch_dir"] == ""
+    set_scratch("/ssd/me")  # the editor is open: it follows
+    assert ed.values()["scratch_dir"] == "/ssd/me" and ed.values()["nr_classes"] == "7"
+    w.actions.new_job("relion.class3d")  # the preference wins over the remembered empty one
+    assert ed.values()["scratch_dir"] == "/ssd/me" and ed.values()["nr_classes"] == "7"
+    ed.widgets["scratch_dir"].set_value("/typed/here")
+    set_scratch("/ssd/other")  # typed in the editor: kept
+    assert ed.values()["scratch_dir"] == "/typed/here"
+    set_scratch("")  # no preference: RELION's remembered settings, as in its own GUI
+    w.actions.new_job("relion.class3d")
+    assert ed.values()["scratch_dir"] == ""
+
+    shell = RelionEnv({"RELION_SCRATCH_DIR": "/shell/scratch"})
+    remembered.options["scratch_dir"] = "/last/job"
+    remembered.write(spa_copy / ".gui_class3djob.star")
+    w2 = MainWindow(spa_copy, env=shell, flag_source=FlagSource(which=lambda p: None), settings=s,
+                    slurm=SlurmClient(which=lambda p: None))
+    qtbot.addWidget(w2)
+    w2.actions.new_job("relion.class3d")  # set in the shell: RELION's own rules (the remembered value)
+    assert w2.actions.editor.values()["scratch_dir"] == "/last/job"
+
+
+def test_wipe_savanna_folders_shows_them_and_asks_first(qtbot, tmp_path, monkeypatch):
+    from qtpy.QtWidgets import QDialog, QMessageBox
+
+    base = tmp_path / "ssd"
+    for name in ("savanna_010", "savanna_011", "keep_me"):
+        (base / name).mkdir(parents=True)
+    s = QSettings(str(tmp_path / "s.ini"), QSettings.IniFormat)
+    dlg = P.PreferencesDialog(s, None, RelionEnv({}))
+    qtbot.addWidget(dlg)
+    told = []
+    monkeypatch.setattr(QMessageBox, "information", lambda parent, title, text: told.append(text))
+    shown = []
+
+    def answer(result):
+        def fake_exec(confirm):
+            shown.append(confirm.paths.toPlainText())
+            assert "will crash" in confirm.warning.text()
+            assert confirm.delete.text().startswith("Delete ") and not confirm.delete.isDefault()
+            return result
+        monkeypatch.setattr(P.WipeScratchDialog, "exec", fake_exec)
+
+    dlg._wipe_scratch()  # no scratch directory set
+    assert "No scratch directory" in told[-1] and not shown
+
+    dlg.scratch.setText(str(base))
+    answer(QDialog.Rejected)
+    dlg._wipe_scratch()
+    assert shown[-1].splitlines() == [str(base / "savanna_010"), str(base / "savanna_011")]
+    assert (base / "savanna_010").exists()  # cancelled
+
+    answer(QDialog.Accepted)
+    dlg._wipe_scratch()
+    assert sorted(x.name for x in base.iterdir()) == ["keep_me"]
+    assert "Deleted 2 folders" in told[-1]
+    dlg._wipe_scratch()
+    assert "No savanna_NNN folders" in told[-1]
+
+    shell_base = tmp_path / "shell"
+    (shell_base / "savanna_020").mkdir(parents=True)
+    (base / "savanna_030").mkdir()
+    shell = P.PreferencesDialog(s, None, RelionEnv({"RELION_SCRATCH_DIR": str(shell_base)}))
+    qtbot.addWidget(shell)
+    shell.scratch.setText(str(base))
+    answer(QDialog.Rejected)
+    shell._wipe_scratch()  # the directory jobs get: the shell's
+    assert shown[-1] == str(shell_base / "savanna_020")
+
+
 def test_shortcuts_and_about(qtbot, tmp_path, spa_project):
     w = make(qtbot, spa_project, QSettings(str(tmp_path / "s.ini"), QSettings.IniFormat))
     from qtpy.QtGui import QKeySequence

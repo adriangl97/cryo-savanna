@@ -135,10 +135,25 @@ class RelionEnv:
     def __init__(self, environ: Mapping[str, str] | None = None):
         src = os.environ if environ is None else environ
         self.vars: dict[str, str] = {k: v for k, v in src.items() if k.startswith("RELION_")}
+        self._from_shell = frozenset(self.vars)
         self._path = src.get("PATH", "")
 
     def get(self, name: str) -> str | None:
         return self.vars.get(name)
+
+    def from_shell(self, name: str) -> bool:
+        return name in self._from_shell
+
+    def set_default(self, name: str, value: str) -> bool:
+        """A value for a RELION_* variable the shell leaves unset (cryo-savanna's preferences); ""
+        unsets it again. A value from the shell wins: returns False then."""
+        if name in self._from_shell:
+            return False
+        if value:
+            self.vars[name] = value
+        else:
+            self.vars.pop(name, None)
+        return True
 
     # -- typed accessors (same parsing as RELION) ------------------------------------------
     def integer(self, name: str) -> int | None:

@@ -9,22 +9,30 @@ import os
 from qtpy.QtCore import QSettings, Qt
 from qtpy.QtGui import QKeySequence
 from qtpy.QtWidgets import (
+    QApplication,
+    QCheckBox,
     QComboBox,
     QDialog,
     QDialogButtonBox,
     QDoubleSpinBox,
+    QFileDialog,
     QFormLayout,
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QMessageBox,
+    QPlainTextEdit,
     QPushButton,
     QSpinBox,
+    QStyle,
     QTextBrowser,
     QVBoxLayout,
     QWidget,
 )
 
+from cryo_savanna.env.relion_env import RelionEnv
 from cryo_savanna.images.cache import cache_root, cache_size_mb, clear_cache
+from cryo_savanna.project import scratch
 from cryo_savanna.ui.style import THEMES
 
 # key, default, what it is
@@ -35,7 +43,11 @@ DEFAULTS = {
     "chimerax": "",  # ChimeraX to use instead of the one on PATH
     "theme": "system",  # colours of the window: system, light or dark (style.THEMES)
     "editor": "window",  # where the job editor opens (EDITOR_PLACES)
+    "scratch_dir": "",  # default "Copy particles to scratch directory" of new jobs (as $RELION_SCRATCH_DIR)
+    "scratch_own": False,  # each job a savanna_NNN subdirectory of its scratch directory (off: as RELION's GUI)
 }
+
+SCRATCH_VAR = scratch.ENV_VAR
 
 EDITOR_PLACES = {"window": "In its own window", "docked": "Docked in the main window"}
 CHOICES = {"theme": THEMES, "editor": EDITOR_PLACES}  # preferences with a fixed set of values
@@ -93,8 +105,14 @@ def apply_environment(settings: QSettings) -> None:
         _set_here = None
 
 
+def apply_relion_defaults(settings: QSettings, env: RelionEnv) -> None:
+    """Preferences that act as RELION_* variables for the job editor's defaults: the scratch
+    directory, as $RELION_SCRATCH_DIR (one set in the shell wins)."""
+    env.set_default(SCRATCH_VAR, setting(settings, "scratch_dir"))
+
+
 class PreferencesDialog(QDialog):
-    def __init__(self, settings: QSettings, parent=None):
+    def __init__(self, settings: QSettings, parent=None, env: RelionEnv | None = None):
         super().__init__(parent)
         self.setWindowTitle("Preferences")
         self.settings = settings
@@ -145,6 +163,41 @@ class PreferencesDialog(QDialog):
         self.chimerax.setPlaceholderText("chimerax on PATH")
         self.chimerax.setToolTip("ChimeraX to start for Open in ChimeraX ($CRYO_SAVANNA_CHIMERAX, if set, wins)")
         form.addRow("ChimeraX", self.chimerax)
+        self.scratch = QLineEdit(setting(settings, "scratch_dir"))
+        shell = env.get(SCRATCH_VAR) if env is not None and env.from_shell(SCRATCH_VAR) else None
+        self.scratch.setPlaceholderText(f"${SCRATCH_VAR} = {shell} (wins)" if shell is not None else "none")
+        self.scratch.setToolTip("Default of 'Copy particles to scratch directory' for new jobs ($RELION_SCRATCH_DIR, "
+                                "if set in the shell, wins)")
+        browse = QPushButton("Browse…")
+        browse.clicked.connect(self._browse_scratch)
+        row = QHBoxLayout()
+        row.addWidget(self.scratch)
+        row.addWidget(browse)
+        row.setContentsMargins(0, 0, 0, 0)
+        holder = QWidget()
+        holder.setLayout(row)
+        form.addRow("Scratch directory", holder)
+        self.scratch_own = QCheckBox("A subdirectory of its own for each job (savanna_NNN)")
+        self.scratch_own.setChecked(setting(settings, "scratch_own"))
+        self.scratch_own.setToolTip(
+            "Each job started with a scratch directory copies its particles to <directory>/savanna_NNN, with a "
+            "random 3-digit number no other job of the project uses, so jobs sharing a scratch disk never wipe "
+            "each other's relion_volatile/. RELION removes only relion_volatile/ of a job that finishes well: "
+            "the copies of failed or aborted jobs stay until you delete them. Off: the directory as typed, as "
+            "in RELION's own GUI.")
+        wipe = QPushButton("Wipe savanna folders…")
+        wipe.setToolTip("Delete every savanna_NNN folder directly in the scratch directory, after showing them. "
+                        "Jobs running with their scratch in one of them will crash.")
+        wipe.clicked.connect(self._wipe_scratch)
+        row = QHBoxLayout()
+        row.addWidget(self.scratch_own)
+        row.addStretch(1)
+        row.addWidget(wipe)
+        row.setContentsMargins(0, 0, 0, 0)
+        holder = QWidget()
+        holder.setLayout(row)
+        form.addRow("", holder)
+        self._env = env
         buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
@@ -157,6 +210,42 @@ class PreferencesDialog(QDialog):
     def _cache_label(self) -> None:
         self.cache_info.setText(f"<span style='color:gray'>{cache_root()} — {cache_size_mb():.0f} MB now</span>")
 
+    def _browse_scratch(self) -> None:
+        d = QFileDialog.getExistingDirectory(self, "Scratch directory", self.scratch.text().strip())
+        if d:
+            self.scratch.setText(d)
+
+    def scratch_base(self) -> str:
+        """The scratch directory new jobs get: $RELION_SCRATCH_DIR from the shell, else the one typed here."""
+        env = self._env
+        if env is not None and env.from_shell(SCRATCH_VAR):
+            return (env.get(SCRATCH_VAR) or "").strip()
+        return self.scratch.text().strip()
+
+    def _wipe_scratch(self) -> None:
+        base = self.scratch_base()
+        title = "Wipe savanna folders"
+        if not base:
+            QMessageBox.information(self, title, "No scratch directory is set: there is nothing to search.")
+            return
+        dirs = scratch.own_dirs(base)
+        if not dirs:
+            QMessageBox.information(self, title, f"No savanna_NNN folders in {base}.")
+            return
+        if WipeScratchDialog(base, dirs, self).exec() != QDialog.Accepted:
+            return
+        QApplication.setOverrideCursor(Qt.WaitCursor)
+        try:
+            errors = scratch.wipe(dirs)
+        finally:
+            QApplication.restoreOverrideCursor()
+        if errors:
+            QMessageBox.warning(self, title, f"Deleted {len(dirs) - len(errors)} of {len(dirs)} folders. "
+                                "These could not be deleted:\n\n" + "\n".join(errors))
+        else:
+            QMessageBox.information(self, title, f"Deleted {len(dirs)} folder{'s' if len(dirs) != 1 else ''} "
+                                    f"from {base}.")
+
     def _clear_cache(self) -> None:
         clear_cache()  # only cryo-savanna's own files: the root may hold other things
         self._cache_label()
@@ -167,9 +256,49 @@ class PreferencesDialog(QDialog):
         s.setValue("queue_poll_s", self.queue.value())
         s.setValue("cache_mb", self.cache.value())
         s.setValue("chimerax", self.chimerax.text().strip())
+        s.setValue("scratch_dir", self.scratch.text().strip())
+        s.setValue("scratch_own", self.scratch_own.isChecked())
         s.setValue("theme", self.theme.currentData())
         s.setValue("editor", self.editor.currentData())
         super().accept()
+
+
+class WipeScratchDialog(QDialog):
+    """Shows the savanna_NNN folders that would be deleted, and the risk; Cancel is the default."""
+
+    def __init__(self, base: str, dirs, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Wipe savanna folders")
+        n = len(dirs)
+        icon = QLabel()
+        icon.setPixmap(self.style().standardIcon(QStyle.SP_MessageBoxWarning).pixmap(40, 40))
+        self.warning = text = QLabel(
+            f"<b>Delete {n} savanna_NNN folder{'s' if n != 1 else ''} in {base}, and everything in them?</b>"
+            "<p>Jobs that are running now with their scratch directory in one of these folders <b>will "
+            "crash</b>: RELION reads their particles from there. Jobs queued to start later are not affected "
+            "(RELION makes the folder again). Wipe them only when no job using scratch is running.</p>"
+            "<p>This cannot be undone.</p>")
+        text.setWordWrap(True)
+        top = QHBoxLayout()
+        top.addWidget(icon, 0, Qt.AlignTop)
+        top.addWidget(text, 1)
+        self.paths = QPlainTextEdit("\n".join(str(d) for d in dirs))
+        self.paths.setReadOnly(True)
+        self.paths.setLineWrapMode(QPlainTextEdit.NoWrap)
+        buttons = QDialogButtonBox(QDialogButtonBox.Cancel)
+        self.delete = buttons.addButton(f"Delete {n} folder{'s' if n != 1 else ''}", QDialogButtonBox.DestructiveRole)
+        self.delete.setAutoDefault(False)
+        cancel = buttons.button(QDialogButtonBox.Cancel)
+        cancel.setDefault(True)
+        cancel.setFocus()
+        self.delete.clicked.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        lay = QVBoxLayout(self)
+        lay.addLayout(top)
+        lay.addWidget(QLabel("Folders to delete:"))
+        lay.addWidget(self.paths, 1)
+        lay.addWidget(buttons)
+        self.resize(620, 420)
 
 
 def shortcuts_html(window) -> str:

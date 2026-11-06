@@ -49,6 +49,7 @@ from cryo_savanna.ui.preferences import (
     PreferencesDialog,
     TextDialog,
     apply_environment,
+    apply_relion_defaults,
     setting,
     shortcuts_html,
 )
@@ -153,6 +154,7 @@ class MainWindow(QMainWindow):
         poll_s, queue_poll_s = _intervals(poll_s, queue_poll_s)
         self.defs = defs or JobDefs.load()
         self.env = env or RelionEnv()
+        apply_relion_defaults(self.settings, self.env)
         # tomo None: the tomography job menu if the project has tomography jobs (decided on loading)
         self.tomo, self.readonly, self.poll_s = bool(tomo), readonly, poll_s
         self.tomo_auto = tomo is None
@@ -338,7 +340,7 @@ class MainWindow(QMainWindow):
 
     # ------------------------------------------------------------------ preferences and help
     def show_preferences(self) -> None:
-        dlg = PreferencesDialog(self.settings, self)
+        dlg = PreferencesDialog(self.settings, self, self.env)
         if dlg.exec() != PreferencesDialog.Accepted:
             return
         s = self.settings
@@ -351,6 +353,9 @@ class MainWindow(QMainWindow):
         if self.info.cache is not None:
             self.info.cache.max_disk = setting(s, "cache_mb") * 1024 * 1024
         apply_environment(s)
+        apply_relion_defaults(s, self.env)
+        self.actions.editor.own_scratch = setting(s, "scratch_own")
+        self.actions.editor.refresh_defaults()  # an open editor shows the new scratch directory
         style.apply_theme(QApplication.instance(), setting(s, "theme"))
         self.actions.set_editor_place(setting(s, "editor"))
         self._update_status()
@@ -756,6 +761,7 @@ class MainWindow(QMainWindow):
         if s.value("editor_geometry"):  # and its own window
             self.actions.editor_window.placed = self.actions.editor_window.restoreGeometry(s.value("editor_geometry"))
         self.actions.set_editor_place(setting(s, "editor"))
+        self.actions.editor.own_scratch = setting(s, "scratch_own")
         self.actions.hide_editor()
 
     def closeEvent(self, e) -> None:

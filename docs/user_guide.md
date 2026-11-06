@@ -130,11 +130,56 @@ show the same way.
 
 ## Preferences (Ctrl+,)
 
-Theme (light, dark, or as the system:), where the job editor opens (its own window, the default, or
-docked in the main window), polling interval (at least 0.5 s), SLURM polling (at least 5 s, or none), the size of the image cache
-for all projects together (`$CRYO_SAVANNA_CACHE`, else `$XDG_CACHE_HOME/cryo-savanna`, i.e.
-`~/.cache/cryo-savanna`) and emptying it (only cryo-savanna's own files there are deleted), ChimeraX.
 Help → Keyboard shortcuts (F1) lists every key.
+
+### Theme
+
+Light, dark, or as the system.
+
+### Where the job editor opens
+
+Its own window, the default, or docked in the main window.
+
+### Polling interval
+
+At least 0.5 s.
+
+### SLURM polling
+
+At least 5 s, or none.
+
+### Size of the image cache
+
+For all projects together in `$CRYO_SAVANNA_CACHE`, else `$XDG_CACHE_HOME/cryo-savanna`, i.e.
+`~/.cache/cryo-savanna`. There is an option to empty it (only cryo-savanna's own files there are
+deleted).
+
+### ChimeraX path
+
+The ChimeraX that "Open in ChimeraX" starts; empty, the one on PATH. A `$CRYO_SAVANNA_CHIMERAX` set
+in the shell wins over this preference.
+
+### Scratch directory
+
+The default of "Copy particles to scratch directory" for new jobs, as `$RELION_SCRATCH_DIR` would
+set it. A `$RELION_SCRATCH_DIR` set in the shell wins over this preference.
+
+### Scratch subdirectory of its own for each job
+
+Off by default: the directory is used as typed, as in RELION's GUI. If set to on, every job started
+or scheduled with a scratch directory (new, cloned or overwritten) gets a subdirectory of its own in
+it, `savanna_NNN`, with a random 3-digit number that no other job of the project uses and that is
+not on disk yet. RELION wipes `<scratch>/relion_volatile/` when a job starts and ends, so jobs
+sharing one directory would destroy each other's copies. This can lead to an accidental crash of a
+job if you run two at the same time sharing a scratch folder. This setting avoids that. Continuing a
+job keeps its directory.
+
+The caveat with this is that RELION removes only `relion_volatile/` of a job that finishes ok, so
+the copies of failed, aborted or killed jobs stay until you delete them (with one shared directory,
+the next job would have wiped them). The "Wipe savanna folders…" button deletes them: it lists every
+`savanna_NNN` folder directly in the scratch directory (`$RELION_SCRATCH_DIR` from the shell, else
+the one in Preferences), with full paths, and deletes them only after you confirm. Jobs running with
+their scratch in one of them crash, so use it only when no job using scratch is running.
 
 ## Installing
 

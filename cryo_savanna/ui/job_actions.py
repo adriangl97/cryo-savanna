@@ -43,6 +43,9 @@ from cryo_savanna.project.jobstar import JobStar, read_last_used
 from cryo_savanna.project.ops import OpsError, PipelineOps
 from cryo_savanna.project.pipeline import Pipeline
 from cryo_savanna.project.pipeliner import Pipeliner, PipelinerError
+from cryo_savanna.project.scratch import ENV_VAR as SCRATCH_VAR
+from cryo_savanna.project.scratch import SCRATCH_KEY
+from cryo_savanna.project.scratch import assign as assign_scratch
 from cryo_savanna.project.selection import (
     SelectionError,
     interactive_kind,
@@ -505,7 +508,10 @@ class JobActions(QObject):
             last = None
         note = ("Settings of the last job of this type (from RELION's .gui files); 'Defaults' resets them."
                 if last is not None else "")
-        self._edit("New job", self.editor.new_job, variant, last.options if last else None, note)
+        values = dict(last.options) if last else None
+        if values and self.env.get(SCRATCH_VAR) and not self.env.from_shell(SCRATCH_VAR):
+            values.pop(SCRATCH_KEY, None)  # the scratch directory of the Preferences, not the last job's
+        self._edit("New job", self.editor.new_job, variant, values, note)
 
     def new_cli_job(self, program: str) -> None:
         QApplication.setOverrideCursor(Qt.WaitCursor)  # the first time, the program's --help is read
@@ -604,7 +610,12 @@ class JobActions(QObject):
         if QMessageBox.question(self.window, "Overwrite", ask) != QMessageBox.Yes:
             return
 
+        scratch: list[str | None] = [None]  # the job's own scratch directory, once given
+        own_scratch = self.editor.own_scratch
+
         def overwrite_and_run():
+            if own_scratch:
+                scratch[0] = self._own_scratch(js, p)
             res = pl.overwrite_job(job, js, alias or None)
             rec = None if schedule_only else pl.run([res.job])
             return res, rec
@@ -616,12 +627,25 @@ class JobActions(QObject):
             self.select.emit(res.job)
             verb = "scheduled" if rec is None else "started"
             text = f"{res.job.rstrip('/')} overwritten and {verb}." + (" " + " ".join(res.warnings) if res.warnings else "")
+            if scratch[0]:
+                text += f" Scratch directory: {scratch[0]}"
             if rec is None:
                 self.editor.status.setText(text)
             else:
                 self._started(edit, text)
 
         self._run(f"Overwrite {self._label(job)}", overwrite_and_run, done)
+
+    def _own_scratch(self, js: JobStar, pipeline: Pipeline | None) -> str | None:
+        """Before a job is added (in the worker: it reads the project's job.star files): its scratch
+        directory becomes a savanna_NNN of its own, so no two jobs wipe each other's relion_volatile/.
+        Only with Preferences → "A subdirectory of its own for each job" (editor.own_scratch)."""
+        labels = {v.label for v in self.defs.variants.values() if SCRATCH_KEY in v.options}
+        try:
+            pipeline = Pipeline.read(self.project_dir)  # with jobs added since the last snapshot
+        except (OSError, ValueError, KeyError):
+            pass
+        return assign_scratch(js.options, self.project_dir, pipeline, labels)
 
     def _on_submit(self, js: JobStar, alias: str, schedule_only: bool) -> None:
         pl = self.pipeliner
@@ -675,7 +699,12 @@ class JobActions(QObject):
         predicted = self.editor.job_dir() if isinstance(variant, CliVariant) else None
         pipeline = self.editor.pipeline
 
+        scratch: list[str | None] = [None]  # the job's own scratch directory, once given
+        own_scratch = self.editor.own_scratch
+
         def add_and_run():
+            if own_scratch:
+                scratch[0] = self._own_scratch(js, pipeline)
             res = pl.add_job(js, alias or None)
             if predicted is not None and res.job != predicted:  # outputs must go to its own directory
                 variant.make_jobstar(values, False, res.job, pipeline).write(self.project_dir / res.job / "job.star")
@@ -689,6 +718,8 @@ class JobActions(QObject):
             self.select.emit(res.job)
             verb = "scheduled" if rec is None else "started"
             text = f"{res.job.rstrip('/')} {verb}." + (" " + " ".join(res.warnings) if res.warnings else "")
+            if scratch[0]:
+                text += f" Scratch directory: {scratch[0]}"
             if rec is None:  # scheduled: kept open, to schedule the next job from it
                 self.editor.status.setText(text)
             else:

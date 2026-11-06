@@ -63,11 +63,13 @@ from qtpy.QtWidgets import (
     QWidget,
 )
 
-from cryo_savanna.env.relion_env import RelionEnv
+from cryo_savanna.env.relion_env import RelionEnv, RelionEnvError
 from cryo_savanna.jobdefs.flags import Flag, FlagSource, command_flags, program_for
 from cryo_savanna.jobdefs.model import JobVariant, OptionDef, Row
 from cryo_savanna.project.jobstar import JobStar
 from cryo_savanna.project.pipeline import Pipeline
+from cryo_savanna.project.scratch import SCRATCH_KEY
+from cryo_savanna.project.scratch import base_dir as scratch_base_dir
 from cryo_savanna.project.selection import interactive_kind
 from cryo_savanna.ui.flag_panel import FlagPanel, FlagsTask
 
@@ -343,6 +345,13 @@ class _HelpFilter(QObject):
         return False
 
 
+def _scratch_base(values: dict[str, str]) -> None:
+    """Show the scratch directory chosen, not the job's own savanna_NNN in it (a new one is given
+    when the job starts)."""
+    if SCRATCH_KEY in values:
+        values[SCRATCH_KEY] = scratch_base_dir(values[SCRATCH_KEY])
+
+
 class JobEditor(QWidget):
     """Edit a new job or continue an existing one. Emits ``submit`` with the job.star to use."""
 
@@ -375,6 +384,7 @@ class JobEditor(QWidget):
         self.job: str | None = None  # the job being continued
         self.readonly = False
         self.can_run = True
+        self.own_scratch = False  # each job a savanna_NNN of its scratch directory (Preferences)
 
         self.title = QLabel()
         f = QFont(self.font())
@@ -392,7 +402,8 @@ class JobEditor(QWidget):
         self.only_changed = QCheckBox("Only changed")
         self.only_changed.toggled.connect(lambda _: self._apply_search())
         self.reset = QPushButton("Defaults")
-        self.reset.setToolTip("Set every option to RELION's default (with this shell's RELION_* settings)")
+        self.reset.setToolTip("Set every option to RELION's default (with this shell's RELION_* settings and "
+                              "the scratch directory of the preferences)")
         self.reset.clicked.connect(self._reset_defaults)
 
         self.tabs = QTabWidget()
@@ -462,6 +473,8 @@ class JobEditor(QWidget):
         for k, v in (values or {}).items():
             if k in start:
                 start[k] = v
+        if self.own_scratch:
+            _scratch_base(start)
         self._set_values(start)
         name = self._type_name(variant)
         self.title.setText(f"New job: {name}" + (" (tomo)" if variant.is_tomo else ""))
@@ -488,6 +501,8 @@ class JobEditor(QWidget):
         self.mode, self.job, self.source_job = MODE_OVERWRITE, job, job
         self._build(variant)
         values, ignored = variant.values_from_jobstar(jobstar, self.env)
+        if self.own_scratch:
+            _scratch_base(values)  # it runs again in a scratch directory of its own
         self._set_values(values)
         name = self._type_name(variant)
         self.title.setText(f"Overwrite {job.rstrip('/')}: {name}")
@@ -693,6 +708,24 @@ class JobEditor(QWidget):
         return tip
 
     # ------------------------------------------------------------------ values
+    def refresh_defaults(self) -> None:
+        """The defaults changed (Preferences): a new job's options left at the old default take the new one."""
+        if self.variant is None:
+            return
+        try:
+            options = self.variant.resolved_options(self.env)
+        except RelionEnvError:
+            return
+        if options.keys() != self.options.keys():
+            return  # other queue fields: shown the next time the editor opens
+        vals = self.values()
+        old, self.options = self.options, options
+        if self.mode == MODE_NEW:
+            for k in self.widgets:
+                if vals[k] == old[k].default and options[k].default != old[k].default:
+                    vals[k] = options[k].default
+        self._set_values(vals)
+
     def _set_values(self, values: dict[str, str]) -> None:
         self._loading = True
         for k, w in self.widgets.items():
@@ -819,7 +852,9 @@ class JobEditor(QWidget):
             extra.append(f"input node type {o.node_type}")
         env = ", ".join(var for _, var in o.env)
         if env:
-            extra.append(f"default from {env}")
+            extra.append(f"default from {env}" + (" or Preferences" if "RELION_SCRATCH_DIR" in env else ""))
+        if key == SCRATCH_KEY and self.own_scratch:
+            extra.append("each job gets its own savanna_NNN subdirectory in it")
         name = "" if o.label.strip() == key else html.escape(key) + " · "
         self.help.setHtml(
             f"<b>{html.escape(o.label.strip())}</b> <span style='color:gray'>{name}default "

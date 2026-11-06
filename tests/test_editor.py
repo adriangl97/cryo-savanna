@@ -24,6 +24,7 @@ from cryo_savanna.project.pipeline import Pipeline  # noqa: E402
 from cryo_savanna.project.snapshot import job_type_names  # noqa: E402
 from cryo_savanna.project.star import write_star  # noqa: E402
 from cryo_savanna.tools.validate import EXTERNAL_SCRIPT, pipeliner_version  # noqa: E402
+from cryo_savanna.ui import preferences as P  # noqa: E402
 from cryo_savanna.ui.flag_panel import COL_DEFAULT, COL_FLAG, COL_VALUE  # noqa: E402
 from cryo_savanna.ui.job_editor import JobEditor, NodeWidget, node_matches, qt_file_filter  # noqa: E402
 from cryo_savanna.ui.main_window import MainWindow  # noqa: E402
@@ -273,6 +274,62 @@ def test_clone_opens_editor_with_the_jobs_settings(window, spa_project):
     assert w.actions.editor_shown()
     js = JobStar.read(spa_project / "Class3D/job009/job.star")
     assert w.actions.editor.jobstar().options == js.options and not w.actions.editor.jobstar().is_continue
+
+
+@pytest.fixture
+def scratch_job(window, spa_copy, tmp_path, monkeypatch):
+    """A window on a project whose Class3D/job009 used <tmp>/ssd/savanna_123, and the job.stars its
+    submissions would add (relion_pipeliner not run)."""
+    w = window(spa_copy)
+    job = "Class3D/job009/"
+    js = JobStar.read(spa_copy / job / "job.star")
+    js.options["scratch_dir"] = str(tmp_path / "ssd" / "savanna_123")
+    js.write(spa_copy / job / "job.star")
+    w.select_job(job)
+    added = []
+
+    class FakePipeliner:
+        available = True
+
+        def add_job(self, js, alias):
+            added.append(js)
+            raise RuntimeError("not run")
+    monkeypatch.setattr(w.actions, "pipeliner", FakePipeliner())
+    monkeypatch.setattr(QMessageBox, "warning", lambda *args, **k: None)
+
+    def submit():
+        w.actions._on_submit(w.actions.editor.jobstar(), "", False)
+        w.actions.wait()
+        return added[-1].options["scratch_dir"]
+    return w, submit
+
+
+def test_scratch_directory_is_used_as_typed_by_default(scratch_job, tmp_path):
+    w, submit = scratch_job
+    assert not P.setting(w.settings, "scratch_own")  # as RELION's own GUI
+    w.actions.clone_job()
+    assert w.actions.editor.values()["scratch_dir"] == str(tmp_path / "ssd" / "savanna_123")
+    assert submit() == str(tmp_path / "ssd" / "savanna_123")
+
+
+def test_each_new_job_gets_a_scratch_directory_of_its_own(scratch_job, tmp_path, monkeypatch):
+    from cryo_savanna.project.scratch import base_dir
+
+    w, submit = scratch_job
+
+    def fake_exec(dlg):
+        dlg.scratch_own.setChecked(True)
+        dlg.accept()
+        return P.PreferencesDialog.Accepted
+    monkeypatch.setattr(P.PreferencesDialog, "exec", fake_exec)
+    w.show_preferences()
+    a = w.actions
+    a.clone_job()
+    assert a.editor.values()["scratch_dir"] == str(tmp_path / "ssd")  # the directory chosen, not the job's own
+    dirs = [submit() for _ in range(5)]
+    assert all(base_dir(d) == str(tmp_path / "ssd") and d != str(tmp_path / "ssd" / "savanna_123") for d in dirs)
+    a.editor.widgets["scratch_dir"].set_value("")
+    assert submit() == ""  # no scratch: left alone
 
 
 def test_alias_mark_delete_undelete_from_the_menus(window, qtbot, spa_copy, monkeypatch):
