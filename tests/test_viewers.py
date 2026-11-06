@@ -312,6 +312,46 @@ def test_zooming_in_reads_the_region_at_full_detail(qtbot, tmp_path):
     assert not c.detail.isVisible()
 
 
+def test_old_picks_and_images_are_repainted_away(qtbot, tmp_path):
+    """Changing the circles (or losing the image) repaints where they were: with no image under them
+    (a micrograph that does not load), old circles stayed on screen."""
+    from qtpy.QtCore import QRectF
+    c = ImageCanvas(controls=False)
+    qtbot.addWidget(c)
+    c.resize(400, 400)
+    c.show()
+    qtbot.waitExposed(c)
+    c.view.setRange(QRectF(0, 0, 1000, 1000), padding=0)
+    c.view.disableAutoRange()
+    QApplication.processEvents()
+
+    def repaints_old_area(item, change) -> bool:
+        old = item.mapRectToScene(item.boundingRect()).center()
+        dirty = []
+        scene = c.gv.scene()
+        scene.changed.connect(dirty.extend)
+        change()
+        QApplication.processEvents()
+        scene.changed.disconnect(dirty.extend)
+        return any(r.contains(old) for r in dirty)
+
+    def old_picks():
+        c.set_points(np.array([100.0, 150]), np.array([100.0, 150]), 50)
+        QApplication.processEvents()
+
+    old_picks()
+    assert repaints_old_area(c.points, lambda: c.set_points([], [], 1))
+    old_picks()
+    assert repaints_old_area(c.points, lambda: c.set_points(np.array([800.0]), np.array([800.0]), 50))
+    c.set_array(np.zeros((200, 200), np.float32))
+    QApplication.processEvents()
+    assert repaints_old_area(c.item, lambda: c.set_image(None))
+    c.set_array(np.zeros((200, 200), np.float32))
+    QApplication.processEvents()
+    assert repaints_old_area(c.item, lambda: c.set_image(ImageRef(str(tmp_path / "missing.mrc"))) or settle(qtbot))
+    assert c.error and c.item.image is None
+
+
 def test_particle_items_resolve_each_stack_once(tmp_path):
     from cryo_savanna.results.classes import ParticleSet
     from cryo_savanna.results.tables import Table

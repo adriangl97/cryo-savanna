@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
 """Tomography: tilt-series and tomogram readers, viewers, picks in their tomograms, napari, the tomo job menu."""
 
+import shutil
 import stat
 
 import numpy as np
@@ -280,3 +281,134 @@ def test_window_picks_the_tomo_job_menu(qtbot, tmp_path, tomo_project, spa_proje
         pool().waitForDone(20000)
         qtbot.wait(40)
     assert v.shape == (16, 64, 64)
+
+
+# ---------------------------------------------------------------------------- Warp/M particles
+
+
+def make_warp(root):
+    """A Warp project (tomostar/, warp_tiltseries/ with tomograms and subtomograms) with the RELION
+    project in relion/: the particles of a Class3D of Warp's subtomograms (named by their .tomostar,
+    coordinates in pixels of the exported 10 Å, from the corner)."""
+    import mrcfile
+    from cryo_savanna.project.star import StarBlock, write_star
+    rng = np.random.default_rng(3)
+    rec = root / "warp_tiltseries" / "reconstruction"
+    (rec / "denoised").mkdir(parents=True)
+    vol = rng.normal(size=(20, 40, 50)).astype(np.float32)
+    for name, data, px in (("TS_1_20.00Apx.mrc", vol, 20.0), ("TS_1_10.00Apx.mrc", np.zeros((40, 80, 100), np.float32), 10.0),
+                           ("TS_10_20.00Apx.mrc", vol, 20.0), ("denoised/TS_1_20.00Apx.mrc", vol + 1, 20.0)):
+        with mrcfile.new(rec / name) as m:
+            m.set_data(data)
+            m.voxel_size = px
+    (root / "tomostar").mkdir()
+    for ts in ("TS_1", "TS_2"):
+        (root / "tomostar" / f"{ts}.tomostar").write_text("data_\nloop_\n_wrpMovieName\n_wrpAngleTilt\nx.tif 0\n")
+    project = root / "relion"
+    job = project / "Class3D" / "job003"
+    job.mkdir(parents=True)
+    rows = []
+    for ts, n in (("TS_1.tomostar", 30), ("TS_2.tomostar", 10)):
+        for k in range(n):
+            x, y, z = rng.uniform(0, 100), rng.uniform(0, 80), rng.uniform(0, 40)  # 10 Å pixels
+            rows.append([x, y, z, ts, f"../warp_tiltseries/subtomo/{ts[:-9]}/{ts[:-9]}_{k:06d}_10.00A.mrc",
+                         1, 1 + k % 2])
+    optics = StarBlock.from_records("optics", ["rlnOpticsGroup", "rlnOpticsGroupName", "rlnImagePixelSize",
+                                               "rlnImageSize", "rlnImageDimensionality"], [[1, "opticsGroup1", 10.0, 32, 3]])
+    parts = StarBlock.from_records("particles", ["rlnCoordinateX", "rlnCoordinateY", "rlnCoordinateZ",
+                                                 "rlnMicrographName", "rlnImageName", "rlnOpticsGroup",
+                                                 "rlnClassNumber"], rows)
+    write_star(job / "run_it025_data.star", [optics, parts])
+    return project, "Class3D/job003/run_it025_data.star"
+
+
+def test_warp_particles_and_their_tomograms(tmp_path):
+    from cryo_savanna.results.tomo import is_warp_particles, warp_tomogram_set
+    project, rel = make_warp(tmp_path)
+    assert is_warp_particles(project / rel) and not is_tomo_particles(project / rel)
+    picks = read_tomo_picks(project, rel)
+    assert picks.pixel_size == 10.0 and set(picks.by_tomo) == {"TS_1.tomostar", "TS_2.tomostar"}
+    assert picks.classes == {1: 20, 2: 20}
+    # 10 Å coordinates in a 20 Å tomogram: half
+    assert np.allclose(picks.voxels("TS_1.tomostar", 20.0, (20, 40, 50)), picks.by_tomo["TS_1.tomostar"] / 2)
+    ts, searched = warp_tomogram_set(project, picks, rel)
+    assert searched[0] == tmp_path / "warp_tiltseries" / "reconstruction"  # from the subtomograms' path
+    assert ts.names == ["TS_1.tomostar", "TS_2.tomostar"]
+    # the coarsest tomogram (not TS_10's), and its denoised copy first
+    assert [c for c, _ in ts.tomogram_kinds()] == ["rlnTomoReconstructedTomogramDenoised", "rlnTomoReconstructedTomogram"]
+    assert ts.tomogram(0, "rlnTomoReconstructedTomogram").path == str(searched[0] / "TS_1_20.00Apx.mrc")
+    assert ts.tomogram(0).path == str(searched[0] / "denoised" / "TS_1_20.00Apx.mrc")
+    assert ts.tomogram(1) is None  # TS_2 was not reconstructed
+    # a folder the user names comes first
+    other = tmp_path / "elsewhere"
+    other.mkdir()
+    shutil.copy(searched[0] / "TS_1_20.00Apx.mrc", other / "TS_1_20.00Apx.mrc")
+    ts2, searched2 = warp_tomogram_set(project, picks, rel, [str(other)])
+    assert searched2[0] == other and ts2.tomogram(0, "rlnTomoReconstructedTomogram").path == str(other / "TS_1_20.00Apx.mrc")
+
+
+def test_warp_export_without_optics(tmp_path):
+    """As ts_export_particles writes them: one unnamed table, the pixel size per particle."""
+    from cryo_savanna.results.tomo import is_warp_particles
+    (tmp_path / "p.star").write_text(
+        "data_\nloop_\n_rlnCoordinateX\n_rlnCoordinateY\n_rlnCoordinateZ\n_rlnMicrographName\n_rlnMagnification\n"
+        "_rlnDetectorPixelSize\n_rlnImageName\n"
+        "10 20 30 TS_1.tomostar 10000.0 7.50000 sub/TS_1_000001_7.50A.mrc\n")
+    assert is_warp_particles(tmp_path / "p.star")
+    p = read_tomo_picks(tmp_path, "p.star")
+    assert p.pixel_size == 7.5 and np.allclose(p.voxels("TS_1.tomostar", 15.0, (40, 40, 40)), [[5, 10, 15]])
+    # SPA particles are not Warp's
+    (tmp_path / "spa.star").write_text("data_particles\nloop_\n_rlnCoordinateX\n_rlnCoordinateY\n_rlnMicrographName\n"
+                                       "1 2 mics/a.mrc\n")
+    assert not is_warp_particles(tmp_path / "spa.star")
+
+
+def test_warp_class3d_gets_the_tomogram_picks_tab(tmp_path):
+    project, rel = make_warp(tmp_path)
+    ctx = R.JobContext(project, "Class3D/job003/", "relion.class3d.tomo", "Succeeded",
+                       [(rel, "ParticleGroupMetadata.star.relion.class3d")],
+                       {"nr_classes": "2", "particle_diameter": "200"})
+    picks = [v for v in R.views_for(ctx) if v.title == "Picks"]
+    assert len(picks) == 1 and picks[0].kind == R.TOMOGRAMS and picks[0].args["picks"] == rel
+    assert picks[0].args["star"] == "" and picks[0].args["diameter"] == 200.0
+    # any job with Warp particles among its outputs
+    ctx = R.JobContext(project, "Select/job004/", "relion.select", "Succeeded",
+                       [(rel, "ParticleGroupMetadata.star.relion")])
+    assert [v.kind for v in R.views_for(ctx) if v.title == "Picks"] == [R.TOMOGRAMS]
+
+
+def test_warp_particles_on_their_tomograms(qtbot, tmp_path, settle):
+    from cryo_savanna.viewers.tomo_viewer import _WARP_FOLDERS, TomogramViewer
+    project, rel = make_warp(tmp_path)
+    v = show(qtbot, TomogramViewer(project, "", picks=rel, diameter=200))
+    settle()
+    assert v.warp and v.folder_btn.isVisible() and not v.napari.isEnabled()
+    assert v.set.names == ["TS_1.tomostar", "TS_2.tomostar"] and v.shape == (20, 40, 50) and v.voxel == 20.0
+    xyz = v.picks_voxels()
+    assert len(xyz) == 30 and np.allclose(xyz, v.picks.by_tomo["TS_1.tomostar"] / 2)
+    assert len(v.xz.dots.data) == 30 and len(v.canvas.points.data) == v.cut_count > 0
+    # TS_2 has no tomogram: nothing left on screen, and where it looked
+    v.select(1)
+    settle()
+    assert v.shape is None and len(v.canvas.points.data) == 0 and len(v.xz.dots.data) == 0
+    assert v.canvas.item.image is None and "No Warp tomogram for TS_2.tomostar" in v.info.text()
+    assert "warp_tiltseries" in v.info.text()
+    # back to one with a tomogram: the totals again
+    v.select(0)
+    settle()
+    assert v.shape == (20, 40, 50) and "40 particles" in v.info.text()
+    # a folder chosen for the missing one
+    other = tmp_path / "more" / "reconstruction"
+    other.mkdir(parents=True)
+    import mrcfile
+    with mrcfile.new(other / "TS_2_20.00Apx.mrc") as m:
+        m.set_data(np.ones((20, 40, 50), np.float32))
+        m.voxel_size = 20.0
+    try:
+        v.use_folder(str(tmp_path / "more"))
+        settle()
+        v.select(1)
+        settle()
+        assert v.shape == (20, 40, 50) and len(v.picks_voxels()) == 10
+    finally:
+        _WARP_FOLDERS.clear()

@@ -7,11 +7,19 @@ file and, after reconstruction, its tomograms) and one table per tilt series (on
 image: tilt angle, dose, defocus, CTF, motion, alignment). Particles carry ``rlnTomoName`` and
 coordinates in Å from the tomogram's centre (``rlnCenteredCoordinate[XYZ]Angst``; older files have
 ``rlnCoordinate[XYZ]`` in unbinned tilt-series pixels from the corner).
+
+Warp/M particles (WarpTools ts_export_particles, and what RELION writes after classifying or refining
+them) have no ``rlnTomoName``: their ``rlnMicrographName`` names the tilt series' ``.tomostar`` and
+``rlnCoordinate[XYZ]`` are pixels from the corner at the exported pixel size (``rlnPixelSize`` /
+``rlnDetectorPixelSize``, which RELION turns into the optics' ``rlnImagePixelSize``). Their tomograms
+are in Warp's processing folder (``reconstruction/<name>_<pixel size>Apx.mrc``), found from where the
+particles' subtomograms are, near the project, or in a folder the user names.
 """
 
 from __future__ import annotations
 
 import os
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -20,8 +28,8 @@ import numpy as np
 from cryo_savanna.images.mrc import ImageRef
 from cryo_savanna.project.star import loop_columns, read_star
 from cryo_savanna.results.curves import Curve, Figure
-from cryo_savanna.results.micrographs import CLASS, class_counts
-from cryo_savanna.results.tables import Table
+from cryo_savanna.results.micrographs import CLASS, MIC, class_counts
+from cryo_savanna.results.tables import Table, optics_value
 
 TOMO_NAME = "rlnTomoName"
 TOMOGRAM_COLUMNS = [  # (column, title)
@@ -206,6 +214,7 @@ class TomoPicks:
     centered_angst: bool = True  # else unbinned tilt-series pixels from the corner
     cls_by_tomo: dict[str, np.ndarray] | None = None  # tomogram -> rlnClassNumber of its particles
     classes: dict[int, int] = field(default_factory=dict)  # class -> particles
+    pixel_size: float | None = None  # Warp: corner coordinates in pixels of this size (Å), not tilt-series pixels
 
     def count(self, name: str, classes: set[int] | None = None) -> int:
         return int(self.in_classes(name, classes).sum())
@@ -227,6 +236,8 @@ class TomoPicks:
         if xyz is None or not len(xyz):
             return np.empty((0, 3))
         nz, ny, nx = shape
+        if self.pixel_size:
+            return xyz * (self.pixel_size / voxel)
         if self.centered_angst:
             return xyz / voxel + np.array([nx / 2, ny / 2, nz / 2])
         return xyz / (binning or 1.0)
@@ -240,11 +251,63 @@ def is_tomo_particles(path: str | os.PathLike) -> bool:
     return bool(cols) and TOMO_NAME in cols
 
 
+def _particle_block(path: str | os.PathLike) -> tuple[str, list[str]] | None:
+    """The particle table's block name and columns: ``particles``, or the one unnamed block of a
+    RELION 3 style file (as Warp writes them)."""
+    for block in ("particles", ""):
+        cols = columns_of(path, block)
+        if cols:
+            return block, cols
+    return None
+
+
+def _first_row(path: str | os.PathLike, block: str, labels: list[str]) -> dict[str, str]:
+    """Some values of a loop's first row, reading no further."""
+    from cryo_savanna.project.star import tokenize_line
+    target = f"data_{block}"
+    cols: list[str] = []
+    with open(path, "r", encoding="utf-8", errors="replace") as fh:
+        for raw in fh:
+            if raw.startswith("data_") and raw.split()[0] == target:
+                break
+        else:
+            return {}
+        for raw in fh:
+            line = raw.strip()
+            if not line or line[0] == "#" or line.startswith("loop_"):
+                continue
+            if line[0] == "_":
+                cols.append(line[1:].split()[0])
+                continue
+            if line.startswith("data_"):
+                return {}
+            toks = tokenize_line(line) if ('"' in line or "'" in line) else line.split()
+            return {lab: toks[cols.index(lab)] for lab in labels if lab in cols and cols.index(lab) < len(toks)}
+    return {}
+
+
+def is_warp_particles(path: str | os.PathLike) -> bool:
+    """Particles of Warp/M tomograms: named by their .tomostar (``rlnMicrographName``), with 3D
+    coordinates and no ``rlnTomoName``."""
+    try:
+        found = _particle_block(path)
+        if found is None:
+            return False
+        block, cols = found
+        if TOMO_NAME in cols or MIC not in cols or "rlnCoordinateZ" not in cols:
+            return False
+        return _first_row(path, block, [MIC]).get(MIC, "").endswith(WARP_SUFFIX)
+    except OSError:
+        return False
+
+
 def read_tomo_picks(project_dir: str | os.PathLike, star_rel: str) -> TomoPicks:
     path = Path(project_dir) / star_rel
     centred = ["rlnCenteredCoordinateXAngst", "rlnCenteredCoordinateYAngst", "rlnCenteredCoordinateZAngst"]
     corner = ["rlnCoordinateX", "rlnCoordinateY", "rlnCoordinateZ"]
     r = loop_columns(path, "particles", [TOMO_NAME] + centred + corner + [CLASS])
+    if (r is None or TOMO_NAME not in r[1]) and is_warp_particles(path):
+        return read_warp_picks(project_dir, star_rel)
     if r is None or TOMO_NAME not in r[1]:
         raise ValueError(f"{star_rel}: no tomogram particles (rlnTomoName)")
     t = Table("particles", list(r[1]), r[1])
@@ -257,6 +320,150 @@ def read_tomo_picks(project_dir: str | os.PathLike, star_rel: str) -> TomoPicks:
     cls = t.numeric(CLASS).astype(int) if t.has(CLASS) else None
     cls_by = {k: cls[names == k] for k in by} if cls is not None else None
     return TomoPicks(star_rel, by, cols is centred, cls_by, class_counts(cls))
+
+
+WARP_SUFFIX = ".tomostar"
+WARP_PIXEL_LABELS = ["rlnPixelSize", "rlnDetectorPixelSize", "rlnMagnification", "rlnImageName"]
+
+
+def _warp_pixel_size(path: Path, block: str, first: dict[str, str]) -> float | None:
+    """The pixel size of a Warp particle file's coordinates (Å): the exported pixel size."""
+    def num(v) -> float | None:
+        try:
+            f = float(v)
+        except (TypeError, ValueError):
+            return None
+        return f if f > 0 else None
+    # Warp writes it per particle, rlnMagnification 10000 making rlnDetectorPixelSize (µm) the pixel size
+    px = num(first.get("rlnPixelSize"))
+    det, mag = num(first.get("rlnDetectorPixelSize")), num(first.get("rlnMagnification"))
+    if px is None and det and mag:
+        px = det * 1e4 / mag
+    if px is None:  # RELION moved it to the optics
+        px = optics_value(path, "rlnImagePixelSize") or optics_value(path, "rlnMicrographOriginalPixelSize")
+    if px is None:
+        det, mag = optics_value(path, "rlnDetectorPixelSize"), optics_value(path, "rlnMagnification")
+        px = det * 1e4 / mag if det and mag else None
+    return px
+
+
+def read_warp_picks(project_dir: str | os.PathLike, star_rel: str) -> TomoPicks:
+    path = Path(project_dir) / star_rel
+    found = _particle_block(path)
+    if found is None:
+        raise ValueError(f"{star_rel}: no particles")
+    block = found[0]
+    corner = ["rlnCoordinateX", "rlnCoordinateY", "rlnCoordinateZ"]
+    r = loop_columns(path, block, [MIC] + corner + [CLASS])
+    if r is None or MIC not in r[1] or not all(c in r[1] for c in corner):
+        raise ValueError(f"{star_rel}: no particle coordinates")
+    px = _warp_pixel_size(path, block, _first_row(path, block, WARP_PIXEL_LABELS))
+    if px is None:
+        raise ValueError(f"{star_rel}: no pixel size for the coordinates (rlnPixelSize, rlnImagePixelSize)")
+    t = Table(block, list(r[1]), r[1])
+    xyz = np.stack([t.numeric(c) for c in corner], axis=1)
+    names = np.array(t.column(MIC))
+    by = {str(n): xyz[names == n] for n in dict.fromkeys(names.tolist())}
+    cls = t.numeric(CLASS).astype(int) if t.has(CLASS) else None
+    cls_by = {k: cls[names == k] for k in by} if cls is not None else None
+    return TomoPicks(star_rel, by, False, cls_by, class_counts(cls), pixel_size=px)
+
+
+def _warp_series(name: str) -> str:
+    base = os.path.basename(name)
+    return base[: -len(WARP_SUFFIX)] if base.endswith(WARP_SUFFIX) else base
+
+
+def _subdirs(d: Path) -> list[Path]:
+    try:
+        return [e for e in d.iterdir() if e.is_dir() and not e.name.startswith(".")]
+    except OSError:
+        return []
+
+
+def warp_reconstruction_dirs(project_dir: Path, image: str = "", folders: list[str] | None = None) -> list[Path]:
+    """Folders that may hold Warp's tomograms, most likely first: a folder the user named (itself, or
+    its ``reconstruction``), the processing folder the particles' subtomograms are in (an ancestor of
+    ``rlnImageName`` with a ``reconstruction`` folder), and processing folders in or next to the project."""
+    out: list[Path] = []
+
+    def add(d: Path) -> None:
+        d = Path(os.path.normpath(d))
+        if d not in out and d.is_dir():
+            out.append(d)
+
+    for f in folders or []:
+        d = Path(f)
+        add(d / "reconstruction")
+        add(d)
+    if image:
+        p = Path(image.split("@", 1)[-1])
+        p = p if p.is_absolute() else project_dir / p
+        for a in list(p.parents)[:6]:
+            if (a / "reconstruction").is_dir():
+                add(a / "reconstruction")
+                break
+    for base in (project_dir, project_dir.parent):
+        add(base / "reconstruction")
+        for sub in _subdirs(base):
+            if (sub / "reconstruction").is_dir():
+                add(sub / "reconstruction")
+    return out
+
+
+def _warp_tomogram_in(d: Path, series: str, files: list[str]) -> str | None:
+    """``<series>_<pixel size>Apx.mrc`` (the coarsest one, quickest to show), else ``<series>.mrc``."""
+    pat = re.compile(re.escape(series) + r"_(\d+(?:\.\d+)?)Apx\.mrc$")
+    sized = [(float(m.group(1)), f) for f in files if (m := pat.match(f))]
+    if sized:
+        return str(d / max(sized)[1])
+    return str(d / f"{series}.mrc") if f"{series}.mrc" in files else None
+
+
+def _listing(d: Path, cache: dict[Path, list[str]]) -> list[str]:
+    if d not in cache:
+        try:
+            cache[d] = os.listdir(d)
+        except OSError:
+            cache[d] = []
+    return cache[d]
+
+
+def warp_tomogram_set(project_dir: str | os.PathLike, picks: TomoPicks, star_rel: str,
+                      folders: list[str] | None = None) -> tuple[TiltSeriesSet, list[Path]]:
+    """The tomograms of Warp particles, as a tomogram set (one row per .tomostar, its tomogram or
+    "None"), and the folders searched. Denoised and even/odd half tomograms come along when they are
+    in ``denoised``, ``even`` and ``odd`` next to the tomogram."""
+    project_dir = Path(project_dir)
+    path = project_dir / star_rel
+    found = _particle_block(path)
+    image = _first_row(path, found[0], ["rlnImageName"]).get("rlnImageName", "") if found else ""
+    dirs = warp_reconstruction_dirs(project_dir, image, folders)
+    listings: dict[Path, list[str]] = {}
+    kinds = {"rlnTomoReconstructedTomogram": "", "rlnTomoReconstructedTomogramDenoised": "denoised",
+             "rlnTomoReconstructedTomogramHalf1": "even", "rlnTomoReconstructedTomogramHalf2": "odd"}
+    data: dict[str, list[str]] = {TOMO_NAME: [], **{c: [] for c in kinds}}
+    for name in picks.by_tomo:
+        series = _warp_series(name)
+        direct = project_dir / name
+        rec = str(direct) if name.endswith((".mrc", ".rec")) and direct.is_file() else None
+        for d in dirs:
+            if rec:
+                break
+            rec = _warp_tomogram_in(d, series, _listing(d, listings))
+        data[TOMO_NAME].append(name)
+        for col, sub in kinds.items():
+            if rec is None:
+                data[col].append("None")
+            elif not sub:
+                data[col].append(rec)
+            else:
+                other = Path(rec).parent / sub / Path(rec).name
+                data[col].append(str(other) if other.is_file() else "None")
+    cols = [TOMO_NAME] + [c for c in kinds if c == "rlnTomoReconstructedTomogram" or
+                          any(v != "None" for v in data[c])]
+    table = Table("global", cols, {c: data[c] for c in cols})
+    return TiltSeriesSet(project_dir, star_rel, table), dirs
 
 
 def tomograms_for_particles(project_dir: Path, particles_rel: str, options: dict[str, str]) -> str | None:

@@ -17,7 +17,14 @@ from pathlib import Path
 from cryo_savanna.project.summary import base_type
 from cryo_savanna.project.selection import interactive_kind
 from cryo_savanna.results.classes import data_star_for, iterations, latest_iteration_maps
-from cryo_savanna.results.tomo import TOMO_NAME, columns_of, has_tomograms, is_tomo_particles, tomograms_for_particles
+from cryo_savanna.results.tomo import (
+    TOMO_NAME,
+    columns_of,
+    has_tomograms,
+    is_tomo_particles,
+    is_warp_particles,
+    tomograms_for_particles,
+)
 
 # viewer kinds
 MICROGRAPHS = "micrographs"  # list + image (+ CTF spectrum / motion track / picks)
@@ -121,8 +128,9 @@ def tomo_pick_diameter(ctx: JobContext) -> float | None:
 
 def class_job_particles(ctx: JobContext) -> str | None:
     """The micrograph particles of an SPA classification job with several classes, for its Picks tab: its
-    output, else (while it runs) those of its latest iteration. Tomography particles get theirs as any
-    tomogram particles do."""
+    output, else (while it runs) those of its latest iteration. Also Warp particles (named by their
+    .tomostar, which have rlnMicrographName too): those are shown on their tomograms. RELION
+    tomography particles get theirs as any tomogram particles do."""
     try:
         if int(ctx.options.get("nr_classes", "1")) < 2:
             return None
@@ -225,7 +233,11 @@ def views_for(ctx: JobContext) -> list[ViewSpec]:
             add(ANGLES, "Angular distribution", job=ctx.name)
     if t in ("relion.class2d", "relion.class3d", "relion.initialmodel"):
         parts = class_job_particles(ctx)
-        if parts:
+        if parts and is_warp_particles(ctx.project_dir / parts):
+            # Warp particles: on the tomograms Warp reconstructed (no RELION tomogram set)
+            add(TOMOGRAMS, "Picks", star="", picks=parts, diameter=tomo_pick_diameter(ctx))
+            seen_files.discard(parts)
+        elif parts:
             # the particles on their micrographs, with the classes to show; no micrograph list in a
             # particle file, so the micrographs it names
             add(MICROGRAPHS, "Picks", picks=parts, diameter=_float(ctx.options.get("particle_diameter")))
@@ -263,6 +275,10 @@ def views_for(ctx: JobContext) -> list[ViewSpec]:
     tomo_parts = [n for n, nt in ctx.outputs if nt.split(".", 1)[0] == "ParticleGroupMetadata"
                   and n not in seen_files and ctx.exists(n) and is_tomo_particles(ctx.project_dir / n)]
     newest_parts = max(tomo_parts, key=lambda n: (ctx.project_dir / n).stat().st_mtime_ns, default=None)
+    warp_parts = [n for n, nt in ctx.outputs if nt.split(".", 1)[0] == "ParticleGroupMetadata"
+                  and n not in seen_files and n not in tomo_parts and ctx.exists(n)
+                  and is_warp_particles(ctx.project_dir / n)]
+    newest_warp = max(warp_parts, key=lambda n: (ctx.project_dir / n).stat().st_mtime_ns, default=None)
     for node, nt in ctx.outputs:
         kind = nt.split(".", 1)[0]
         if node in seen_files or not ctx.exists(node):
@@ -277,6 +293,8 @@ def views_for(ctx: JobContext) -> list[ViewSpec]:
             if tomograms:
                 add(TOMOGRAMS, "Picks", star=tomograms, picks=node, diameter=tomo_pick_diameter(ctx))
         elif kind == "ParticleGroupMetadata":
+            if node == newest_warp:
+                add(TOMOGRAMS, "Picks", star="", picks=node, diameter=tomo_pick_diameter(ctx))
             add(PARTICLES, "Particles" if not any(v.title == "Particles" for v in views) else os.path.basename(node),
                 star=node)
         elif kind == "MicrographGroupMetadata":

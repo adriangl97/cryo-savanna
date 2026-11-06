@@ -12,6 +12,10 @@ binned copy, with the slab's position; particles drawn as circles where the slab
 away from their centre); denoised and raw side by side.
 
 Both open RELION's own napari viewer (relion_python_tomo_view) for the same files.
+
+Warp/M particles (named by their .tomostar, no RELION tomogram set) come with the tomograms Warp
+reconstructed: found by themselves, or in a folder chosen with "Tomograms folder…" (kept for the
+session, per project).
 """
 
 from __future__ import annotations
@@ -26,6 +30,7 @@ from qtpy.QtWidgets import (
     QCheckBox,
     QComboBox,
     QDoubleSpinBox,
+    QFileDialog,
     QHBoxLayout,
     QLabel,
     QPushButton,
@@ -48,6 +53,7 @@ from cryo_savanna.results.tomo import (
     read_tomo_picks,
     series_summary,
     tilt_figures,
+    warp_tomogram_set,
 )
 from cryo_savanna.viewers.class_filter import ClassFilter
 from cryo_savanna.viewers.external import launch_detached, napari_command
@@ -55,6 +61,9 @@ from cryo_savanna.viewers.image_canvas import ImageCanvas
 from cryo_savanna.viewers.plots import FigureGrid
 from cryo_savanna.viewers.star_table import RowFilter, TableModel, make_table_view
 from cryo_savanna.viewers.tasks import TaskError, Tasks
+
+
+_WARP_FOLDERS: dict[str, list[str]] = {}  # project -> folders chosen for Warp's tomograms, this session
 
 
 def _stamp(path: Path):
@@ -360,6 +369,13 @@ class TomogramViewer(QWidget):
         self.classes = ClassFilter()  # shown for particles of several classes (Class3D, ...)
         self.classes.changed.connect(self._on_classes)
         self.napari = NapariButton(self.project_dir, self._report)
+        self.warp = False  # Warp particles: the tomograms are Warp's, found near the particles
+        self.searched: list[Path] = []
+        self._missing = False  # the info line says a tomogram was not found
+        self.folder_btn = QPushButton("Tomograms folder…")
+        self.folder_btn.setToolTip("The folder with Warp's tomograms (its processing folder, or its reconstruction folder)")
+        self.folder_btn.clicked.connect(self._choose_folder)
+        self.folder_btn.hide()
         self.info = QLabel("Reading…")
 
         bar = QHBoxLayout()
@@ -367,6 +383,7 @@ class TomogramViewer(QWidget):
         for w in (self.kind, self.compare, self.slab, self.sigma, self.show_picks, self.diameter, self.classes):
             bar.addWidget(w)
         bar.addStretch(1)
+        bar.addWidget(self.folder_btn)
         bar.addWidget(self.napari)
         zbar = QHBoxLayout()
         zbar.setContentsMargins(0, 0, 0, 0)
@@ -422,11 +439,16 @@ class TomogramViewer(QWidget):
     def load(self) -> None:
         project, star, picks = self.project_dir, self.star, self.picks_rel
         self._stamps = self._watched()
+        folders = list(_WARP_FOLDERS.get(str(project), []))
 
         def read():
-            ts = read_tilt_series_set(project, star)
             pk = read_tomo_picks(project, picks) if picks else None
-            return ts, pk
+            if star:
+                return read_tilt_series_set(project, star), pk, None
+            if pk is not None and pk.pixel_size:  # Warp particles: no tomogram set, Warp's tomograms
+                ts, searched = warp_tomogram_set(project, pk, picks, folders)
+                return ts, pk, searched
+            raise ValueError(f"{picks}: no tomograms for these particles")
 
         self.tasks.run(read, self._on_loaded, channel="load")
 
@@ -438,7 +460,9 @@ class TomogramViewer(QWidget):
         if isinstance(result, TaskError):
             self.info.setText(f"⚠ {result}")
             return
-        ts, picks = result
+        ts, picks, searched = result
+        self.warp, self.searched = searched is not None, searched or []
+        self.folder_btn.setVisible(self.warp)
         keep = self.set.names[self.current] if self.set is not None and 0 <= self.current < len(self.set) else None
         self.set, self.picks = ts, picks
         self.kind.blockSignals(True)
@@ -460,9 +484,12 @@ class TomogramViewer(QWidget):
         else:
             self.info.setText(f"{len(ts)} tomograms   ·   {self.star}")
         self.table.resizeColumnsToContents()
-        cmd = napari_command("particles", self.picks_rel, self.star) if self.picks_rel else \
-            napari_command("tomograms", self.star)
-        self.napari.set_command(cmd)
+        if self.warp:
+            self.napari.set_command(None, "RELION's napari viewer needs a RELION tomogram set (rlnTomoName)")
+        else:
+            cmd = napari_command("particles", self.picks_rel, self.star) if self.picks_rel else \
+                napari_command("tomograms", self.star)
+            self.napari.set_command(cmd)
         row = ts.names.index(keep) if keep in ts.names else 0
         if len(ts):
             self.select(row)
@@ -472,6 +499,20 @@ class TomogramViewer(QWidget):
         if idx.isValid():
             self.table.setCurrentIndex(idx)
 
+    def _choose_folder(self) -> None:
+        start = str(self.searched[0].parent if self.searched else self.project_dir)
+        d = QFileDialog.getExistingDirectory(self, "Folder with Warp's tomograms", start)
+        if d:
+            self.use_folder(d)
+
+    def use_folder(self, folder: str) -> None:
+        """Look for Warp's tomograms in this folder first (for this project, this session)."""
+        folders = _WARP_FOLDERS.setdefault(str(self.project_dir), [])
+        if folder in folders:
+            folders.remove(folder)
+        folders.insert(0, folder)
+        self.load()
+
     def _on_row(self, cur, _prev) -> None:
         if cur.isValid():
             self.current = self.proxy.mapToSource(cur).row()
@@ -480,14 +521,36 @@ class TomogramViewer(QWidget):
     def _ref(self, column: str | None = None) -> ImageRef | None:
         if self.set is None or self.current < 0:
             return None
-        return self.set.tomogram(self.current, column or self.kind.currentData())
+        ref = self.set.tomogram(self.current, column or self.kind.currentData())
+        if ref is None and column is None:  # not of the kind chosen (e.g. one not denoised): another one
+            ref = next((r for c, _ in self.set.tomogram_kinds()
+                        if (r := self.set.tomogram(self.current, c)) is not None), None)
+        return ref
 
     def _show_current(self) -> None:
         ref = self._ref()
         if ref is None:
-            self.canvas.set_image(None)
-            self.info.setText("This tomogram has not been reconstructed")
+            self.tasks.cancel("geometry")
+            self.tasks.cancel("slab")
+            self.shape, self.side_data = None, None
+            for c in (self.canvas, self.raw):
+                c.set_image(None)
+            for sv in (self.xz, self.yz):
+                sv.img.prepareGeometryChange()
+                sv.img.clear()
+            self._draw_picks()  # none: no tomogram to place them in
+            if self.warp and self.set is not None and 0 <= self.current < len(self.set):
+                looked = ", ".join(str(d) for d in self.searched) or "nowhere: no processing folder found"
+                self._missing = True
+                self.info.setText(f"No Warp tomogram for {self.set.names[self.current]} (looked in: {looked}). "
+                                  "Choose the folder with “Tomograms folder…”")
+            else:
+                self.info.setText("This tomogram has not been reconstructed")
             return
+        if self._missing:  # back to the totals
+            self._missing = False
+            if self.picks is not None and self.set is not None:
+                self._count_picks()
         compare = self.compare.isVisible() and self.compare.isChecked() and \
             self.kind.currentData() == "rlnTomoReconstructedTomogramDenoised"
         self.raw.setVisible(compare)
@@ -602,6 +665,7 @@ class TomogramViewer(QWidget):
             for c in (self.canvas, self.raw):
                 c.set_points([], [], 1)
             for s in (self.xz, self.yz):
+                s.dots.prepareGeometryChange()  # see ImageCanvas.set_points
                 s.dots.clear()
             return
         r = self.diameter.value() / 2 / self.voxel
@@ -617,6 +681,8 @@ class TomogramViewer(QWidget):
             brush = [brushes[c] for c in colors]
         else:
             brush = pg.mkBrush(*colors, 160)
+        for s in (self.xz, self.yz):
+            s.dots.prepareGeometryChange()
         self.xz.dots.setData(x=xyz[:, 0], y=xyz[:, 2], brush=brush)
         self.yz.dots.setData(x=xyz[:, 1], y=xyz[:, 2], brush=brush)
         self.cut_count = int(cut.sum())
