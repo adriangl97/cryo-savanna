@@ -43,6 +43,7 @@ from cryo_savanna.project.jobstar import JobStar, read_last_used
 from cryo_savanna.project.ops import OpsError, PipelineOps
 from cryo_savanna.project.pipeline import Pipeline
 from cryo_savanna.project.pipeliner import Pipeliner, PipelinerError
+from cryo_savanna.project.rebuild import RebuildError
 from cryo_savanna.project.scratch import ENV_VAR as SCRATCH_VAR
 from cryo_savanna.project.scratch import SCRATCH_KEY
 from cryo_savanna.project.scratch import assign as assign_scratch
@@ -106,7 +107,7 @@ class _Task(QRunnable):
     def run(self) -> None:
         try:
             result = self.fn()
-        except (OpsError, PipelinerError) as e:
+        except (OpsError, PipelinerError, RebuildError) as e:
             self.signals.error.emit(str(e))
         except Exception as e:  # anything else: report, never kill the GUI
             self.signals.error.emit(f"{type(e).__name__}: {e}")
@@ -273,6 +274,9 @@ class JobActions(QObject):
         self.act_delete = self._act("Delete…", lambda: self.delete(False), "Del", "Move the job to Trash/")
         self.act_delete_all = self._act("Delete with all downstream jobs…", lambda: self.delete(True))
         self.act_undelete = self._act("Undelete…", self.undelete, tip="Put a job back from Trash/")
+        self.act_import = self._act("Add jobs run outside the pipeline…", self.import_jobs,
+                                    tip="Add job folders the pipeline does not have (jobs run from the command line), "
+                                        "read from their job.star and logs")
         self.tools: list[QMainWindow] = []  # open selection windows
 
         self.cli_menu = QMenu("CLI tools", self.window)
@@ -394,6 +398,7 @@ class JobActions(QObject):
         self.act_gentle.setEnabled(writable and has_pipeliner and info is not None and status != "Running")
         self.act_harsh.setEnabled(self.act_gentle.isEnabled())
         self.act_undelete.setEnabled(writable and self._has_trash)
+        self.act_import.setEnabled(writable)
         self.act_star.setEnabled(info is not None)  # read-only too: for the session only (project/stars.py)
         self.act_star.setChecked(info is not None and info.starred)
         self.editor.set_permissions(self.readonly, has_pipeliner, why)
@@ -986,6 +991,22 @@ class JobActions(QObject):
         if QMessageBox.question(self.window, "Delete", text) != QMessageBox.Yes:
             return
         self._run(f"Delete {self._label(job)}", lambda: self.ops.delete(job, recursive))
+
+    def import_jobs(self) -> None:
+        """Project → Add jobs run outside the pipeline: job folders the pipeline lacks, reviewed, then added."""
+        from cryo_savanna.project.rebuild import write_pipeline
+        from cryo_savanna.ui.rebuild_dialog import run_rebuild
+
+        project = self.project_dir
+
+        def write(result, jobs, statuses):
+            def done(added):
+                if added:
+                    self.select.emit(added[-1])
+            self._run(f"Add {len(jobs)} job(s)", lambda: write_pipeline(project, result, jobs, statuses), done)
+
+        run_rebuild(project, self.defs, new=False, pipeline=self.snapshot.pipeline if self.snapshot else None,
+                    type_names=self.type_names, parent=self.window, write=write)
 
     def undelete(self) -> None:
         entries = self.ops.trash()

@@ -35,6 +35,7 @@ from cryo_savanna.env.relion_env import RelionEnv, relion_version, version_warni
 from cryo_savanna.images.cache import ThumbCache
 from cryo_savanna.jobdefs.model import JobDefs
 from cryo_savanna.project.main_inputs import MainInputs
+from cryo_savanna.project.rebuild import find_job_dirs
 from cryo_savanna.project.slurm import QueueState, SlurmClient, SlurmError, SlurmMonitor
 from cryo_savanna.project.snapshot import ProjectLoader, ProjectSnapshot, job_type_names
 from cryo_savanna.project.stars import Stars
@@ -45,6 +46,7 @@ from cryo_savanna.ui.job_graph import JobGraphView
 from cryo_savanna.ui.job_info import JobInfoPanel
 from cryo_savanna.ui.job_tree import STATUS_FILTERS, JobTreeView
 from cryo_savanna.ui.log_panel import LogPanel
+from cryo_savanna.ui.rebuild_dialog import ask_generate, run_rebuild
 from cryo_savanna.ui.preferences import (
     PreferencesDialog,
     TextDialog,
@@ -289,7 +291,8 @@ class MainWindow(QMainWindow):
 
         mb = self.menuBar()
         project = mb.addMenu("Project")
-        for a in (self.act_open, self.act_refresh, None, self.actions.act_undelete, None, self.act_prefs, None, act_quit):
+        for a in (self.act_open, self.act_refresh, None, self.actions.act_import, self.actions.act_undelete, None,
+                  self.act_prefs, None, act_quit):
             project.addSeparator() if a is None else project.addAction(a)
         mb.addMenu(self.actions.job_menu)
         mb.addMenu(self.actions.cli_menu)
@@ -398,9 +401,7 @@ class MainWindow(QMainWindow):
         root = Path(project_dir).resolve()
         loader = ProjectLoader(project_dir, self.defs, main_inputs=MainInputs(root, persist=not self.readonly),
                                stars=Stars(root, persist=not self.readonly))
-        if not loader.is_project():
-            QMessageBox.warning(self, "Not a RELION project",
-                                f"{loader.project_dir} has no {loader.pipeline_path.name}.")
+        if not loader.is_project() and not self._generate_pipeline(loader.project_dir):
             if self.snapshot is None:
                 self._update_status()
             return
@@ -738,6 +739,17 @@ class MainWindow(QMainWindow):
         statuses = STATUS_FILTERS[self.status_filter.currentText()]
         self.tree.set_filter(self.search.text(), statuses, self.hide_failed.isChecked(), self.starred_only.isChecked())
         self.graph.set_dimmed(None if not self.tree.proxy.is_active() else set(self.tree.visible_jobs()))
+
+    def _generate_pipeline(self, folder: Path) -> bool:
+        """A folder without default_pipeline.star: if it has job folders, offer to generate one from them.
+        True when the folder has a pipeline now."""
+        jobs = find_job_dirs(folder)
+        if not jobs:
+            QMessageBox.warning(self, "Not a RELION project", f"{folder} has no default_pipeline.star.")
+            return False
+        if ask_generate(folder, len(jobs), self.readonly, self, other_folder=False) != "generate":
+            return False
+        return run_rebuild(folder, self.defs, new=True, type_names=self.type_names, parent=self) is not None
 
     def _choose_project(self) -> None:
         start = str(self.loader.project_dir) if self.snapshot else str(Path.cwd())

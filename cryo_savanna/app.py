@@ -63,6 +63,9 @@ def print_info(project: Path, tomo: bool) -> int:
     print(f"job menu ({'tomo' if tomo else 'SPA'}): {', '.join(label for label, _ in defs.menu(tomo))}\n")
     if pipeline is None:
         print(f"{project} has no default_pipeline.star (not a RELION project)")
+        from cryo_savanna.project.rebuild import find_job_dirs
+        if find_job_dirs(project):
+            print("It has RELION job folders: open it in the window to generate default_pipeline.star from them.")
         return 1
     print_tree(pipeline, project, defs)
     return 0
