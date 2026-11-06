@@ -117,7 +117,7 @@ class ImageCanvas(QWidget):
         self.detail.hide()
         if ref is None:
             self.tasks.cancel("image")
-            self.item.clear()
+            self._clear_image()
             self.preview = None
             self._show_message("")
             return
@@ -144,7 +144,7 @@ class ImageCanvas(QWidget):
     def _on_preview(self, ref, result, keep_view: bool) -> None:
         if isinstance(result, TaskError):
             self.error = str(result)
-            self.item.clear()
+            self._clear_image()
             self.preview = None
             self._show_message(self.error)
             self.info.setText("")
@@ -167,6 +167,13 @@ class ImageCanvas(QWidget):
             name = f"{ref.index + 1}@{name}"
         self.info.setText(f"{name}   {full[1]}×{full[0]}" + (f"   (shown at 1/{factor:.1f})" if factor > 1.01 else ""))
         self.loaded.emit()
+
+    def _clear_image(self) -> None:
+        # ImageItem.clear() empties its bounds before prepareGeometryChange (as the points do): mark the
+        # old image's area first, so the previous image does not stay on screen
+        self.item.prepareGeometryChange()
+        self.item.clear()
+        self.detail.hide()
 
     def _show_message(self, text: str) -> None:
         self.message.setText(text)
@@ -237,6 +244,10 @@ class ImageCanvas(QWidget):
     def set_points(self, x: np.ndarray, y: np.ndarray, diameter, color=(60, 220, 60)) -> None:
         """Circles of the given diameter (image pixels; one for all, or one per point) centred on (x, y),
         in one colour or one per point (a list of colours)."""
+        # pyqtgraph drops the old points' bounds before telling Qt the geometry changes, so Qt would
+        # repaint only the new area: where the old circles were stays on screen unless something
+        # else covers it (an image that failed to load does not)
+        self.points.prepareGeometryChange()
         if len(x) == 0:
             self.points.clear()
             return
