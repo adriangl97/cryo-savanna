@@ -73,7 +73,7 @@ def run_gui(project: Path, tomo: bool | None, readonly: bool, poll_s: float | No
     # Plain raster rendering: no OpenGL over X11 forwarding (for cryo-savanna only: env/child.py)
     child.override("QT_XCB_GL_INTEGRATION", "none")
     try:
-        from qtpy.QtWidgets import QApplication, QFileDialog
+        from qtpy.QtWidgets import QApplication
     except ImportError as e:  # pip install without the [gui] extra
         print(f"cryo-savanna: the window needs Qt ({e}). Install it with environment.yml, or "
               "pip install 'cryo-savanna[gui]'; --print-tree works without it.", file=sys.stderr)
@@ -81,17 +81,16 @@ def run_gui(project: Path, tomo: bool | None, readonly: bool, poll_s: float | No
 
     from cryo_savanna.ui import gc_guard
     from cryo_savanna.ui.main_window import MainWindow
+    from cryo_savanna.ui.start_project import choose_project
 
     app = QApplication.instance() or QApplication(sys.argv[:1])
     gc_guard.install(app)  # garbage collected in a reading thread can deadlock with the GUI thread
     app.setApplicationName("cryo-savanna")
     app.setStyle("Fusion")
-    if not (project / "default_pipeline.star").exists():
-        d = QFileDialog.getExistingDirectory(None, "Open RELION project (folder with default_pipeline.star)",
-                                             str(project))
-        if not d:
-            return 1
-        project = Path(d)
+    chosen = choose_project(project, readonly)  # not a project: start one here, open another, or close
+    if chosen is None:
+        return 0
+    project = chosen
     win = MainWindow(project, tomo=tomo, readonly=readonly, poll_s=poll_s, queue_poll_s=queue_poll_s)
     win.show()
     rc = app.exec()

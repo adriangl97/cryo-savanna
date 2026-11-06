@@ -112,6 +112,8 @@ RELION_OUTPUT_NODES = "RELION_OUTPUT_NODES.star"
 # Project-level files
 PIPELINE_HAS_CHANGED = ".pipeline_has_changed"
 LOCK_DIR = ".relion_lock"
+GUI_PROJECTDIR = ".gui_projectdir"  # RELION's GUI marks a project directory with it
+TMP_RUNFILES = ".TMP_runfiles"  # made by RELION's GUI for a new project (for the CCP-EM pipeliner)
 
 # JobOption kinds (JOBOPTION_* in pipeline_jobs.h)
 JOBOPTION_KINDS = {

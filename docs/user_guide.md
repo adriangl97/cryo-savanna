@@ -17,6 +17,12 @@ cryo-savanna --print-tree         # no window: the RELION environment and the jo
 savanna                           # short name alias
 ```
 
+Started in a folder that is not a RELION project (no `default_pipeline.star`), it asks, as RELION's
+GUI does, whether to start a new project there; or it can open a different folder, or close. A new
+project is made by the installed RELION (`relion --do_projdir`, whose window shows for a second), or,
+without `relion` on PATH, by cryo-savanna writing the same files (`.gui_projectdir`, `.TMP_runfiles/`
+and an empty `default_pipeline.star`). With `--readonly` no project is started.
+
 Over `ssh -X` it needs no OpenGL; images are reduced to the size they are shown at before they are
 sent, so a slow connection stays usable.
 
