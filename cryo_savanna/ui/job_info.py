@@ -29,6 +29,7 @@ from qtpy.QtWidgets import (
 
 from cryo_savanna.env.relion_env import RelionEnv, RelionEnvError
 from cryo_savanna.jobdefs.model import JobDefs
+from cryo_savanna.jobdefs.pytom_jobs import PytomCatalog, decode, pytom_kind_of
 from cryo_savanna.project.jobstar import JobStar
 from cryo_savanna.project.snapshot import ProjectSnapshot, stamp
 from cryo_savanna.results.registry import MICROGRAPHS, TABLE_PLOT, JobContext, ViewSpec, context_for, views_for
@@ -71,6 +72,7 @@ class JobInfoPanel(QTabWidget):
         self._job: str | None = None
         self._jobstar: JobStar | None = None
         self._jobstar_error = ""
+        self._jobstar_stamp = None  # job.star's (mtime, size) when read: a Continue writes it again
         self.queue = None  # slurm.QueueState
         self.history: dict[str, list | str] = {}  # job -> its SLURM jobs (slurm.AcctJob), or an error
         self.main_inputs = None  # project.main_inputs.MainInputs: the main inputs chosen in cryo-savanna
@@ -114,9 +116,12 @@ class JobInfoPanel(QTabWidget):
             self.options.clear()
             self._set_viewers(None)
             return
-        if reload_options or self._jobstar is None:
+        path = snap.project_dir / name / "job.star"
+        st = stamp(path)  # the same job with a new job.star (continued, overwritten): read it again
+        if reload_options or self._jobstar is None or st != self._jobstar_stamp:
+            self._jobstar_stamp = st
             try:
-                self._jobstar, self._jobstar_error = JobStar.read(snap.project_dir / name / "job.star"), ""
+                self._jobstar, self._jobstar_error = JobStar.read(path), ""
             except (OSError, ValueError, KeyError) as e:
                 self._jobstar, self._jobstar_error = None, str(e)
             self._fill_options()
@@ -351,8 +356,9 @@ class JobInfoPanel(QTabWidget):
         js = self._jobstar
         if js is None:
             return
-        try:
-            variant = self.defs.variant_for_jobstar(js)
+        kind = pytom_kind_of(js)
+        try:  # a pytom job: its own form, as in the editor, not External's fields
+            variant = PytomCatalog(self.defs, self.env).variant(kind) if kind else self.defs.variant_for_jobstar(js)
         except KeyError as e:
             QTreeWidgetItem(self.options, [f"Unknown job type: {e}"])
             return
@@ -375,7 +381,7 @@ class JobInfoPanel(QTabWidget):
                     if o is None:
                         continue
                     value = values.get(key, "")
-                    changed = key in js.options and value != o.default
+                    changed = (kind is not None or key in js.options) and value != o.default
                     if only_changed and not changed:
                         continue
                     it = QTreeWidgetItem(tab_item, [o.label.strip().rstrip(":").strip() or key, value, o.default])
@@ -390,9 +396,14 @@ class JobInfoPanel(QTabWidget):
             if tab_item.childCount():
                 self.options.addTopLevelItem(tab_item)
         if ignored:
-            extra = QTreeWidgetItem([f"Not defined in RELION {self.defs.version}"])
+            if kind:  # --key value pairs in "Additional arguments" that this form does not have
+                given = decode(js.options.get("other_args", ""))[0]
+                extra = QTreeWidgetItem(["Not options of this form"])
+            else:
+                given = js.options
+                extra = QTreeWidgetItem([f"Not defined in RELION {self.defs.version}"])
             for k in ignored:
-                QTreeWidgetItem(extra, [k, js.options[k], ""])
+                QTreeWidgetItem(extra, [k, given.get(k, ""), ""])
             self.options.addTopLevelItem(extra)
         self.options.expandAll()
         self.options.resizeColumnToContents(1)

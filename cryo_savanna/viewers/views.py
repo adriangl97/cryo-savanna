@@ -666,6 +666,13 @@ def build_view(spec: R.ViewSpec, ctx: R.JobContext, cache: ThumbCache | None, re
         if spec.kind == R.CTF_CHANGES:
             return V.CtfChangesView(project, a["star"], a.get("input", ""))
         return V.AberrationsView(project, a["job"], a.get("star", ""))
+    if spec.kind in (R.PYTOM_SCORES, R.PYTOM_THRESHOLDS, R.SVG_PLOTS):
+        from cryo_savanna.viewers import pytom_view as V
+        if spec.kind == R.PYTOM_SCORES:
+            return V.PytomScoresView(project, a["job"])
+        if spec.kind == R.PYTOM_THRESHOLDS:
+            return V.PytomThresholdView(project, a["job"], a.get("summary", ""), a.get("diameter"), cache)
+        return V.SvgPlotsView(project, a["job"], a.get("folder", "plots"))
     if spec.kind == R.FILES:
         return FilesView(project, a["job"], cache)
     return _message(f"No viewer for {spec.kind}")

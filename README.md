@@ -60,6 +60,11 @@ and can be used interchangeably, even at the same time, on the same project.
 - RELION's command-line-only programs (`relion_image_handler`, `relion_reconstruct`, the
   `relion_tomo_*` tools, ...) can be run from the **CLI tools** menu. They appear in the pipeline
   as ordinary External jobs, with their inputs and outputs.
+- **Additional external jobs**: cryo-savanna has additional wrappers.
+  - pytom-match-pick template matching and candidate extraction (from
+  its own conda environment), with pytom's inputs written from RELION 5's tomograms.star, one
+  tomogram per GPU, results while it runs, thresholds chosen interactively, and a RELION 5
+  particles.star.
 - Class2D, Class3D, Refine3D and InitialModel jobs that have not written an iteration yet can be
   marked failed (RELION refuses and leaves them Running), and then overwritten.
 
@@ -127,6 +132,12 @@ Help → Keyboard shortcuts (F1) lists them all.
 The **CLI tools** menu offers RELION's command-line-only programs as job forms. They run as
 External jobs through `cryo_savanna/cli_runner.py`, which is copied into the project as
 `.cryo-savanna/cli_runner.py`, so the jobs keep working when cryo-savanna is moved or updated.
+
+### Additional external jobs
+
+pytom's template matching and extraction run as External jobs through `cryo_savanna/pytom_runner.py`,
+copied into the project as `.cryo-savanna/pytom_runner.py`. It only runs pytom's programs (from the
+conda environment named in the job): cryo-savanna does not include or import pytom.
 
 ### SLURM
 

@@ -34,6 +34,7 @@ Below "Additional arguments:" a panel lists every flag of the program that gets 
 
 from __future__ import annotations
 
+import fnmatch
 import html
 import os
 import re
@@ -115,6 +116,14 @@ def node_matches(node_label: str, node_depth: int, wanted: str, depth: int) -> b
     if depth <= 1:
         return node_label.split(".", 1)[0] == wanted.split(".", 1)[0]
     return node_depth > 1 and _before_nth(node_label, node_depth) == _before_nth(wanted, depth)
+
+
+def _name_matches(name: str, pattern: str) -> bool:
+    """A pattern naming a file ("pytom match (*pytom_match.star)") also limits the nodes listed; the
+    usual ones (*.star, *.mrc) do not."""
+    globs = re.findall(r"\(([^)]*)\)", pattern)
+    specific = [g for part in globs for g in part.split() if not re.fullmatch(r"\*\.[\w{},]+", g)]
+    return not specific or any(fnmatch.fnmatch(os.path.basename(name), g) for g in specific)
 
 
 # ---------------------------------------------------------------------------- option widgets
@@ -290,7 +299,8 @@ class NodeWidget(FileWidget):
         self.combo.clear()
         if pipeline is not None:
             nodes = [n for n in pipeline.nodes.values() if n.producer and node_matches(
-                n.type_label, n.type_depth, self.opt.node_type, self.opt.node_type_depth)]
+                n.type_label, n.type_depth, self.opt.node_type, self.opt.node_type_depth)
+                and _name_matches(n.name, self.opt.pattern)]
             for n in reversed(nodes):  # newest jobs first
                 pr = pipeline.processes.get(n.producer)
                 alias = f"   ({pr.alias.rstrip('/')})" if pr is not None and pr.has_alias else ""
@@ -515,6 +525,8 @@ class JobEditor(QWidget):
         self._update_mode_widgets()
 
     def _type_name(self, variant: JobVariant) -> str:
+        if getattr(variant, "kind", None) in ("match", "extract"):  # pytom (jobdefs/pytom_jobs.py)
+            return f"{variant.program} (runs as an External job)"
         if getattr(variant, "is_cli", False):
             return f"{variant.program} (CLI tool, runs as an External job)"
         return self.type_names.get(variant.label, variant.dirname)

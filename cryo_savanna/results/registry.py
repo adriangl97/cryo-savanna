@@ -41,6 +41,9 @@ SELECTION = "selection"  # what an interactive Select / Exclude tilt images job 
 CTF_REFINE = "ctf_refine"  # CtfRefine: what it fitted, optics before/after, statistics of the changes
 CTF_CHANGES = "ctf_changes"  # CtfRefine: per-particle CTF changes, and per micrograph
 ABERRATIONS = "aberrations"  # CtfRefine: phase images of beam tilt / trefoil / 4th order, magnification
+PYTOM_SCORES = "pytom_scores"  # pytom template matching: progress and score statistics per tomogram
+PYTOM_THRESHOLDS = "pytom_thresholds"  # pytom extraction: thresholds per tomogram, chosen interactively
+SVG_PLOTS = "svg_plots"  # the plots a program wrote as SVG files (pytom)
 FILES = "files"  # every file of the job: STAR tables, images, stacks
 
 
@@ -153,6 +156,34 @@ def class_job_particles(ctx: JobContext) -> str | None:
     if TOMO_NAME in cols or "rlnMicrographName" not in cols or "rlnCoordinateX" not in cols:
         return None
     return data
+
+
+def _pytom_views(ctx: JobContext, add, add_maps) -> None:
+    """pytom jobs (jobdefs/pytom_jobs.py): their views come from the files in the job directory, so that
+    they show while the job runs (an External job has its outputs only at the end)."""
+    from cryo_savanna import pytom_runner as P
+    from cryo_savanna.jobdefs.pytom_jobs import decode, pytom_kind
+    kind = pytom_kind(ctx.options.get("fn_exe", ""))
+    if kind is None:
+        return
+    own = decode(ctx.options.get("other_args", ""))[0]
+    if kind == P.MATCH:
+        summary = ctx.name + P.SUMMARY
+        add(PYTOM_SCORES, "Scores", job=ctx.name)
+        if ctx.exists(summary):
+            add(TOMOGRAMS, "Tomograms", star=summary)
+        add_maps([ctx.name + "template.mrc", ctx.name + "mask.mrc"], masks=[ctx.name + "mask.mrc"])
+        return
+    summary = own.get("in_match", "")
+    add(PYTOM_THRESHOLDS, "Thresholds", job=ctx.name, summary=summary, diameter=_float(own.get("particle_diameter")))
+    particles = ctx.name + P.PARTICLES
+    if ctx.exists(particles) and ctx.exists(summary):
+        add(TOMOGRAMS, "Picks", star=summary, picks=particles, diameter=_float(own.get("particle_diameter")))
+    if (ctx.job_dir / P.PLOTS_DIR).is_dir():
+        add(SVG_PLOTS, "pytom plots", job=ctx.name, folder=P.PLOTS_DIR)
+    if ctx.exists(particles):
+        add(TABLE_PLOT, "Particle plots", star=particles, block="particles",
+            columns=[P.LCC, "rlnCenteredCoordinateZAngst"])
 
 
 def views_for(ctx: JobContext) -> list[ViewSpec]:
@@ -286,6 +317,8 @@ def views_for(ctx: JobContext) -> list[ViewSpec]:
             add(PARTICLES, "Particles", star=parts)
     elif t == "relion.excludetilts" and interactive_kind(ctx.type_label, ctx.options) == "tilts":
         add(SELECTION, "Selection", job=ctx.name, what="tilts")
+    elif t == "relion.external":
+        _pytom_views(ctx, add, add_maps)
 
     # anything else a viewer can show; of several tomogram particle files (a continued job lists its
     # earlier ones too), the newest gets the Picks tab

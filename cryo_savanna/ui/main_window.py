@@ -267,6 +267,12 @@ class MainWindow(QMainWindow):
         new_btn.setMenu(self.actions.new_menu)
         new_btn.setPopupMode(QToolButton.InstantPopup)
         tb.addWidget(new_btn)
+        ext_btn = QToolButton()
+        ext_btn.setText("Additional external jobs")
+        ext_btn.setToolTip("Programs that are not RELION's (pytom template matching, ...), run as RELION External jobs")
+        ext_btn.setMenu(self.actions.external_menu)
+        ext_btn.setPopupMode(QToolButton.InstantPopup)
+        tb.addWidget(ext_btn)
         for a in (self.actions.act_clone, self.actions.act_continue, self.actions.act_run):
             tb.addAction(a)
         tb.addSeparator()
@@ -296,6 +302,7 @@ class MainWindow(QMainWindow):
             project.addSeparator() if a is None else project.addAction(a)
         mb.addMenu(self.actions.job_menu)
         mb.addMenu(self.actions.cli_menu)
+        mb.addMenu(self.actions.external_menu)
         view = mb.addMenu("View")
         for a in (self.act_tree, self.act_graph, self.act_fit):
             view.addAction(a)

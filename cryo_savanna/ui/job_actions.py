@@ -39,6 +39,9 @@ from cryo_savanna.env.relion_env import RelionEnv, RelionEnvError
 from cryo_savanna.jobdefs.cli_catalog import CATEGORIES, describe
 from cryo_savanna.jobdefs.cli_tools import CliCatalog, CliVariant, cli_program_of
 from cryo_savanna.jobdefs.model import JobDefs, JobVariant
+from cryo_savanna.jobdefs.pytom_jobs import (DESCRIPTIONS as PYTOM_DESCRIPTIONS, EXTRACT as PYTOM_EXTRACT,
+                                             MATCH as PYTOM_MATCH, PytomCatalog, PytomVariant, last_settings,
+                                             pytom_kind_of, quoted_values)
 from cryo_savanna.project.jobstar import JobStar, read_last_used
 from cryo_savanna.project.ops import OpsError, PipelineOps
 from cryo_savanna.project.pipeline import Pipeline
@@ -202,6 +205,7 @@ class JobActions(QObject):
 
         self.editor = JobEditor(env, type_names, flag_source=flag_source)
         self.cli = CliCatalog(defs, env, self.editor.flag_source)
+        self.pytom = PytomCatalog(defs, env)
         self.editor.submit.connect(self._on_submit)
         # the editor goes in its own window or in the dock (Preferences → Job editor: set_editor_place)
         self.dock = QDockWidget("Job editor", window)
@@ -290,6 +294,15 @@ class JobActions(QObject):
             a.triggered.connect(lambda _=False, p=program: self.new_cli_job(p))
         for m in subs.values():
             m.setToolTipsVisible(True)
+
+        # programs that are not RELION's, run as External jobs (a button of their own in the main toolbar)
+        self.external_menu = QMenu("Additional external jobs", self.window)
+        self.external_menu.setToolTipsVisible(True)
+        for kind, text in ((PYTOM_MATCH, "pytom: template matching"), (PYTOM_EXTRACT, "pytom: extract candidates")):
+            a = self.external_menu.addAction(text)
+            a.setToolTip(PYTOM_DESCRIPTIONS[kind])
+            a.setStatusTip(PYTOM_DESCRIPTIONS[kind])
+            a.triggered.connect(lambda _=False, k=kind: self.new_pytom_job(k))
 
         self.job_menu = QMenu("Job", self.window)
         self.job_menu.addMenu(self.new_menu)
@@ -386,6 +399,7 @@ class JobActions(QObject):
                "" if has_pipeliner else "relion_pipeliner not found: load RELION 5.1")
         self.new_menu.setEnabled(writable)
         self.cli_menu.setEnabled(writable)
+        self.external_menu.setEnabled(writable)
         self.act_clone.setEnabled(writable and info is not None)
         self.act_continue.setEnabled(writable and has_pipeliner and info is not None and status != "Running")
         self.act_overwrite.setEnabled(self.act_continue.isEnabled())
@@ -509,7 +523,7 @@ class JobActions(QObject):
     def new_job(self, variant_key: str) -> None:
         variant = self.defs.variants[variant_key]
         last = read_last_used(self.project_dir, variant.label, variant.is_tomo) if self.project_dir else None
-        if last is not None and cli_program_of(last):  # External's remembered settings are a CLI tool's
+        if last is not None and (cli_program_of(last) or pytom_kind_of(last)):  # remembered: a CLI tool's / pytom's
             last = None
         note = ("Settings of the last job of this type (from RELION's .gui files); 'Defaults' resets them."
                 if last is not None else "")
@@ -534,8 +548,27 @@ class JobActions(QObject):
         self._edit(program, self.editor.new_job, variant, None,
                    f"{variant.description}. Options from {variant.source}.{mpi}")
 
+    def new_pytom_job(self, kind: str) -> None:
+        """A pytom job (template matching or extraction): the form, with the pytom environment of the last one."""
+        try:
+            variant = self.pytom.variant(kind)
+        except RelionEnvError as e:
+            self._env_error("pytom", e)
+            return
+        values = variant.default_values(self.env)
+        pipeline = self.snapshot.pipeline if self.snapshot is not None else None
+        if self.project_dir is not None:
+            values.update(last_settings(self.project_dir, pipeline, kind))
+        if pipeline is not None:  # the newest input of the right kind, as a start
+            values.update(_newest_inputs(pipeline, kind))
+        self._edit(variant.program, self.editor.new_job, variant, values,
+                   f"{variant.description}. Runs as a RELION External job (pytom from its conda environment).")
+
     def _variant_for(self, js: JobStar) -> JobVariant:
-        """The form for a job: its job type's, or a CLI tool's for External jobs made from that menu."""
+        """The form for a job: its job type's, or a CLI tool's or pytom's for External jobs made from those menus."""
+        kind = pytom_kind_of(js)
+        if kind is not None:
+            return self.pytom.variant(kind)
         program = cli_program_of(js)
         if program is not None:
             v = self.cli.variant(program, js.is_tomo)
@@ -548,7 +581,8 @@ class JobActions(QObject):
         try:
             js = JobStar.read(self.project_dir / job / "job.star")
             variant = self._variant_for(js)
-            values = variant.values_from_jobstar(js, self.env)[0] if isinstance(variant, CliVariant) else js.options
+            values = (variant.values_from_jobstar(js, self.env)[0] if isinstance(variant, (CliVariant, PytomVariant))
+                      else js.options)
         except RelionEnvError as e:
             self._env_error("Clone", e)
             return
@@ -659,6 +693,14 @@ class JobActions(QObject):
             job = self.editor.job if self.editor.mode in (MODE_CONTINUE, MODE_OVERWRITE) else None
             self.open_tool(kind, js, alias, self.editor.mode, job)
             return
+        if isinstance(self.editor.variant, PytomVariant):
+            bad = quoted_values(self.editor.values(), self.editor.variant.own_keys)
+            if bad:
+                QMessageBox.warning(self.window, self.editor.variant.program,
+                                    "These options cannot have a double quote (\") in them (RELION's job.star "
+                                    "keeps them in double quotes): " + ", ".join(
+                                        self.editor.variant.options[k].label.rstrip(": ") for k in bad))
+                return
         if isinstance(self.editor.variant, CliVariant):
             v = self.editor.values()
             if v.get("nr_mpi", "1") not in ("", "1") and v.get("do_queue") == "Yes":
@@ -1021,3 +1063,17 @@ class JobActions(QObject):
                 self.select.emit(restored[0])
 
         self._run(f"Undelete {label}", lambda: self.ops.undelete(fn), done)
+
+
+def _newest_inputs(pipeline: Pipeline, kind: str) -> dict[str, str]:
+    """The newest tomogram set (template matching) or pytom match summary (extraction) of the pipeline."""
+    from cryo_savanna.pytom_runner import SUMMARY
+    for name in reversed(list(pipeline.nodes)):
+        n = pipeline.nodes[name]
+        if not n.producer:
+            continue
+        if kind == PYTOM_MATCH and n.kind == "TomogramGroupMetadata" and name.endswith("tomograms.star"):
+            return {"in_tomograms": name}
+        if kind == PYTOM_EXTRACT and name.endswith("/" + SUMMARY):
+            return {"in_match": name}
+    return {}

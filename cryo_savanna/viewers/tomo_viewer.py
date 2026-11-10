@@ -45,6 +45,8 @@ from cryo_savanna.images.mrc import ImageRef, MrcReader, contrast_limits
 from cryo_savanna.images.volume import load_volume
 from cryo_savanna.results.tables import Table
 from cryo_savanna.results.tomo import (
+    RAW_TOMOGRAM,
+    SCORES,
     SERIES_COLUMNS,
     TILT_COLUMNS,
     TiltSeriesSet,
@@ -322,6 +324,7 @@ class TomogramViewer(QWidget):
         self.side_data = None  # binned copy for the side views
         self.levels = (0.0, 1.0)
         self._stamp = None
+        self.picks_loaded = None  # called with the TomoPicks when they were (re)read
 
         self.model = TableModel(self)
         self.proxy = RowFilter(self)
@@ -334,7 +337,8 @@ class TomogramViewer(QWidget):
         self.kind.setToolTip("Which tomogram to show")
         self.kind.currentIndexChanged.connect(lambda _: self._show_current())
         self.compare = QCheckBox("Raw beside it")
-        self.compare.setToolTip("Show the raw reconstruction next to the denoised one, at the same place")
+        self.compare.setToolTip("Show another tomogram next to this one, at the same place: the raw reconstruction "
+                                "beside a denoised one or a score map, the score map beside the raw one")
         self.compare.toggled.connect(lambda _: self._show_current())
         self.compare.hide()
         self.slab = QSpinBox()
@@ -473,12 +477,12 @@ class TomogramViewer(QWidget):
         i = self.kind.findData(current_kind)
         self.kind.setCurrentIndex(max(0, i))
         self.kind.blockSignals(False)
-        kinds = [c for c, _ in ts.tomogram_kinds()]
-        self.compare.setVisible("rlnTomoReconstructedTomogramDenoised" in kinds and
-                                "rlnTomoReconstructedTomogram" in kinds)
+        self._update_compare()
         cols = [("rlnTomoName", "Tomogram")] + [(c, t) for c, t in SERIES_COLUMNS if ts.table.has(c)]
         self.model.set_table(ts.table, cols)
         if picks is not None:
+            if self.picks_loaded is not None:  # e.g. the pytom threshold view's selection
+                self.picks_loaded(picks)
             self.classes.set_counts(picks.classes)
             self._count_picks()
         else:
@@ -493,6 +497,30 @@ class TomogramViewer(QWidget):
         row = ts.names.index(keep) if keep in ts.names else 0
         if len(ts):
             self.select(row)
+
+    def _beside(self) -> str | None:
+        """The tomogram shown beside the chosen one: the raw reconstruction (beside a denoised one or
+        pytom's scores), or the scores beside the raw one; None when there is no such pair."""
+        if self.set is None:
+            return None
+        kinds = [c for c, _ in self.set.tomogram_kinds()]
+        cur = self.kind.currentData()
+        if cur != RAW_TOMOGRAM and RAW_TOMOGRAM in kinds:
+            return RAW_TOMOGRAM
+        if cur == RAW_TOMOGRAM and SCORES in kinds:
+            return SCORES
+        return None
+
+    def _update_compare(self) -> None:
+        beside = self._beside()
+        titles = dict(self.set.tomogram_kinds()) if self.set is not None else {}
+        self.compare.setVisible(beside is not None)
+        if beside is not None:
+            self.compare.setText(("Raw" if beside == RAW_TOMOGRAM else titles[beside]) + " beside it")
+
+    def select_name(self, name: str) -> None:
+        if self.set is not None and name in self.set.names:
+            self.select(self.set.names.index(name))
 
     def select(self, row: int) -> None:
         idx = self.proxy.mapFromSource(self.model.index(row, 0))
@@ -551,8 +579,8 @@ class TomogramViewer(QWidget):
             self._missing = False
             if self.picks is not None and self.set is not None:
                 self._count_picks()
-        compare = self.compare.isVisible() and self.compare.isChecked() and \
-            self.kind.currentData() == "rlnTomoReconstructedTomogramDenoised"
+        self._update_compare()
+        compare = not self.compare.isHidden() and self.compare.isChecked() and self._beside() is not None
         self.raw.setVisible(compare)
 
         def read():
@@ -601,8 +629,11 @@ class TomogramViewer(QWidget):
         if self.shape is None:
             return
         refs = [self._ref()]
-        if self.raw.isVisible():
-            refs.append(self._ref("rlnTomoReconstructedTomogram"))
+        beside = self._beside()
+        if not self.raw.isHidden() and beside is not None:
+            ref = self._ref(beside)
+            if ref is not None:
+                refs.append(ref)
         nz = self.shape[0]
         half = self.slab.value() // 2
         z0, z1 = max(0, self.z - half), min(nz, self.z + half + 1)

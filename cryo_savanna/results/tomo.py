@@ -37,7 +37,9 @@ TOMOGRAM_COLUMNS = [  # (column, title)
     ("rlnTomoReconstructedTomogram", "Reconstructed"),
     ("rlnTomoReconstructedTomogramHalf1", "Half 1"),
     ("rlnTomoReconstructedTomogramHalf2", "Half 2"),
+    ("savannaPytomScores", "pytom scores"),  # a pytom template matching job's score maps (pytom_match.star)
 ]
+RAW_TOMOGRAM, SCORES = "rlnTomoReconstructedTomogram", "savannaPytomScores"
 TILT_COLUMNS = [  # per-tilt values worth a column
     ("rlnTomoNominalStageTiltAngle", "Tilt (°)"), ("rlnMicrographPreExposure", "Dose (e/Å²)"),
     ("rlnDefocusU", "Defocus U (Å)"), ("rlnDefocusV", "Defocus V (Å)"), ("rlnCtfMaxResolution", "Max. res. (Å)"),
@@ -215,6 +217,7 @@ class TomoPicks:
     cls_by_tomo: dict[str, np.ndarray] | None = None  # tomogram -> rlnClassNumber of its particles
     classes: dict[int, int] = field(default_factory=dict)  # class -> particles
     pixel_size: float | None = None  # Warp: corner coordinates in pixels of this size (Å), not tilt-series pixels
+    keep: dict[str, np.ndarray] | None = None  # tomogram -> which of its particles to show (pytom thresholds)
 
     def count(self, name: str, classes: set[int] | None = None) -> int:
         return int(self.in_classes(name, classes).sum())
@@ -227,8 +230,13 @@ class TomoPicks:
         n = len(self.by_tomo.get(name, ()))
         cls = self.class_numbers(name)
         if classes is None or cls is None:
-            return np.ones(n, bool)
-        return np.isin(cls, list(classes))
+            out = np.ones(n, bool)
+        else:
+            out = np.isin(cls, list(classes))
+        if self.keep is not None:
+            k = self.keep.get(name)
+            out &= k if k is not None and len(k) == n else np.zeros(n, bool)
+        return out
 
     def voxels(self, name: str, voxel: float, shape: tuple[int, int, int], binning: float | None = None) -> np.ndarray:
         """Coordinates of a tomogram's particles in its voxels: [n, 3] (x, y, z)."""
