@@ -276,8 +276,9 @@ class MainWindow(QMainWindow):
         for a in (self.actions.act_clone, self.actions.act_continue, self.actions.act_run):
             tb.addAction(a)
         tb.addSeparator()
-        self.act_tree = self._action(tb, "List", "Ctrl+1", lambda: self.views.setCurrentWidget(self.tree))
-        self.act_graph = self._action(tb, "Tree", "Ctrl+2", lambda: self.views.setCurrentWidget(self.graph))
+        # List/Tree are reachable from the view tabs; keep them only in the View menu and as shortcuts
+        self.act_tree = self._action(None, "List", "Ctrl+1", lambda: self.views.setCurrentWidget(self.tree))
+        self.act_graph = self._action(None, "Tree", "Ctrl+2", lambda: self.views.setCurrentWidget(self.graph))
         self.act_fit = self._action(tb, "Fit tree", "Ctrl+0", self._fit_graph)
         self.all_links = QCheckBox("All links")
         self.all_links.setToolTip("Also draw links to references, masks and other secondary inputs of every job\n"
