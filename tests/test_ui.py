@@ -135,6 +135,18 @@ def test_filter_finds_the_program_of_external_jobs(window, spa_copy):
     w.search.setText("my_picker")
     assert "External/job031/" in w.tree.visible_jobs()
 
+    # the Options tab shows the tool's form (once its --help is read), not External's fields
+    w.search.clear()
+    w.select_job("External/job030/")
+    w.info.wait_flags()
+    tree = w.info.options
+    rows = {tree.topLevelItem(i).child(j).text(0): tree.topLevelItem(i).child(j).text(1)
+            for i in range(tree.topLevelItemCount()) for j in range(tree.topLevelItem(i).childCount())}
+    assert rows["--i"] == "Refine3D/job011/run_class001.mrc" and rows["--invert_hand"] == "Yes"
+    assert "External executable" not in rows
+    w.select_job("External/job031/")  # any other External job: External's fields
+    assert tree.topLevelItem(0).child(0).text(1) == "/home/me/scripts/my_picker.sh"
+
 
 def test_options_tab_marks_changed_values(window, spa_project):
     w = window(spa_project)

@@ -12,9 +12,10 @@ from __future__ import annotations
 import html
 from collections.abc import Callable
 
-from qtpy.QtCore import Qt, QUrl, Signal
+from qtpy.QtCore import Qt, QThreadPool, QUrl, Signal
 from qtpy.QtGui import QFont, QPalette
 from qtpy.QtWidgets import (
+    QApplication,
     QCheckBox,
     QHeaderView,
     QMainWindow,
@@ -28,12 +29,15 @@ from qtpy.QtWidgets import (
 )
 
 from cryo_savanna.env.relion_env import RelionEnv, RelionEnvError
-from cryo_savanna.jobdefs.model import JobDefs
+from cryo_savanna.jobdefs.cli_catalog import POSITIONAL
+from cryo_savanna.jobdefs.cli_tools import CliCatalog, cli_program_of
+from cryo_savanna.jobdefs.model import JobDefs, JobVariant
 from cryo_savanna.jobdefs.pytom_jobs import PytomCatalog, decode, pytom_kind_of
 from cryo_savanna.project.jobstar import JobStar
 from cryo_savanna.project.snapshot import ProjectSnapshot, stamp
 from cryo_savanna.results.registry import MICROGRAPHS, TABLE_PLOT, JobContext, ViewSpec, context_for, views_for
 from cryo_savanna.ui import style
+from cryo_savanna.ui.flag_panel import FlagsTask
 
 FIXED_TABS = 2  # Overview, Options; the viewers follow
 
@@ -73,6 +77,12 @@ class JobInfoPanel(QTabWidget):
         self._jobstar: JobStar | None = None
         self._jobstar_error = ""
         self._jobstar_stamp = None  # job.star's (mtime, size) when read: a Continue writes it again
+        # the forms of External jobs made from the "Additional external jobs" menu, as in the editor
+        # (the main window gives the ones of its JobActions, so a --help is read once)
+        self.cli: CliCatalog | None = None
+        self.pytom = PytomCatalog(defs, env)
+        self._flags_pool = QThreadPool(self)
+        self._flag_tasks: set[FlagsTask] = set()
         self.queue = None  # slurm.QueueState
         self.history: dict[str, list | str] = {}  # job -> its SLURM jobs (slurm.AcctJob), or an error
         self.main_inputs = None  # project.main_inputs.MainInputs: the main inputs chosen in cryo-savanna
@@ -351,17 +361,58 @@ class JobInfoPanel(QTabWidget):
             self.main_input_requested.emit(self._job, s[5:])
 
     # ------------------------------------------------------------------ options
+    def _variant_for(self, js: JobStar, kind: str | None, program: str | None) -> JobVariant:
+        """The form the editor uses for this job: pytom's or the CLI tool's for External jobs made from
+        those menus, else the job type's."""
+        if kind is not None:
+            return self.pytom.variant(kind)
+        if program is not None and self.cli is not None:
+            v = self.cli.variant(program, js.is_tomo)
+            if v is not None:
+                return v
+        return self.defs.variant_for_jobstar(js)
+
+    def _read_flags_first(self, program: str) -> bool:
+        """Start reading a CLI tool's --help off the GUI thread if its form needs it (the options are
+        shown when it is done). True while that is going on."""
+        if self.cli is None or program in POSITIONAL or not self.cli.flag_source.needs_run(program):
+            return False
+        if not any(t.program == program for t in self._flag_tasks):
+            task = FlagsTask(self.cli.flag_source, program)
+            task.signals.done.connect(self._on_flags_ready)
+            self._flag_tasks.add(task)
+            self._flags_pool.start(task)
+        return True
+
+    def _on_flags_ready(self, program: str, _flags) -> None:
+        self._flag_tasks = {t for t in self._flag_tasks if t.program != program}
+        if self._jobstar is not None and cli_program_of(self._jobstar) == program:
+            self._fill_options()
+
+    def wait_flags(self) -> None:
+        """Wait for --help runs in progress (tests)."""
+        self._flags_pool.waitForDone()
+        QApplication.processEvents()
+
     def _fill_options(self) -> None:
         self.options.clear()
         js = self._jobstar
         if js is None:
             return
         kind = pytom_kind_of(js)
-        try:  # a pytom job: its own form, as in the editor, not External's fields
-            variant = PytomCatalog(self.defs, self.env).variant(kind) if kind else self.defs.variant_for_jobstar(js)
+        program = cli_program_of(js) if kind is None else None
+        if program is not None and self._read_flags_first(program):
+            QTreeWidgetItem(self.options, [f"Reading the options of {program} (its --help)…"])
+            return
+        try:  # a pytom job or a CLI tool: its own form, as in the editor, not External's fields
+            variant = self._variant_for(js, kind, program)
         except KeyError as e:
             QTreeWidgetItem(self.options, [f"Unknown job type: {e}"])
             return
+        except RelionEnvError as e:
+            QTreeWidgetItem(self.options, [f"⚠ {e}"])
+            return
+        own_form = getattr(variant, "is_cli", False)  # its values are read from External's arguments
         try:
             values, ignored = variant.values_from_jobstar(js, self.env)
             opts = variant.resolved_options(self.env)
@@ -381,7 +432,7 @@ class JobInfoPanel(QTabWidget):
                     if o is None:
                         continue
                     value = values.get(key, "")
-                    changed = (kind is not None or key in js.options) and value != o.default
+                    changed = (own_form or key in js.options) and value != o.default
                     if only_changed and not changed:
                         continue
                     it = QTreeWidgetItem(tab_item, [o.label.strip().rstrip(":").strip() or key, value, o.default])
