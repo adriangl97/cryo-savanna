@@ -8,6 +8,7 @@ pool, each with its own contrast (mean ± 3σ, as RELION's display). Particles a
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
@@ -244,9 +245,11 @@ class GalleryView(QWidget):
         key = self.sort_keys[self.sort.currentIndex()][0]
         items = list(self.all_items)
         if key:
+            sign = -1 if self.descending.isChecked() else 1  # read once, not for each of a million particles
+
             def k(it: GalleryItem):
                 v = it.keys.get(key)
-                return (v is None or not np.isfinite(v), -(v or 0) if self.descending.isChecked() else (v or 0))
+                return (v is None or not math.isfinite(v), sign * (v or 0))
             items.sort(key=k)
         elif self.descending.isChecked():
             items.reverse()

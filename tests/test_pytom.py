@@ -117,6 +117,10 @@ FAKE = {
 
 @pytest.fixture
 def fake_pytom(tmp_path, monkeypatch):
+    return _fake_pytom(tmp_path, monkeypatch)
+
+
+def _fake_pytom(tmp_path, monkeypatch):
     bin_dir = tmp_path / "fakebin"
     bin_dir.mkdir()
     for name, code in FAKE.items():
@@ -133,6 +137,10 @@ def fake_pytom(tmp_path, monkeypatch):
 @pytest.fixture
 def project(tomo_project, tmp_path):
     """A copy of the tomo project whose tomograms have CTF values (the per-tilt files of CtfFind)."""
+    return _project(tomo_project, tmp_path)
+
+
+def _project(tomo_project, tmp_path):
     dst = tmp_path / "tomo"
     shutil.copytree(tomo_project, dst, symlinks=True)
     star = dst / "Tomograms/job006/tomograms.star"
@@ -430,14 +438,27 @@ def test_gaussian_cut_off():
 # ---------------------------------------------------------------------------- views
 
 
-@pytest.fixture
-def done_jobs(project, fake_pytom):
-    assert run_runner(project, "match", "External/job015/", match_values()).returncode == 0
-    assert run_runner(project, "extract", "External/job016/", extract_values()).returncode == 0
+@pytest.fixture(scope="module")
+def _done_jobs_once(tomo_project, tmp_path_factory):
+    """A project with a finished match and a finished extract job, run once for the tests that only look
+    at their results (each gets a copy: done_jobs)."""
+    tmp = tmp_path_factory.mktemp("pytom_done")
+    project = _project(tomo_project, tmp)
+    with pytest.MonkeyPatch.context() as mp:
+        _fake_pytom(tmp, mp)
+        assert run_runner(project, "match", "External/job015/", match_values()).returncode == 0
+        assert run_runner(project, "extract", "External/job016/", extract_values()).returncode == 0
     for job, kind in (("External/job015/", "match"), ("External/job016/", "extract")):
         vals = match_values() if kind == "match" else extract_values()
         CATALOG.variant(kind).make_jobstar(vals, False, job, None).write(project / job / "job.star")
     return project
+
+
+@pytest.fixture
+def done_jobs(_done_jobs_once, fake_pytom, tmp_path):
+    dst = tmp_path / "tomo"
+    shutil.copytree(_done_jobs_once, dst, symlinks=True)
+    return dst
 
 
 def _ctx(project, job):
@@ -711,3 +732,15 @@ def test_options_tab_reads_a_continued_job_star_again(qtbot, tmp_path):
     os.utime(path, ns=(time.time_ns() + 10**9,) * 2)  # a coarse clock: make the change visible
     panel.show_job(loader.refresh(force=True), job)
     assert cuda() == "cuda/12.4"
+
+
+def test_a_tilt_without_an_angle_is_named(tmp_path):
+    """Not a TypeError from sorting the tilts: the tomogram and the file are named."""
+    star = tmp_path / "TS_1.star"
+    star.write_text("data_TS_1\n\nloop_\n_rlnTomoNominalStageTiltAngle #1\n_rlnMicrographPreExposure #2\n"
+                    "-3.0 0\nnan 3\n3.0 6\n")
+    with pytest.raises(P.Usage, match="TS_1: a tilt without a rlnTomoNominalStageTiltAngle"):
+        P.tilt_table({"rlnTomoName": "TS_1", "rlnTomoTiltSeriesStarFile": str(star)}, {})
+    star.write_text(star.read_text().replace("nan", "0.0"))
+    assert [t[0] for t in P.tilt_table({"rlnTomoName": "TS_1", "rlnTomoTiltSeriesStarFile": str(star)}, {})[1]] \
+        == [-3.0, 0.0, 3.0]

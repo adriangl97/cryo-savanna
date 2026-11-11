@@ -654,7 +654,12 @@ def _label_for(sc: _Scanner, path: str, hint: str | None) -> str:
 
 
 def _last_iteration(paths: list[str]) -> list[str]:
-    """The files of the highest (continuation, iteration) number; all of them when none is numbered."""
+    """The files of the last iteration of the job's latest run; all of them when none is numbered.
+
+    A run continued from iteration N (run_ctN_...) replaces the earlier run's iterations after N, as in
+    project/summary.py (current_iterations): continued from 10 and now at 20, its files count, not the
+    run_it025 the earlier run left behind.
+    """
     def key(p: str) -> tuple[int, int]:
         ct = it = -1
         for m in _ITER.finditer(os.path.basename(p)):
@@ -665,8 +670,11 @@ def _last_iteration(paths: list[str]) -> list[str]:
         return it, ct
     if not paths:
         return []
-    best = max(key(p) for p in paths)
-    return [p for p in paths if key(p) == best]
+    keys = {p: key(p) for p in paths}
+    starts = {ct for _, ct in keys.values()} - {-1}
+    current = {p: k for p, k in keys.items() if not any(k[1] < s < k[0] for s in starts)} or keys
+    best = max(current.values())
+    return [p for p, k in current.items() if k == best]
 
 
 _PATHISH = re.compile(r"[A-Za-z0-9_.+-]+/[^\s'\"]+")

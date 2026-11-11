@@ -133,11 +133,12 @@ def tomo_pick_diameter(ctx: JobContext) -> float | None:
     return None
 
 
-def class_job_particles(ctx: JobContext) -> str | None:
+def class_job_particles(ctx: JobContext, its: list | None = None) -> str | None:
     """The micrograph particles of an SPA classification job with several classes, for its Picks tab: its
     output, else (while it runs) those of its latest iteration. Also Warp particles (named by their
     .tomostar, which have rlnMicrographName too): those are shown on their tomograms. RELION
-    tomography particles get theirs as any tomogram particles do."""
+    tomography particles get theirs as any tomogram particles do. ``its``: the job's iterations(), if the
+    caller has them already."""
     try:
         if int(ctx.options.get("nr_classes", "1")) < 2:
             return None
@@ -145,7 +146,7 @@ def class_job_particles(ctx: JobContext) -> str | None:
         return None
     data = ctx.output("ParticleGroupMetadata")
     if not data:
-        its = iterations(ctx.job_dir)
+        its = iterations(ctx.job_dir) if its is None else its
         data = ctx.name + data_star_for(its[-1][1]).name if its else None
     if not data or not ctx.exists(data):
         return None
@@ -209,6 +210,13 @@ def views_for(ctx: JobContext) -> list[ViewSpec]:
                 color=color if ctx.exists(color) else "", masks=list(masks or []), **extra)
 
     density = [n for n, nt in ctx.outputs if nt.split(".", 1)[0] == "DensityMap"]
+    listed: list[list] = []
+
+    def job_iterations() -> list:
+        """iterations() of the job, listed once: this runs in the window's thread at every refresh."""
+        if not listed:
+            listed.append(iterations(ctx.job_dir))
+        return listed[0]
 
     def add_job_maps(maps: list[str], mask: str) -> None:
         """An iterative job's maps: while it runs (or when it stopped before writing its final maps), those
@@ -256,18 +264,18 @@ def views_for(ctx: JobContext) -> list[ViewSpec]:
                 box=ctx.options.get("extract_size", ""))
             add(TABLE_PLOT, "Plots", star=parts, block="particles")
     elif t == "relion.class2d":
-        if iterations(ctx.job_dir):
+        if job_iterations():
             add(CLASSES, "Classes", job=ctx.name, tool="classes")
             add(PLOTS, "Convergence", job=ctx.name, figures="convergence")
     elif t in ("relion.class3d", "relion.initialmodel"):
-        if iterations(ctx.job_dir):
+        if job_iterations():
             add(CLASSES, "Classes", job=ctx.name, tool="classes")
         add_job_maps(density, ctx.options.get("fn_mask", ""))
-        if iterations(ctx.job_dir):
+        if job_iterations():
             add(PLOTS, "Convergence", job=ctx.name, figures="convergence")
             add(ANGLES, "Angular distribution", job=ctx.name)
     if t in ("relion.class2d", "relion.class3d", "relion.initialmodel"):
-        parts = class_job_particles(ctx)
+        parts = class_job_particles(ctx, job_iterations())
         if parts and is_warp_particles(ctx.project_dir / parts):
             # Warp particles: on the tomograms Warp reconstructed (no RELION tomogram set)
             add(TOMOGRAMS, "Picks", star="", picks=parts, diameter=tomo_pick_diameter(ctx))
@@ -280,7 +288,7 @@ def views_for(ctx: JobContext) -> list[ViewSpec]:
     elif t in ("relion.refine3d", "relion.multibody"):
         # the full map before the half maps
         add_job_maps(sorted(density, key=lambda n: "half" in n), ctx.options.get("fn_mask", ""))
-        if iterations(ctx.job_dir) or ctx.file("run_model.star"):
+        if job_iterations() or ctx.file("run_model.star"):
             add(PLOTS, "FSC", job=ctx.name, figures="model_fsc")
             add(PLOTS, "Convergence", job=ctx.name, figures="convergence")
             add(ANGLES, "Angular distribution", job=ctx.name)

@@ -70,13 +70,22 @@ class RunRecord:
         except ProcessLookupError:
             return False
         except PermissionError:
-            return True
+            return self._is_this_run()  # another user's process: their run, or the number given out again
         # a zombie of our own child counts as finished
         try:
             done, _ = os.waitpid(self.pid, os.WNOHANG)
             return done == 0
         except ChildProcessError:
+            return self._is_this_run()  # not started by this window: this run, or the number given out again
+
+    def _is_this_run(self) -> bool:
+        """Whether the process with this run's number is its relion_pipeliner (its command line has the
+        run's --schedule name), not another program that got the number after the run ended. True when
+        that cannot be told (no /proc and no ps)."""
+        args = _command_line(self.pid)
+        if args is None:
             return True
+        return "--RunJobs" in args and self.schedule in args
 
 
 @dataclass
@@ -332,6 +341,23 @@ class Pipeliner:
         if number is None:
             raise PipelinerError(f"not a job: {job}")
         self._call("--harsh_clean" if harsh else "--gentle_clean", str(number))
+
+
+def _command_line(pid: int) -> list[str] | None:
+    """The arguments of a running process (/proc, else ps); None when they cannot be read."""
+    try:
+        with open(f"/proc/{pid}/cmdline", "rb") as fh:
+            data = fh.read()
+        if data:
+            return [a.decode("utf-8", "replace") for a in data.split(b"\0") if a]
+    except OSError:
+        pass
+    try:
+        r = subprocess.run(["ps", "-ww", "-o", "args=", "-p", str(pid)], capture_output=True, text=True, timeout=10,
+                           stdin=subprocess.DEVNULL)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return r.stdout.split() if r.returncode == 0 and r.stdout.strip() else None
 
 
 def _in_trash(job: str) -> str:

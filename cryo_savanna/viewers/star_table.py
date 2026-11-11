@@ -8,7 +8,7 @@ import math
 from pathlib import Path
 
 import numpy as np
-from qtpy.QtCore import QAbstractProxyModel, QAbstractTableModel, QModelIndex, Qt, Signal
+from qtpy.QtCore import QAbstractProxyModel, QAbstractTableModel, QModelIndex, QTimer, Qt, Signal
 from qtpy.QtWidgets import (
     QAbstractItemView,
     QComboBox,
@@ -123,6 +123,15 @@ class TableModel(QAbstractTableModel):
             return np.asarray(num, dtype=np.float64)
         return np.array([str(v) for v in self.table.data[label]], dtype=str)
 
+    def only_numbers(self, col: int) -> bool:
+        """Whether column ``col`` shows nothing but numbers (the row numbers, and the columns
+        read_compact kept as floats): a filter text with a letter in it cannot be there."""
+        if col <= 0 or self.table is None:
+            return True
+        label = self.columns[col - 1][0]
+        vals = None if label in self.extra else self.table.data.get(label)
+        return isinstance(vals, np.ndarray) and vals.dtype.kind == "f"
+
     def column_text(self, col: int) -> list[str]:
         """The text shown in column ``col`` for every row (what a filter looks for)."""
         if col <= 0 or self.table is None:
@@ -149,6 +158,11 @@ def _number(text: str) -> str:
     return f"{x:.6g}"
 
 
+FILTER_AT_ONCE_ROWS = 20_000  # tables up to this size are filtered at every letter typed
+FILTER_PAUSE_MS = 250
+_NUMBER_CHARS = frozenset("0123456789.-+einfa")  # what _number() can show: digits, exponents, inf, nan
+
+
 class RowFilter(QAbstractProxyModel):
     """Sorts and filters the rows of a TableModel with numpy, a whole column at a time.
 
@@ -166,6 +180,11 @@ class RowFilter(QAbstractProxyModel):
         self._order = np.empty(0, np.int64)  # every source row, in the sort order
         self._sort_col, self._descending = -1, False
         self._needle = ""
+        self._typed = ""
+        self._pause = QTimer(self)  # big tables: filtered once the typing pauses, not at every letter
+        self._pause.setSingleShot(True)
+        self._pause.setInterval(FILTER_PAUSE_MS)
+        self._pause.timeout.connect(self._filter_typed)
 
     # -- the source -------------------------------------------------------------------------
     def setSourceModel(self, model) -> None:
@@ -265,8 +284,23 @@ class RowFilter(QAbstractProxyModel):
 
     # -- filtering --------------------------------------------------------------------------
     def setFilterFixedString(self, text: str) -> None:
-        self._needle = text.lower()
-        self._relayout(refilter=True)
+        """Show only the rows with ``text`` in them. A table of many rows takes a moment to look
+        through: it is filtered when the typing pauses (flush_filter() does it at once)."""
+        self._typed = text.lower()
+        m = self.sourceModel()
+        if m is not None and m.rowCount() > FILTER_AT_ONCE_ROWS:
+            self._pause.start()
+        else:
+            self._filter_typed()
+
+    def flush_filter(self) -> None:
+        self._filter_typed()
+
+    def _filter_typed(self) -> None:
+        self._pause.stop()
+        if self._typed != self._needle:
+            self._needle = self._typed
+            self._relayout(refilter=True)
 
     def _matches(self) -> np.ndarray | None:
         """Source rows shown (a boolean per row), or None for all of them."""
@@ -274,7 +308,13 @@ class RowFilter(QAbstractProxyModel):
         if not self._needle or m is None:
             return None
         hit = np.zeros(m.rowCount(), bool)
+        # a text that cannot be part of a number ("mic0012", "job005/") is not looked for in the
+        # number columns: most columns of a particle file, and most of the time a pass takes
+        in_numbers = all(ch in _NUMBER_CHARS for ch in self._needle)
+        only_numbers = getattr(m, "only_numbers", None)
         for c in range(m.columnCount()):
+            if not in_numbers and only_numbers is not None and only_numbers(c):
+                continue
             text = np.char.lower(np.array(m.column_text(c), dtype=str))
             hit |= np.char.find(text, self._needle) >= 0
         return hit

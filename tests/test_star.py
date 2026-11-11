@@ -5,12 +5,15 @@ import os
 import pytest
 
 from cryo_savanna.project.star import (
+    FormattedLoop,
     StarBlock,
     StarError,
     escape_string,
     format_block,
+    format_row,
     format_star,
     format_value,
+    loop_tokens,
     parse_star_text,
     read_star,
     tokenize_line,
@@ -179,3 +182,35 @@ def test_a_row_that_would_not_read_as_values_is_quoted(value):
     assert parse_star_text(text)["t"].rows == [[value, "z"], ["y", value]]
     # quoted where a row starts; elsewhere as RELION writes it (a "#" value is quoted anywhere already)
     assert text.count(f'"{value}"') == (2 if value.startswith("#") else 1)
+
+
+def test_loop_is_streamed_as_read_star_reads_it(tmp_path):
+    """loop_tokens gives the labels, then the rows read_star gives, without holding the table."""
+    text = ("\ndata_optics\n\nloop_ \n_rlnOpticsGroup #1 \n_rlnVoltage #2 \n 1 300 \n \n"
+            "\n# version 50001\n\ndata_particles\n\nloop_ \n_rlnImageName #1 \n_rlnClassNumber #2 \n_rlnNote #3 \n"
+            '000001@a.mrcs 3 "two words" \n# a comment\n000002@a.mrcs 1 plain \n \n'
+            "\ndata_other\n\n_rlnA 1\n")
+    f = tmp_path / "data.star"
+    f.write_text(text)
+    rows = loop_tokens(f, "particles")
+    assert next(rows) == ["rlnImageName", "rlnClassNumber", "rlnNote"]
+    assert list(rows) == read_star(f)["particles"].rows == [["000001@a.mrcs", "3", "two words"],
+                                                            ["000002@a.mrcs", "1", "plain"]]
+    assert list(loop_tokens(f, "missing")) == [] and list(loop_tokens(f, "other")) == []  # a list, not a loop
+    f.write_text("data_particles\n\nloop_\n_rlnA #1\n_rlnB #2\n_rlnC #3\n1 2\n")
+    with pytest.raises(StarError):
+        list(loop_tokens(f, "particles"))
+    f.write_text("data_particles\n\nloop_\n_rlnA #1\n")
+    assert list(loop_tokens(f, "particles")) == [["rlnA"]]  # no rows: the labels alone
+
+
+def test_rows_formatted_ahead_are_written_as_the_same_file(tmp_path):
+    rows = [["000001@a.mrcs", "3", "two words", ""], ["_odd", "1", "#x", "data_"], ["loop_x", "2", "a", "b"]]
+    block = StarBlock.from_records("particles", ["rlnImageName", "rlnClassNumber", "rlnNote", "rlnEmpty"], rows)
+    ahead = FormattedLoop("particles", list(block.columns), [format_row(r) for r in rows])
+    optics = StarBlock.from_records("optics", ["rlnOpticsGroup"], [[1]])
+    assert format_block(ahead) == format_block(block)
+    write_star(tmp_path / "a.star", [optics, block])
+    write_star(tmp_path / "b.star", [optics, ahead], atomic=False)
+    assert (tmp_path / "a.star").read_bytes() == (tmp_path / "b.star").read_bytes() == format_star([optics, block]).encode()
+    assert format_block(FormattedLoop("particles", ["rlnA"], [])) == ""

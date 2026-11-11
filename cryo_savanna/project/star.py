@@ -279,6 +279,51 @@ def loop_columns(path: str | os.PathLike, block: str, labels: Iterable[str]) -> 
     return columns, out
 
 
+def loop_tokens(path: str | os.PathLike, block: str) -> Iterator[list[str]]:
+    """Stream one loop block: first its column labels, then every row as its values (as read_star
+    gives them, with the same checks), one at a time.
+
+    For files too big to hold as rows of strings (millions of particles): the caller keeps what it
+    needs of each row. Yields nothing when the file has no such loop block.
+    """
+    target = f"data_{block}"
+    with open(path, "r", encoding="utf-8", errors="replace") as fh:
+        for raw in fh:
+            if raw.startswith("data_") and raw.split()[0] == target:
+                break
+        else:
+            return
+        columns: list[str] = []
+        in_header = is_loop = False
+        for raw in fh:
+            line = raw.strip()
+            if not line or line[0] == "#":
+                continue
+            if line.startswith("data_"):
+                break
+            if line.startswith("loop_"):
+                is_loop = in_header = True
+                continue
+            if not is_loop:  # a list block, not a loop
+                return
+            if line[0] == "_" and in_header:
+                columns.append(line[1:].split()[0])
+                continue
+            if in_header:
+                in_header = False
+                yield columns
+            toks = tokenize_line(line)
+            if not toks:
+                continue
+            if len(toks) < len(columns) <= 2:  # as in _parse (RELION's readStarLoop)
+                toks += [""] * (len(columns) - len(toks))
+            elif len(toks) != len(columns):
+                raise StarError(f"data_{block}: expected {len(columns)} values, got {len(toks)}: {line!r}")
+            yield toks
+        if in_header and columns:  # a loop without rows
+            yield columns
+
+
 def parse_star_text(text: str, blocks: Iterable[str] | None = None) -> dict[str, StarBlock]:
     return _parse(io.StringIO(text), set(blocks) if blocks is not None else None)
 
@@ -402,43 +447,65 @@ def format_value(v) -> str:
     return escape_string(str(v))
 
 
-def format_block(block: StarBlock, version: int = CURRENT_MDT_VERSION) -> str:
-    """Render one block exactly like MetaDataTable::write (empty blocks render as '')."""
-    if not block.rows:
-        return ""
-    out = [f"\n# version {version}\n\ndata_{block.name}\n"]
+def format_row(row: Iterable) -> str:
+    """One row of a loop as MetaDataTable::write writes it, with its newline."""
+    values = [format_value(v) for v in row]
+    if values and values[0].startswith(_LINE_STARTS):
+        # RELION writes it bare, and every reader (RELION's too) then takes a row starting with
+        # "_" for a label, "data_" / "loop_" for a new block or loop, and skips one starting
+        # with ";" after the labels: quoted, it is read as the value it is
+        values[0] = _quote(values[0])
+    return "".join(f"{v:>10} " for v in values) + "\n"
+
+
+@dataclass
+class FormattedLoop:
+    """A loop block whose rows are text already (format_row): for tables too big to hold as values."""
+
+    name: str
+    columns: list[str]
+    lines: list[str]
+    comment: str = ""
+
+
+def _block_text(block: "StarBlock | FormattedLoop", version: int = CURRENT_MDT_VERSION) -> Iterator[str]:
+    """The pieces of one block, exactly as MetaDataTable::write writes it (nothing for an empty block)."""
+    formatted = isinstance(block, FormattedLoop)
+    if not (block.lines if formatted else block.rows):
+        return
+    yield f"\n# version {version}\n\ndata_{block.name}\n"
     if block.comment:
-        out.append(f"# {block.comment}\n")
-    out.append("\n")
-    if block.is_loop:
-        out.append("loop_ \n")
+        yield f"# {block.comment}\n"
+    yield "\n"
+    if formatted or block.is_loop:
+        yield "loop_ \n"
         for i, label in enumerate(block.columns, start=1):
-            out.append(f"_{label} #{i} \n")
-        for row in block.rows:
-            values = [format_value(v) for v in row]
-            if values and values[0].startswith(_LINE_STARTS):
-                # RELION writes it bare, and every reader (RELION's too) then takes a row starting with
-                # "_" for a label, "data_" / "loop_" for a new block or loop, and skips one starting
-                # with ";" after the labels: quoted, it is read as the value it is
-                values[0] = _quote(values[0])
-            out.append("".join(f"{v:>10} " for v in values))
-            out.append("\n")
-        out.append(" \n")
+            yield f"_{label} #{i} \n"
+        if formatted:
+            yield from block.lines
+        else:
+            for row in block.rows:
+                yield format_row(row)
+        yield " \n"
     else:
         max_width = max([10] + [len(c) for c in block.columns])
         row = block.rows[0]
         for label, v in zip(block.columns, row):
             pad = 12 + max_width - len(label)
-            out.append(f"_{label}{' ':>{pad}}{format_value(v)}\n")
-        out.append(" \n")
-    return "".join(out)
+            yield f"_{label}{' ':>{pad}}{format_value(v)}\n"
+        yield " \n"
 
 
-def format_star(blocks: Iterable[StarBlock]) -> str:
+def format_block(block: "StarBlock | FormattedLoop", version: int = CURRENT_MDT_VERSION) -> str:
+    """Render one block exactly like MetaDataTable::write (empty blocks render as '')."""
+    return "".join(_block_text(block, version))
+
+
+def format_star(blocks: Iterable["StarBlock | FormattedLoop"]) -> str:
     return "".join(format_block(b) for b in blocks)
 
 
-def write_star(path: str | os.PathLike, blocks: Iterable[StarBlock], atomic: bool = True) -> None:
+def write_star(path: str | os.PathLike, blocks: Iterable["StarBlock | FormattedLoop"], atomic: bool = True) -> None:
     """Write blocks to ``path``. With ``atomic`` the file is written to a temp file and renamed.
 
     A file this user may not write is refused, as RELION's in-place write would be: a rename would
@@ -447,21 +514,23 @@ def write_star(path: str | os.PathLike, blocks: Iterable[StarBlock], atomic: boo
 
     A symlink is written through, as RELION writes it: the file it points to is replaced, the link stays.
     """
-    text = format_star(blocks)
+    blocks = list(blocks)  # written piece by piece: a big table is never one string in memory
     path = os.fspath(path)
     if os.path.lexists(path) and not os.access(path, os.W_OK):
         raise PermissionError(errno.EACCES, "Not writable by you (nor by RELION run as you); ask its owner "
                               "to make it group-writable", path)
     if not atomic:
         with open(path, "w", encoding="utf-8") as fh:
-            fh.write(text)
+            for b in blocks:
+                fh.writelines(_block_text(b))
         return
     if os.path.islink(path):
         path = os.path.realpath(path)
     tmp = f"{path}.tmp.{uuid.uuid4().hex}"  # one per write: other threads, processes and hosts (a shared project)
     try:
         with open(tmp, "w", encoding="utf-8") as fh:
-            fh.write(text)
+            for b in blocks:
+                fh.writelines(_block_text(b))
             fh.flush()
             os.fsync(fh.fileno())
         # Keep permissions/group of the file we replace (projects are often group-shared).

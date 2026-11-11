@@ -22,6 +22,7 @@ import os
 import re
 import shlex
 import subprocess
+import threading
 import uuid
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -42,7 +43,7 @@ DESCRIPTIONS = {
     MATCH: "Template matching in RELION 5 tomograms with pytom-match-pick (pytom_match_template.py), "
            "on one or more GPUs",
     EXTRACT: "Particles from a pytom template matching job (pytom_extract_candidates.py), with thresholds "
-             "chosen interactively, as a RELION 5 particles.star",
+             "chosen interactively, as a RELION 5 particles.star (needs a GPU machine, like matching)",
 }
 ENV_VAR = "CRYO_SAVANNA_PYTOM_ENV"  # default conda environment of pytom
 CUDA_ENV_VAR = "CRYO_SAVANNA_CUDA_MODULE"  # default CUDA module
@@ -96,6 +97,25 @@ def default_cuda_module() -> str:
     except (OSError, subprocess.SubprocessError):
         return ""
     return pick_cuda_module(r.stdout) if r.returncode == 0 else ""
+
+
+_warming: threading.Thread | None = None
+
+
+def warm_defaults() -> None:
+    """Start looking up default_cuda_module() in the background (once): "module avail" can take many
+    seconds on a cluster, and the first pytom form would otherwise wait for it with the window frozen."""
+    global _warming
+    if _warming is None:
+        _warming = threading.Thread(target=default_cuda_module, name="cryo-savanna-cuda-module", daemon=True)
+        _warming.start()
+
+
+def _warmed_cuda_module() -> str:
+    """default_cuda_module(), after a look started by warm_defaults() (not a second one beside it)."""
+    if _warming is not None and _warming is not threading.current_thread():
+        _warming.join()
+    return default_cuda_module()
 
 
 def _o(key, label, default="", help="", kind="any", **kw) -> OptionDef:
@@ -504,11 +524,15 @@ class PytomCatalog:
         own, tabs, groups = match_options() if kind == MATCH else extract_options()
         options = {o.key: o for o in own}
         options["pytom_env"] = replace(options["pytom_env"], default=default_env())
-        options["cuda_module"] = replace(options["cuda_module"], default=default_cuda_module())
+        options["cuda_module"] = replace(options["cuda_module"], default=_warmed_cuda_module())
         if kind == EXTRACT:
             options["nr_threads"] = replace(ext["nr_threads"], label="Tomograms at a time:", help=(
-                "Extractions run in parallel (CPU; each is one pytom process). Also the number of threads "
-                "a queue script reserves (XXXthreadsXXX)."))
+                "Extractions run in parallel, each one pytom process. Also the number of threads a queue "
+                "script reserves (XXXthreadsXXX). pytom's programs look for a GPU when they start, so the "
+                "job needs a machine with a GPU and its NVIDIA driver even to extract: submit it to a GPU "
+                "queue (ask for one GPU in the submission script, e.g. --gres=gpu:1) or run it on a GPU "
+                "workstation; on a machine without one, every tomogram fails with "
+                "'cudaErrorInsufficientDriver'."))
         else:
             options["nr_threads"] = replace(ext["nr_threads"], help=(
                 "CPU threads to reserve on the queue (XXXthreadsXXX in the submission script). pytom's matching "
@@ -530,13 +554,15 @@ class PytomCatalog:
                             own_keys=tuple(o.key for o in own), external=external, env=self.env)
 
 
-def last_settings(project_dir: Path, pipeline: Pipeline | None, kind: str) -> dict[str, str]:
+def last_settings(project_dir: Path, pipeline: Pipeline | None, kind: str,
+                  jobs: list[str] | None = None) -> dict[str, str]:
     """CUDA module, pytom environment and conda command of the newest pytom job in the project (any kind),
-    so they need typing only once."""
+    so they need typing only once. ``jobs``: the project's pytom jobs, when the caller knows them (the
+    window does, from its snapshot): only those are read, not every External job's job.star."""
     if pipeline is None:
         return {}
     for name, pr in reversed(list(pipeline.processes.items())):
-        if pr.type_label != EXTERNAL:
+        if pr.type_label != EXTERNAL or (jobs is not None and name not in jobs):
             continue
         try:
             js = JobStar.read(Path(project_dir) / name / "job.star")

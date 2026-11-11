@@ -46,6 +46,7 @@ from cryo_savanna.project.selection import (
 from cryo_savanna.results.classes import read_model_classes
 from cryo_savanna.results.tomo import tilt_figures
 from cryo_savanna.ui import style
+from cryo_savanna.ui.busy import run_busy
 from cryo_savanna.viewers.gallery import GalleryItem, GalleryView
 from cryo_savanna.viewers.tasks import TaskError, Tasks
 from cryo_savanna.viewers.tomo_viewer import TiltSeriesViewer
@@ -478,7 +479,10 @@ class SelectionView(QWidget):
         else:
             source = o.get("in_tiltseries", "")
             try:
-                kept = read_tilt_exclusion(read_tilt_input(self.project_dir, source), self.job)
+                # one STAR file per tilt series, of the input and of the job: read in a thread
+                project, job = self.project_dir, self.job
+                kept = run_busy(lambda: read_tilt_exclusion(read_tilt_input(project, source), job),
+                                "Reading the tilt series…", self)
             except (OSError, ValueError, KeyError, SelectionError) as e:
                 self.note.setText(f"⚠ {e}")
                 return

@@ -370,6 +370,7 @@ class VolumeViewer(QWidget):
         self.color_range = (0.0, 1.0)
         self.pos = [0, 0, 0]  # [z, y, x], full-map voxels
         self._stamp = None
+        self._others: dict[str, tuple] = {}  # mask / local-resolution map -> (stamp, Volume): read once
         self.error = ""
 
         self.iteration = QComboBox()
@@ -484,11 +485,19 @@ class VolumeViewer(QWidget):
         project = self.project_dir
         self._stamp = _stamp(project / rel)
 
+        kept = self._others  # the mask and the local-resolution map stay the same from map to map
+
+        def other(name: str):
+            if not name or not (project / name).is_file():
+                return None
+            st = _stamp(project / name)
+            hit = kept.get(name)
+            if hit is None or hit[0] != st:
+                hit = kept[name] = (st, load_volume(project / name))
+            return hit[1]
+
         def read():
-            v = load_volume(project / rel)
-            m = load_volume(project / mask) if mask and (project / mask).is_file() else None
-            c = load_volume(project / color) if color and (project / color).is_file() else None
-            return v, m, c
+            return load_volume(project / rel), other(mask), other(color)
 
         self.info.setText("Reading…")
         self.tasks.run(read, lambda r: self._on_loaded(r, keep_view), channel="load")

@@ -33,6 +33,7 @@ from qtpy.QtWidgets import (
 from cryo_savanna.env.relion_env import RelionEnv
 from cryo_savanna.images.cache import cache_root, cache_size_mb, clear_cache
 from cryo_savanna.project import scratch
+from cryo_savanna.ui.busy import run_busy, when_done
 from cryo_savanna.ui.style import THEMES
 
 # key, default, what it is
@@ -208,7 +209,12 @@ class PreferencesDialog(QDialog):
         lay.addWidget(buttons)
 
     def _cache_label(self) -> None:
-        self.cache_info.setText(f"<span style='color:gray'>{cache_root()} — {cache_size_mb():.0f} MB now</span>")
+        """Where the cache is and how big: one look at every cached image, so in a thread (a full cache
+        on a network home is tens of thousands of files)."""
+        root = cache_root()
+        self.cache_info.setText(f"<span style='color:gray'>{root} — measuring…</span>")
+        when_done(self, cache_size_mb, lambda mb: self.cache_info.setText(
+            f"<span style='color:gray'>{root} — {mb:.0f} MB now</span>"))
 
     def _browse_scratch(self) -> None:
         d = QFileDialog.getExistingDirectory(self, "Scratch directory", self.scratch.text().strip())
@@ -235,8 +241,8 @@ class PreferencesDialog(QDialog):
         if WipeScratchDialog(base, dirs, self).exec() != QDialog.Accepted:
             return
         QApplication.setOverrideCursor(Qt.WaitCursor)
-        try:
-            errors = scratch.wipe(dirs)
+        try:  # particle copies of many jobs: minutes to delete, in a thread with the window alive
+            errors = run_busy(lambda: scratch.wipe(dirs), f"Deleting {len(dirs)} savanna_NNN folders in {base}…", self)
         finally:
             QApplication.restoreOverrideCursor()
         if errors:
@@ -247,7 +253,8 @@ class PreferencesDialog(QDialog):
                                     f"from {base}.")
 
     def _clear_cache(self) -> None:
-        clear_cache()  # only cryo-savanna's own files: the root may hold other things
+        # only cryo-savanna's own files: the root may hold other things
+        run_busy(clear_cache, "Emptying the image cache…", self)
         self._cache_label()
 
     def accept(self) -> None:

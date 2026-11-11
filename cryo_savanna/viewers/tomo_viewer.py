@@ -21,6 +21,8 @@ session, per project).
 from __future__ import annotations
 
 import os
+import threading
+from collections import OrderedDict
 from pathlib import Path
 
 import numpy as np
@@ -309,6 +311,30 @@ class SideView(pg.GraphicsView):
         self.on_click(p.x(), p.y())
 
 
+_SIDES: OrderedDict[tuple, object] = OrderedDict()  # (path, stamp) -> binned Volume for the side views
+_SIDES_LOCK = threading.Lock()
+SIDES_KEPT = 4
+
+
+def side_volume(path: str):
+    """The binned copy of a tomogram that the side views show. Making it reads the whole tomogram, so
+    the last few are kept (by the file's stamp): going back to a tomogram, or switching "beside it" on,
+    reads nothing again. Only the binned copy is kept, never the full map."""
+    key = (os.path.realpath(path), _stamp(Path(path)))
+    with _SIDES_LOCK:
+        hit = _SIDES.get(key)
+        if hit is not None:
+            _SIDES.move_to_end(key)
+            return hit
+    side = load_volume(path, max_size=256)
+    side.full = None  # sections come from the file: up to 128 MB per tomogram shown otherwise
+    with _SIDES_LOCK:
+        _SIDES[key] = side
+        while len(_SIDES) > SIDES_KEPT:
+            _SIDES.popitem(last=False)
+    return side
+
+
 class TomogramViewer(QWidget):
     def __init__(self, project_dir: Path, star: str, picks: str = "", diameter: float | None = None, cache=None,
                  parent=None):
@@ -325,6 +351,7 @@ class TomogramViewer(QWidget):
         self.levels = (0.0, 1.0)
         self._stamp = None
         self.picks_loaded = None  # called with the TomoPicks when they were (re)read
+        self._side_dots = None  # what the side views' dots were drawn from (they do not move with the slab)
 
         self.model = TableModel(self)
         self.proxy = RowFilter(self)
@@ -586,8 +613,7 @@ class TomogramViewer(QWidget):
         def read():
             with MrcReader(ref.path) as r:
                 shape, voxel = (r.nz, r.ny, r.nx), r.voxel
-            side = load_volume(ref.path, max_size=256)
-            return shape, voxel, side
+            return shape, voxel, side_volume(ref.path)
 
         self.tasks.run(read, lambda res, rf=ref: self._on_geometry(rf, res), channel="geometry")
 
@@ -698,6 +724,7 @@ class TomogramViewer(QWidget):
             for s in (self.xz, self.yz):
                 s.dots.prepareGeometryChange()  # see ImageCanvas.set_points
                 s.dots.clear()
+            self._side_dots = None
             return
         r = self.diameter.value() / 2 / self.voxel
         dz = np.abs(xyz[:, 2] - (self.z + 0.5))
@@ -707,6 +734,14 @@ class TomogramViewer(QWidget):
         cut_colors = [c for c, k in zip(colors, cut) if k] if isinstance(colors, list) else colors
         for c in (self.canvas, self.raw):
             c.set_points(xyz[cut, 0], xyz[cut, 1], np.maximum(size, 2), cut_colors)
+        self.cut_count = int(cut.sum())
+        # the side views show every particle, wherever the slab is: drawn again only when the particles
+        # or their colours changed, not at every step of the Z slider
+        drawn = (xyz.tobytes(), None if cls is None else np.asarray(cls).tobytes(),
+                 tuple(colors) if isinstance(colors, list) else colors)
+        if drawn == self._side_dots:
+            return
+        self._side_dots = drawn
         if isinstance(colors, list):
             brushes = {c: pg.mkBrush(*c, 160) for c in set(colors)}
             brush = [brushes[c] for c in colors]
@@ -716,4 +751,3 @@ class TomogramViewer(QWidget):
             s.dots.prepareGeometryChange()
         self.xz.dots.setData(x=xyz[:, 0], y=xyz[:, 2], brush=brush)
         self.yz.dots.setData(x=xyz[:, 1], y=xyz[:, 2], brush=brush)
-        self.cut_count = int(cut.sum())

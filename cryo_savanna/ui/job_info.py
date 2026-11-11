@@ -118,6 +118,10 @@ class JobInfoPanel(QTabWidget):
         self.overview.setHtml(self._overview_html())
         self.overview.verticalScrollBar().setValue(scroll)
 
+    def keep_job(self, snap: ProjectSnapshot) -> None:
+        """A new snapshot in which the job shown is as it was: nothing is read or drawn again."""
+        self._snap = snap
+
     def show_job(self, snap: ProjectSnapshot, name: str | None) -> None:
         reload_options = name != self._job or snap.jobs.get(name) is None
         self._snap, self._job = snap, name

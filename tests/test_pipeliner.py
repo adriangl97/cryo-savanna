@@ -207,3 +207,30 @@ def test_repeating_runs_that_stopped_are_not_listed(project):
     (project / "pipeline_cryo-savanna_failed.log").write_text(
         " + Stopping pipeliner due to a job that failed with an error ...\n")
     assert [r.id for r in pl.repeating_runs()] == ["going"]
+
+
+def test_a_run_whose_process_number_was_given_out_again_is_not_alive(tmp_path):
+    """After a restart a run is found by its process number; another program that got that number since
+    (here: this test) is not the run's relion_pipeliner."""
+    import os
+    import socket
+    import subprocess
+    import sys
+
+    from cryo_savanna.project.pipeliner import RunRecord, _command_line
+    rec = RunRecord("a", ["Class2D/job002/"], "cryo-savanna_a", os.getpid(), socket.gethostname(), "me", 0.0, [], 3)
+    assert rec.is_alive() is False
+    proc = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)", "--RunJobs", "Class2D/job002/",
+                             "--schedule", "cryo-savanna_a"])
+    try:
+        deadline = time.time() + 10
+        while "--RunJobs" not in (_command_line(proc.pid) or []) and time.time() < deadline:
+            time.sleep(0.05)
+        mine = RunRecord("a", ["Class2D/job002/"], "cryo-savanna_a", proc.pid, socket.gethostname(), "me", 0.0, [], 3)
+        other = RunRecord("b", ["Class2D/job002/"], "cryo-savanna_b", proc.pid, socket.gethostname(), "me", 0.0, [], 3)
+        assert mine._is_this_run() and not other._is_this_run()
+        assert mine.is_alive() is True
+    finally:
+        proc.kill()
+        proc.wait()
+    assert mine.is_alive() is False

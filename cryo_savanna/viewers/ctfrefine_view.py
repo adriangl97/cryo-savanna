@@ -358,6 +358,7 @@ class MicrographMap(QWidget):
         lay.addWidget(self.grid, 1)
         lay.addWidget(self.info)
         self._groups: dict[str, np.ndarray] = {}
+        self._level_cache: dict[str, tuple[float, float, bool]] = {}
         self._sizes: dict[str, tuple[int, int]] = {}
         self._project: Path | None = None
         self._pixel_size: float | None = None
@@ -366,6 +367,7 @@ class MicrographMap(QWidget):
         self._project = project_dir
         keep_mic, keep_val = self.mic.currentData(), self.value.currentData()
         self.table = t
+        self._level_cache.clear()
         labels = [c for c, _ in MAP_VALUES if t.has(c)]
         self.summary = C.per_micrograph(t, labels)
         names = t.column("rlnMicrographName") if t.has("rlnMicrographName") else []
@@ -398,7 +400,13 @@ class MicrographMap(QWidget):
             self.mic.setCurrentIndex((self.mic.currentIndex() + d) % n)
 
     def _levels(self, col: str) -> tuple[float, float, bool]:
-        """Colour range of a value over all particles (so micrographs compare), and whether it is signed."""
+        """Colour range of a value over all particles (so micrographs compare), and whether it is signed.
+        Worked out once per value: a percentile over every particle, asked for at each micrograph shown."""
+        if col not in self._level_cache:
+            self._level_cache[col] = self._find_levels(col)
+        return self._level_cache[col]
+
+    def _find_levels(self, col: str) -> tuple[float, float, bool]:
         v = self.table.numeric(col)
         v = v[np.isfinite(v)] if v is not None else np.empty(0)
         if not len(v):

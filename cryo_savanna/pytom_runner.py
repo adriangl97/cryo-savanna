@@ -629,7 +629,10 @@ def tilt_table(row, opts):
         dose = _f(t, "rlnMicrographPreExposure")
         u, v = _f(t, "rlnDefocusU"), _f(t, "rlnDefocusV")
         defocus = None if u is None else ((u + (v if v is not None else u)) / 2) / 1e4
-        out.append((_f(t, angle_col), dose, defocus))
+        angle = _f(t, angle_col)
+        if angle is None:
+            raise Usage("%s: a tilt without a %s (%r) in %s" % (row[TOMO_NAME], angle_col, t.get(angle_col, ""), star))
+        out.append((angle, dose, defocus))
     out.sort(key=lambda r: r[0])
     return star, out
 

@@ -133,7 +133,8 @@ class ImageCanvas(QWidget):
         size = preview_size(int(max(self.gv.width(), self.gv.height(), 256) * self.devicePixelRatioF()))
         cache, disk = self.cache, self.disk_cache
         if cache is not None:
-            self.tasks.run(lambda: load_preview(ref, size, cache, disk))
+            # a channel of its own: stepping quickly, only the newest image ahead is read
+            self.tasks.run(lambda: load_preview(ref, size, cache, disk), channel="prefetch")
 
     def set_array(self, img: np.ndarray, keep_view: bool = False) -> None:
         """Show an array that is already in memory (no detail refinement)."""

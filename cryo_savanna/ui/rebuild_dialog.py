@@ -38,14 +38,17 @@ from cryo_savanna.project.ops import decompose
 from cryo_savanna.project.pipeline import Pipeline
 from cryo_savanna.project.rebuild import RECENT_S, FoundJob, RebuildError, Scan, adopt_folder, scan, write_pipeline
 from cryo_savanna.relion_consts import JOB_TYPES, STATUS_LABELS
+from cryo_savanna.ui.busy import run_busy
 
 COLUMNS = ("Job", "Type", "Status", "Inputs from", "Outputs", "Read from", "Notes")
 
 
-def _busy(fn: Callable):
+def _busy(fn: Callable, text: str = "Reading the job folders…", parent: QWidget | None = None):
+    """Reading (or writing) every job folder takes a while over a network file system: in a thread,
+    with the window alive meanwhile (ui/busy.py)."""
     QApplication.setOverrideCursor(QCursor(Qt.CursorShape.WaitCursor))
     try:
-        return fn()
+        return run_busy(fn, text, parent)
     finally:
         QApplication.restoreOverrideCursor()
 
@@ -204,7 +207,7 @@ class RebuildDialog(QDialog):
         except (RebuildError, OSError) as e:
             QMessageBox.warning(self, "Add folder as job", str(e))
             return
-        self.result = _busy(self.rescan)
+        self.result = _busy(self.rescan, parent=self)
         self.fill()
         QMessageBox.information(self, "Add folder as job", f"{rel} is now {_short(name)}.")
 
@@ -222,7 +225,8 @@ def run_rebuild(project_dir: Path, defs, new: bool, pipeline: Pipeline | None = 
         current = None if new else Pipeline.read(project_dir)
         return scan(project_dir, current, defs=defs)
 
-    result = _busy(rescan) if pipeline is None or new else _busy(lambda: scan(project_dir, pipeline, defs=defs))
+    result = _busy(rescan, parent=parent) if pipeline is None or new else \
+        _busy(lambda: scan(project_dir, pipeline, defs=defs), parent=parent)
     dlg = RebuildDialog(project_dir, result, rescan, new, type_names, parent)
     if dlg.exec() != QDialog.Accepted:
         return None
@@ -231,7 +235,8 @@ def run_rebuild(project_dir: Path, defs, new: bool, pipeline: Pipeline | None = 
         write(dlg.result, jobs, statuses)
         return jobs
     try:
-        return _busy(lambda: write_pipeline(project_dir, dlg.result, jobs, statuses, new=new))
+        return _busy(lambda: write_pipeline(project_dir, dlg.result, jobs, statuses, new=new),
+                     "Writing default_pipeline.star…", parent)
     except (RebuildError, OSError, RuntimeError) as e:
         QMessageBox.critical(parent, "cryo-savanna", f"The pipeline was not written: {e}")
         return None

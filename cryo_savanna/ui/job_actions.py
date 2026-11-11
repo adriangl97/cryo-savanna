@@ -39,6 +39,8 @@ from cryo_savanna.env.relion_env import RelionEnv, RelionEnvError
 from cryo_savanna.jobdefs.cli_catalog import CATEGORIES, describe
 from cryo_savanna.jobdefs.cli_tools import CliCatalog, CliVariant, cli_program_of
 from cryo_savanna.jobdefs.model import JobDefs, JobVariant
+from cryo_savanna.jobdefs.pytom_jobs import TITLES as PYTOM_TITLES
+from cryo_savanna.jobdefs.pytom_jobs import warm_defaults as warm_pytom_defaults
 from cryo_savanna.jobdefs.pytom_jobs import (DESCRIPTIONS as PYTOM_DESCRIPTIONS, EXTRACT as PYTOM_EXTRACT,
                                              MATCH as PYTOM_MATCH, PytomCatalog, PytomVariant, last_settings,
                                              pytom_kind_of, quoted_values)
@@ -65,6 +67,7 @@ from cryo_savanna.project.selection import (
 from cryo_savanna.project.snapshot import ProjectSnapshot
 from cryo_savanna.relion_consts import RELION_JOB_EXIT_ABORTED, RELION_JOB_EXIT_FAILURE, RELION_JOB_EXIT_SUCCESS
 from cryo_savanna.ui import style
+from cryo_savanna.ui.busy import run_busy
 from cryo_savanna.ui.job_editor import MODE_CONTINUE, MODE_OVERWRITE, JobEditor
 
 
@@ -206,6 +209,7 @@ class JobActions(QObject):
         self.editor = JobEditor(env, type_names, flag_source=flag_source)
         self.cli = CliCatalog(defs, env, self.editor.flag_source)
         self.pytom = PytomCatalog(defs, env)
+        warm_pytom_defaults()  # "module avail cuda", in the background: not when the first form opens
         self.editor.submit.connect(self._on_submit)
         # the editor goes in its own window or in the dock (Preferences → Job editor: set_editor_place)
         self.dock = QDockWidget("Job editor", window)
@@ -558,7 +562,10 @@ class JobActions(QObject):
         values = variant.default_values(self.env)
         pipeline = self.snapshot.pipeline if self.snapshot is not None else None
         if self.project_dir is not None:
-            values.update(last_settings(self.project_dir, pipeline, kind))
+            # the snapshot knows what every External job runs: only the pytom ones are read
+            pytom = [n for n, j in self.snapshot.jobs.items() if j.program in PYTOM_TITLES.values()] \
+                if self.snapshot is not None else None
+            values.update(last_settings(self.project_dir, pipeline, kind, pytom))
         if pipeline is not None:  # the newest input of the right kind, as a start
             values.update(_newest_inputs(pipeline, kind))
         self._edit(variant.program, self.editor.new_job, variant, values,
@@ -828,7 +835,8 @@ class JobActions(QObject):
         try:
             if kind == "classes":
                 src = o["fn_model"]
-                inp = read_class_input(self.project_dir, src)
+                # the model and one STAR file per tilt series are read in a thread (ui/busy.py)
+                inp = run_busy(lambda: read_class_input(self.project_dir, src), "Reading the classes…", self.window)
                 pre = read_backup_selection(self.project_dir, job, len(inp.classes)) if job else None
                 w = ClassSelector(self.project_dir, src, selected_numbers(inp, pre),
                                   recenter=o.get("do_recenter") == "Yes",
@@ -836,7 +844,8 @@ class JobActions(QObject):
                                   title=f"Select classes — {src} — {what}", parent=self.window)
             else:
                 src = o["in_tiltseries"]
-                kept = read_tilt_exclusion(read_tilt_input(self.project_dir, src), job) if job else None
+                kept = run_busy(lambda: read_tilt_exclusion(read_tilt_input(self.project_dir, src), job),
+                                "Reading the tilt series…", self.window) if job else None
                 w = TiltExcluder(self.project_dir, src, kept, title=f"Exclude tilt images — {src} — {what}",
                                  parent=self.window)
         except (OSError, ValueError, KeyError, SelectionError) as e:

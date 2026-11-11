@@ -446,3 +446,102 @@ def test_ctf_refine_summary_while_running(qtbot, tmp_path):
     settle(qtbot)
     assert "Per-micrograph fits done for 1 micrograph." in s.text.toPlainText()
     assert not s.log_btn.isEnabled()
+
+
+def test_a_read_overtaken_while_it_waits_is_not_run(qtbot):
+    """Stepping quickly through micrographs: a read still waiting for a thread when the next one is asked
+    for on its channel is skipped, so the last one does not wait behind reads nobody will see."""
+    import threading
+
+    from qtpy.QtCore import QObject
+
+    from cryo_savanna.viewers.tasks import Tasks
+    owner = QObject()
+    tasks = Tasks(owner)
+    release, ran, got = threading.Event(), [], []
+    for _ in range(pool().maxThreadCount()):  # every thread busy
+        tasks.run(release.wait)
+    for i in range(5):
+        tasks.run(lambda i=i: ran.append(i) or i, got.append, channel="image")
+    tasks.run(lambda: ran.append("other") or "other", got.append, channel="detail")
+    tasks.run(lambda: ran.append("plain") or "plain", got.append)  # no channel: always run
+    release.set()
+    assert tasks.wait() and not tasks.busy()
+    assert sorted(map(str, ran)) == ["4", "other", "plain"] and sorted(map(str, got)) == ["4", "other", "plain"]
+
+
+def test_movie_sum_adds_the_first_frames(tmp_path):
+    from cryo_savanna.images.mrc import read_movie_sum
+    frames = np.arange(10 * 6 * 8, dtype=np.int16).reshape(10, 6, 8)
+    with mrcfile.new(tmp_path / "movie.mrcs") as m:
+        m.set_data(frames)
+    total = read_movie_sum(str(tmp_path / "movie.mrcs"))
+    assert total.dtype == np.float32 and np.array_equal(total, frames[:8].sum(axis=0))
+    assert np.array_equal(read_movie_sum(str(tmp_path / "movie.mrcs"), max_frames=1), frames[0])
+    tifffile = pytest.importorskip("tifffile")
+    tifffile.imwrite(tmp_path / "movie.tif", frames.astype(np.uint8))
+    assert np.array_equal(read_movie_sum(str(tmp_path / "movie.tif")), frames.astype(np.uint8)[:8].sum(axis=0))
+
+
+def test_big_table_is_filtered_when_typing_pauses_and_skips_number_columns(qtbot, monkeypatch):
+    from cryo_savanna.viewers import star_table
+    from cryo_savanna.viewers.star_table import RowFilter, TableModel
+    n = 50
+    table = Table("particles", ["rlnMicrographName", "rlnDefocusU", "rlnNote"],
+                  {"rlnMicrographName": [f"Mics/mic{i:04d}.mrc" for i in range(n)],
+                   "rlnDefocusU": np.arange(n, dtype=np.float64) * 1000 + 0.5,
+                   "rlnNote": ["e5" if i == 7 else "x" for i in range(n)]})
+    model = TableModel()
+    model.set_table(table)
+    proxy = RowFilter()
+    proxy.setSourceModel(model)
+    asked = []
+    text = model.column_text
+    monkeypatch.setattr(model, "column_text", lambda c: asked.append(c) or text(c))
+    proxy.setFilterFixedString("mic0012")  # small table: at once; a text with letters: not in the numbers
+    assert proxy.rowCount() == 1 and asked == [1, 3]
+    asked.clear()
+    proxy.setFilterFixedString("37000.5")  # could be a number: every column
+    assert proxy.rowCount() == 1 and asked == [0, 1, 2, 3]
+    proxy.setFilterFixedString("e5")  # so could this (an exponent): found in the text column
+    assert proxy.rowCount() == 1
+    monkeypatch.setattr(star_table, "FILTER_AT_ONCE_ROWS", 10)  # now a big table
+    for typed in ("m", "mi", "mic000"):
+        proxy.setFilterFixedString(typed)
+    assert proxy.rowCount() == 1  # not yet: the typing has not paused
+    qtbot.waitUntil(lambda: proxy.rowCount() == 10, timeout=3000)
+    proxy.setFilterFixedString("")
+    proxy.flush_filter()
+    assert proxy.rowCount() == n
+
+
+def test_iteration_maps_are_listed_again_only_when_the_job_directory_changed(tmp_path):
+    from cryo_savanna.viewers.views import _while_unchanged
+    calls = []
+    listed = _while_unchanged(tmp_path, lambda: calls.append(1) or sorted(p.name for p in tmp_path.iterdir()))
+    assert listed() == [] and listed() == [] and len(calls) == 1
+    (tmp_path / "run_it001_class001.mrc").write_bytes(b"")
+    os.utime(tmp_path, ns=(1, 1))  # the directory changed, whatever the clock's resolution
+    assert listed() == ["run_it001_class001.mrc"] and listed() and len(calls) == 2
+
+
+def test_only_the_newest_image_ahead_is_read(qtbot):
+    """Each step through the micrographs asks for the next one ahead of time: stepping quickly, those
+    reads do not pile up in front of the image wanted."""
+    import threading
+    canvas = ImageCanvas(cache=object())
+    qtbot.addWidget(canvas)
+    release, read = threading.Event(), []
+    for _ in range(pool().maxThreadCount()):
+        canvas.tasks.run(release.wait)
+    import cryo_savanna.viewers.image_canvas as ic
+    orig = ic.load_preview
+    ic.load_preview = lambda ref, *a: read.append(ref.path)
+    try:
+        for i in range(6):
+            canvas.prefetch(ImageRef(f"mic{i}.mrc"))
+        release.set()
+        assert canvas.tasks.wait()
+    finally:
+        ic.load_preview = orig
+    assert read == ["mic5.mrc"]

@@ -207,6 +207,9 @@ pytom writes into the extraction job's own directory (the matching job's score m
 there). The output is RELION 5's: `particles.star` (rlnTomoName, rlnCenteredCoordinate[XYZ]Angst,
 the angles as rlnAngleRot/Tilt/Psi or rlnTomoSubtomogramRot/Tilt/Psi, rlnLCCmax and
 rlnAutopickFigureOfMerit) and `optimisation_set.star` with the tomograms, for Extract subtomos.
+Like matching, extraction has to run on a machine with a GPU and its NVIDIA driver: pytom's
+programs look for a GPU as they start, even for the extraction itself. Submit it to a GPU queue
+(one GPU is enough) or run it on a GPU workstation. On a machine without one (a CPU node) every tomogram fails with `cudaErrorInsufficientDriver`.
 
 ## Preferences (Ctrl+,)
 

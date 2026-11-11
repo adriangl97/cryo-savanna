@@ -3,7 +3,10 @@
 """Background reads for the viewers: functions run in a shared thread pool, results come back on the GUI thread.
 
 A result is dropped when its owner widget is gone, or when a newer request was made on the same
-channel (e.g. the user moved on to the next micrograph before the last one was read).
+channel (e.g. the user moved on to the next micrograph before the last one was read). A request that
+is still waiting for a thread when a newer one is made on its channel is not run at all: stepping
+quickly through micrographs or dragging a slider does not make the last one wait behind reads nobody
+will see.
 """
 
 from __future__ import annotations
@@ -44,15 +47,18 @@ class _Signals(QObject):
 
 
 class _Job(QRunnable):
-    def __init__(self, ticket: int, fn: Callable, signals: _Signals):
+    def __init__(self, ticket: int, fn: Callable, signals: _Signals, stale: Callable[[], bool] | None = None):
         super().__init__()
-        self.ticket, self.fn, self.signals = ticket, fn, signals
+        self.ticket, self.fn, self.signals, self.stale = ticket, fn, signals, stale
 
     def run(self) -> None:
-        try:
-            result = self.fn()
-        except Exception as e:  # noqa: BLE001 - shown in the viewer
-            result = TaskError(e)
+        if self.stale is not None and self.stale():
+            result = None  # superseded while it waited: _deliver drops it (and forgets its callback)
+        else:
+            try:
+                result = self.fn()
+            except Exception as e:  # noqa: BLE001 - shown in the viewer
+                result = TaskError(e)
         try:
             self.signals.done.emit(self.ticket, result)
         except RuntimeError:  # the owner is gone
@@ -72,9 +78,12 @@ class Tasks(QObject):
         self._next += 1
         ticket = self._next
         self._callbacks[ticket] = (callback, channel)
+        stale = None
         if channel is not None:
             self._latest[channel] = ticket
-        pool().start(_Job(ticket, fn, self._signals))
+            latest = self._latest  # read in the pool's thread: one dictionary look-up
+            stale = lambda: latest.get(channel) != ticket  # noqa: E731
+        pool().start(_Job(ticket, fn, self._signals, stale))
         return ticket
 
     def cancel(self, channel: str) -> None:

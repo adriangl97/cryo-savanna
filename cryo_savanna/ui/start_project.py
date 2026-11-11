@@ -15,6 +15,7 @@ from qtpy.QtCore import Qt
 from qtpy.QtGui import QCursor
 from qtpy.QtWidgets import QApplication, QFileDialog, QMessageBox, QWidget
 
+from cryo_savanna.ui.busy import run_busy
 from cryo_savanna.project.new_project import NewProjectError, create_project, is_project
 from cryo_savanna.project.rebuild import find_job_dirs
 
@@ -93,7 +94,8 @@ def choose_project(
         elif answer == NEW and not readonly and not jobs:
             QApplication.setOverrideCursor(QCursor(Qt.CursorShape.WaitCursor))  # relion takes a few seconds
             try:
-                how, error = create(folder), None
+                # in a thread: the dialogs are painted meanwhile (ui/busy.py)
+                how, error = run_busy(lambda: create(folder), f"Starting a RELION project in {folder}…"), None
             except NewProjectError as e:
                 how, error = None, str(e)
             finally:

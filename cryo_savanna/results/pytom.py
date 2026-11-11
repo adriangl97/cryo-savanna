@@ -21,6 +21,7 @@ from cryo_savanna import pytom_runner as P
 from cryo_savanna.images.mrc import MrcReader
 from cryo_savanna.project.star import loop_columns, read_star
 from cryo_savanna.results.tables import Table
+from cryo_savanna.results.tomo import rows_by_name
 
 
 def _stamp(path: Path):
@@ -171,9 +172,8 @@ def read_selection(project_dir: Path, job: str) -> Selection:
     r = loop_columns(d / P.CANDIDATES, "particles", [P.TOMO_NAME, P.LCC])
     if r is None or P.TOMO_NAME not in r[1] or P.LCC not in r[1]:
         raise ValueError(f"{job}{P.CANDIDATES}: no candidates (rlnTomoName, rlnLCCmax)")
-    names = np.array(r[1][P.TOMO_NAME])
     lcc = np.array([_float(v) if _float(v) is not None else np.nan for v in r[1][P.LCC]], dtype=float)
-    by = {str(n): lcc[names == n] for n in dict.fromkeys(names.tolist())}
+    by = {n: lcc[i] for n, i in rows_by_name(r[1][P.TOMO_NAME]).items()}
     sel = Selection(job, by)
     t = loop_columns(d / P.THRESHOLDS, "thresholds", [P.TOMO_NAME, P.COL_AUTO, P.COL_THRESHOLD])
     if t is not None and P.TOMO_NAME in t[1]:
