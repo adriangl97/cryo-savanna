@@ -35,6 +35,7 @@ The Qt tests run offscreen (`QT_QPA_PLATFORM=offscreen`), so no display is neede
 | `cryo_savanna/jobdefs/model.py` | Loads the definitions and applies the `RELION_*` environment |
 | `cryo_savanna/jobdefs/cli_catalog.py`, `cli_tools.py`, `cryo_savanna/cli_runner.py` | CLI tools: the catalog, job forms from `--help`, and the runner RELION starts for them |
 | `cryo_savanna/jobdefs/pytom_jobs.py`, `cryo_savanna/pytom_runner.py`, `cryo_savanna/results/pytom.py`, `cryo_savanna/viewers/pytom_view.py` | "Additional external jobs": pytom-match-pick's forms, the runner RELION starts for them (standard library only), what they wrote, their viewers |
+| `cryo_savanna/jobdefs/aretomo_jobs.py`, `cryo_savanna/aretomo_runner.py` | "Additional external jobs": AreTomo3's form and its runner (standard library only; it imports the helpers of `pytom_runner.py`, and both are copied into the project) |
 | `cryo_savanna/jobdefs/flags.py`, `jobdefs/help/` | Flags of the program behind each job's "Additional arguments", from `--help` (bundled 5.1.1 texts as fallback) |
 | `cryo_savanna/env/relion_env.py` | Reads `RELION_*` variables the same way RELION does |
 | `cryo_savanna/tools/validate.py` | Checks cryo-savanna against a real RELION install |

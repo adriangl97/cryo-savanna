@@ -6,8 +6,9 @@ The main input of a job is, in this order:
 
 1. the one chosen for that job in cryo-savanna (``main_inputs``: job -> input node, kept by
    project/main_inputs.py), if it is still one of the job's inputs;
-2. for a pytom job (an External job, jobdefs/pytom_jobs.py), the file of its form's main input field
-   (its tomograms, its matching job), whichever External field it went in. When the pipeline has no
+2. for a pytom or AreTomo3 job (External jobs, jobdefs/pytom_jobs.py, aretomo_jobs.py), the file of its
+   form's main input field (its tomograms, its matching job, its tilt series), whichever External field it
+   went in. When the pipeline has no
    such input (an extraction added while its matching job ran: the matching job's output was no
    pipeline node yet, so RELION could not link it), the job sits under the job whose directory holds
    that file;
@@ -30,6 +31,7 @@ from collections.abc import Callable, Mapping
 from pathlib import Path
 
 from cryo_savanna.jobdefs.model import JobDefs
+from cryo_savanna.jobdefs.aretomo_jobs import aretomo_main_input
 from cryo_savanna.jobdefs.pytom_jobs import pytom_main_input
 from cryo_savanna.project.jobstar import JobStar
 from cryo_savanna.project.pipeline import Pipeline
@@ -75,9 +77,10 @@ def default_input(pipeline: Pipeline, ordered: list[str]) -> str | None:
 def _own_main_input(
     process_name: str, project_dir: str | os.PathLike, read_jobstar: Callable[[Path], JobStar]
 ) -> str | None:
-    """The main input a job's own form names (pytom jobs), else None."""
+    """The main input a job's own form names (pytom and AreTomo3 jobs), else None."""
     try:
-        return pytom_main_input(read_jobstar(Path(project_dir) / process_name / "job.star"))
+        js = read_jobstar(Path(project_dir) / process_name / "job.star")
+        return pytom_main_input(js) or aretomo_main_input(js)
     except (OSError, ValueError, KeyError):
         return None
 

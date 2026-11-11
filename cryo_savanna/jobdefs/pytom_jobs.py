@@ -393,6 +393,7 @@ class PytomVariant(JobVariant):
     own_keys: tuple[str, ...] = ()
     external: JobVariant | None = None
     env: RelionEnv | None = None
+    fn_exe: str = ""  # External's executable; empty: pytom_runner.py's (runner_command)
 
     @property
     def is_cli(self) -> bool:  # the editor: a form of its own, written to an External job.star
@@ -415,7 +416,7 @@ class PytomVariant(JobVariant):
         js = self.external.new_jobstar(self.env, is_continue)
         js.is_tomo = True
         o = js.options
-        o["fn_exe"] = runner_command(self.kind)
+        o["fn_exe"] = self.fn_exe or runner_command(self.kind)
         o["nr_threads"] = values.get("nr_threads", "1") or "1"
         for k in RUNNING_KEYS:
             if k in values:
@@ -521,6 +522,24 @@ def install_runner(project_dir: str | os.PathLike) -> Path:
     return dst
 
 
+def add_running_tab(options: dict[str, OptionDef], tabs: list[Tab], groups: dict[int, Group],
+                    ext: dict[str, OptionDef]) -> tuple[list[Tab], dict[int, Group]]:
+    """External's "Running" tab (threads, queue, RELION_QSUB_EXTRA fields) after a form's own tabs;
+    ``options`` gets its fields (nr_threads: the caller's, else External's)."""
+    options.setdefault("nr_threads", ext["nr_threads"])
+    running = [Row(("nr_threads",))]
+    for k in RUNNING_KEYS:
+        options[k] = ext[k]
+        running.append(Row((k,), group=None if k == "do_queue" else QUEUE_GROUP))
+        if k == "qsub":
+            for ex in [x for x in ext if x.startswith("qsub_extra")]:
+                options[ex] = ext[ex]
+                running.append(Row((ex,), group=QUEUE_GROUP))
+    groups = dict(groups)
+    groups[QUEUE_GROUP] = Group(QUEUE_GROUP, None, "do_queue", "Yes")
+    return list(tabs) + [Tab("Running", tuple(running))], groups
+
+
 class PytomCatalog:
     """The two forms, built once per RELION environment (its queue settings and RELION_QSUB_EXTRA fields)."""
 
@@ -552,17 +571,7 @@ class PytomCatalog:
             options["nr_threads"] = replace(ext["nr_threads"], help=(
                 "CPU threads to reserve on the queue (XXXthreadsXXX in the submission script). pytom's matching "
                 "runs on the GPUs."))
-        running = [Row(("nr_threads",))]
-        for k in RUNNING_KEYS:
-            options[k] = ext[k]
-            running.append(Row((k,), group=None if k == "do_queue" else QUEUE_GROUP))
-            if k == "qsub":
-                for ex in [x for x in ext if x.startswith("qsub_extra")]:
-                    options[ex] = ext[ex]
-                    running.append(Row((ex,), group=QUEUE_GROUP))
-        tabs = list(tabs) + [Tab("Running", tuple(running))]
-        groups = dict(groups)
-        groups[QUEUE_GROUP] = Group(QUEUE_GROUP, None, "do_queue", "Yes")
+        tabs, groups = add_running_tab(options, tabs, groups, ext)
         return PytomVariant(key=f"pytom:{kind}", label=EXTERNAL, proc_id=external.proc_id,
                             dirname=external.dirname, is_tomo=True, options=options, tabs=tabs, groups=groups,
                             kind=kind, program=TITLES[kind], description=DESCRIPTIONS[kind],

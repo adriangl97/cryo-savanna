@@ -588,7 +588,7 @@ def test_new_pytom_job_in_window(qtbot, done_jobs, tmp_path):
     qtbot.addWidget(w)
     w.load_now()
     titles = [a.text() for a in w.actions.external_menu.actions()]
-    assert titles == ["pytom: template matching", "pytom: extract candidates"]
+    assert titles[:2] == ["pytom: template matching", "pytom: extract candidates"]
     w.actions.new_pytom_job("match")
     ed = w.actions.editor
     assert ed.variant.kind == "match" and "pytom template matching" in ed.title.text()

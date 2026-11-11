@@ -65,6 +65,10 @@ and can be used interchangeably, even at the same time, on the same project.
   its own conda environment), with pytom's inputs written from RELION 5's tomograms.star, one
   tomogram per GPU, results while it runs, thresholds chosen interactively, and a RELION 5
   particles.star.
+  - AreTomo3 tilt-series alignment and tomogram reconstruction of RELION 5 tilt series, one tilt
+  series per GPU, with the alignment written back into RELION's tilt-series STAR files (for
+  RELION's Reconstruct tomograms) and the tomograms in a tomograms.star; or reconstruction only,
+  with an existing alignment.
 - Class2D, Class3D, Refine3D and InitialModel jobs that have not written an iteration yet can be
   marked failed (RELION refuses and leaves them Running), and then overwritten.
 
@@ -138,6 +142,8 @@ External jobs through `cryo_savanna/cli_runner.py`, which is copied into the pro
 pytom's template matching and extraction run as External jobs through `cryo_savanna/pytom_runner.py`,
 copied into the project as `.cryo-savanna/pytom_runner.py`. It only runs pytom's programs (from the
 conda environment named in the job): cryo-savanna does not include or import pytom.
+AreTomo3 jobs run through `cryo_savanna/aretomo_runner.py` (copied as `.cryo-savanna/aretomo_runner.py`,
+with the `pytom_runner.py` whose helpers it uses), which runs the AreTomo3 executable named in the job.
 
 ### SLURM
 

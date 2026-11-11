@@ -38,6 +38,8 @@ from qtpy.QtWidgets import (
 from cryo_savanna.env.relion_env import RelionEnv, RelionEnvError
 from cryo_savanna.jobdefs.cli_catalog import CATEGORIES, describe
 from cryo_savanna.jobdefs.cli_tools import CliCatalog, CliVariant, cli_program_of
+from cryo_savanna.jobdefs import aretomo_jobs
+from cryo_savanna.jobdefs.aretomo_jobs import AretomoCatalog, aretomo_kind_of
 from cryo_savanna.jobdefs.model import JobDefs, JobVariant
 from cryo_savanna.jobdefs.pytom_jobs import TITLES as PYTOM_TITLES
 from cryo_savanna.jobdefs.pytom_jobs import warm_defaults as warm_pytom_defaults
@@ -209,6 +211,7 @@ class JobActions(QObject):
         self.editor = JobEditor(env, type_names, flag_source=flag_source)
         self.cli = CliCatalog(defs, env, self.editor.flag_source)
         self.pytom = PytomCatalog(defs, env)
+        self.aretomo = AretomoCatalog(defs, env)
         warm_pytom_defaults()  # "module avail cuda", in the background: not when the first form opens
         self.editor.submit.connect(self._on_submit)
         # the editor goes in its own window or in the dock (Preferences → Job editor: set_editor_place)
@@ -307,6 +310,12 @@ class JobActions(QObject):
             a.setToolTip(PYTOM_DESCRIPTIONS[kind])
             a.setStatusTip(PYTOM_DESCRIPTIONS[kind])
             a.triggered.connect(lambda _=False, k=kind: self.new_pytom_job(k))
+        self.external_menu.addSeparator()
+        for kind, text in aretomo_jobs.MENU_TEXT.items():
+            a = self.external_menu.addAction(text)
+            a.setToolTip(aretomo_jobs.DESCRIPTIONS[kind])
+            a.setStatusTip(aretomo_jobs.DESCRIPTIONS[kind])
+            a.triggered.connect(lambda _=False, k=kind: self.new_aretomo_job(k))
 
         self.job_menu = QMenu("Job", self.window)
         self.job_menu.addMenu(self.new_menu)
@@ -527,7 +536,7 @@ class JobActions(QObject):
     def new_job(self, variant_key: str) -> None:
         variant = self.defs.variants[variant_key]
         last = read_last_used(self.project_dir, variant.label, variant.is_tomo) if self.project_dir else None
-        if last is not None and (cli_program_of(last) or pytom_kind_of(last)):  # remembered: a CLI tool's / pytom's
+        if last is not None and (cli_program_of(last) or pytom_kind_of(last) or aretomo_kind_of(last)):  # a CLI tool's, ...
             last = None
         note = ("Settings of the last job of this type (from RELION's .gui files); 'Defaults' resets them."
                 if last is not None else "")
@@ -571,11 +580,33 @@ class JobActions(QObject):
         self._edit(variant.program, self.editor.new_job, variant, values,
                    f"{variant.description}. Runs as a RELION External job (pytom from its conda environment).")
 
+    def new_aretomo_job(self, kind: str) -> None:
+        """An AreTomo3 job: the form, with the modules and executable of the project's last one."""
+        try:
+            variant = self.aretomo.variant(kind)
+        except RelionEnvError as e:
+            self._env_error("AreTomo3", e)
+            return
+        values = variant.default_values(self.env)
+        pipeline = self.snapshot.pipeline if self.snapshot is not None else None
+        if self.project_dir is not None:
+            jobs = [n for n, j in self.snapshot.jobs.items() if j.program in aretomo_jobs.TITLES.values()] \
+                if self.snapshot is not None else None
+            values.update(aretomo_jobs.last_settings(self.project_dir, pipeline, jobs))
+        if pipeline is not None:  # the newest tilt-series set, as a start
+            values.update(aretomo_jobs.newest_input(pipeline))
+        self._edit(variant.program, self.editor.new_job, variant, values,
+                   f"{variant.description}. Runs as a RELION External job (AreTomo3 from its executable).")
+
     def _variant_for(self, js: JobStar) -> JobVariant:
-        """The form for a job: its job type's, or a CLI tool's or pytom's for External jobs made from those menus."""
+        """The form for a job: its job type's, or a CLI tool's, pytom's or AreTomo3's for External jobs made
+        from those menus."""
         kind = pytom_kind_of(js)
         if kind is not None:
             return self.pytom.variant(kind)
+        kind = aretomo_kind_of(js)
+        if kind is not None:
+            return self.aretomo.variant(kind)
         program = cli_program_of(js)
         if program is not None:
             v = self.cli.variant(program, js.is_tomo)

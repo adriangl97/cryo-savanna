@@ -251,7 +251,7 @@ class MainWindow(QMainWindow):
 
         self.actions = JobActions(self, self.defs, self.env, self.type_names, self.tomo, self.readonly,
                                   flag_source=self.flag_source)
-        self.info.cli, self.info.pytom = self.actions.cli, self.actions.pytom  # the editor's forms, also read-only
+        self.info.cli, self.info.pytom, self.info.aretomo = self.actions.cli, self.actions.pytom, self.actions.aretomo  # the editor's forms, also read-only
         self.actions.changed.connect(self._force_refresh)
         self.actions.select.connect(self._select_soon)
         self.actions.message.connect(lambda m: self.statusBar().showMessage(m, 6000))
@@ -271,7 +271,7 @@ class MainWindow(QMainWindow):
         tb.addWidget(new_btn)
         ext_btn = QToolButton()
         ext_btn.setText("Additional external jobs")
-        ext_btn.setToolTip("Programs that are not RELION's (pytom template matching, ...), run as RELION External jobs")
+        ext_btn.setToolTip("Programs that are not RELION's (pytom template matching, AreTomo3, ...), run as RELION External jobs")
         ext_btn.setMenu(self.actions.external_menu)
         ext_btn.setPopupMode(QToolButton.InstantPopup)
         tb.addWidget(ext_btn)

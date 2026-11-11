@@ -87,7 +87,8 @@ polling interval (Preferences, or `--poll`), and views of running jobs read new 
   RELION allows for its own local jobs. Abort asks the program to stop; one that has not stopped
   after 30 s is terminated, and killed 30 s later.
 - **Additional external jobs** (toolbar, menu bar): programs that are not RELION's, run as External
-  jobs and in the pipeline like any job. See [pytom template matching](#pytom-template-matching).
+  jobs and in the pipeline like any job. See [pytom template matching](#pytom-template-matching) and
+  [AreTomo3](#aretomo3-tilt-series-alignment-and-reconstruction).
 - **Queue:** "Submit to queue" uses the queue settings of the loaded RELION module (RELION_QSUB_*).
   On a SLURM cluster the list shows each queued job's state (queued and why, or running where and
   for how long), Abort can cancel it with scancel, and jobs that SLURM ended without RELION noticing
@@ -125,6 +126,7 @@ Each job gets the tabs that fit what it made:
 | Tomograms | pytom template matching | The tomograms and their score maps, Z slab and side views, one beside the other |
 | Thresholds | pytom extraction | The threshold of each tomogram (or one for all), as a line to drag on the histogram of its candidates' scores, with the particles above it on the tomogram; Save rewrites particles.star |
 | pytom plots | pytom extraction | pytom's own SVG plots (extraction histograms, tophat filter, ROC) |
+| Tomograms, Tilt series, AreTomo3 | AreTomo3 | The tomograms and the aligned tilt series done so far, updated as the job goes; the AreTomo3 tab plots each tilt series' thickness, tilt axis, dark tilts and CTF resolution, with its status |
 | Files | every job | Every file: STAR tables (with plots), images, stacks, volumes, text |
 
 "Open in napari" starts RELION's own `relion_python_tomo_view`; "Open in ChimeraX" starts
@@ -211,6 +213,58 @@ rlnAutopickFigureOfMerit) and `optimisation_set.star` with the tomograms, for Ex
 Like matching, extraction has to run on a machine with a GPU and its NVIDIA driver: pytom's
 programs look for a GPU as they start, even for the extraction itself. Submit it to a GPU queue
 (one GPU is enough) or run it on a GPU workstation. On a machine without one (a CPU node) every tomogram fails with `cudaErrorInsufficientDriver`.
+
+### AreTomo3: tilt-series alignment and reconstruction
+
+[AreTomo3](https://github.com/czimaginginstitute/AreTomo3) aligns tilt series and reconstructs
+tomograms on GPUs. **Additional external jobs → AreTomo3: align and reconstruct tilt series** runs it
+on a RELION 5 tilt-series set, as a RELION External job. AreTomo3 does not come with cryo-savanna:
+give its executable on the *Compute* tab (`$CRYO_SAVANNA_ARETOMO3` sets the default, else
+`AreTomo3` on the PATH), and the module(s) it needs (CUDA, or AreTomo3's own module), which are
+loaded with `module load` first. A new job takes both from the project's last AreTomo3 job.
+
+- *Input*: the tilt_series.star of MotionCorr, CtfFind or Exclude tilt images (the job needs the
+  motion-corrected images, `rlnMicrographName`). For each tilt series the job stacks its images,
+  sorted by tilt angle, into `inputs/<name>/<name>.mrc` (float32, deleted when the tilt series is
+  done unless kept), with `<name>_TLT.txt`: tilt angle, acquisition order and dose of each image
+  (from `rlnMicrographPreExposure`). Pixel size, voltage, Cs and amplitude contrast come from the
+  tilt-series set. With *Odd/even tomograms* the odd and even images (`rlnMicrographNameEven/Odd`,
+  MotionCorr's "Save images for denoising?") are stacked too and reconstructed as half tomograms.
+- *Alignment*: **Align with AreTomo3** (`-Cmd 1`: CTF estimation, alignment, CTF correction and
+  reconstruction): tilt axis (refine the nominal `rlnTomoNominalTiltAxisAngle`, keep it, or search),
+  alignment thickness, local alignment patches, tilt-angle offset, dark-image tolerance, phase
+  plate. Or **Use the alignment of the input** (`-Cmd 2`, reconstruction only) with the tilt series
+  of an alignment job: RELION's own (IMOD or AreTomo2), or an earlier AreTomo3 job, whose local
+  alignment and measured thickness are kept when the tilts are still the same. The input's CTF
+  values go to AreTomo3 for the CTF correction. With an alignment that is not AreTomo3's, give the
+  tomogram thickness.
+- *Reconstruction*: binning (up to three: the second and third give further tomograms in
+  `aretomo/<name>/`), thickness (empty: the measured sample thickness plus the extra thickness),
+  SART or WBP, CTF correction (local, phase flip, none, or CTF multiplication for template
+  matching), tilt range, layout of the tomogram (`-FlipVol 1` or `2`), contrast, more AreTomo3
+  arguments.
+- *Compute*: GPU ids separated by colons (`0:1:2:3`): one tilt series per GPU at a time (or more,
+  with *Tilt series per GPU*). Tilt series already done are skipped when the job runs again
+  (Continue), so after a failure only the rest run.
+
+The job writes, as tilt series finish (so that its tabs show them while it runs):
+
+- `aligned_tilt_series.star`, with per-tilt STAR files in `tilt_series/`, the alignment in RELION's
+  convention as RELION's own AreTomo wrapper writes it (`rlnTomoXTilt` 0, `rlnTomoYTilt`,
+  `rlnTomoZRot`, `rlnTomoX/YShiftAngst`). Tilts AreTomo3 found dark are left out. It is an input for
+  RELION's **Reconstruct tomograms** and the rest of RELION's tomography pipeline. AreTomo3's
+  defocus per tilt goes into it when the input has none (before CtfFind), always, or never.
+- `tomograms.star`: AreTomo3's tomograms (`aretomo/<name>/<name>_Vol.mrc`, the halves as
+  `rlnTomoReconstructedTomogramHalf1/2`), their size and binning, for the Tomograms tab, template
+  matching and denoising.
+- `aretomo3.star`: one row per tilt series, with status, run time, tilt axis, sample thickness, tilt
+  offsets, dark tilts and CTF resolution. AreTomo3's own output (`.aln`, `_CTF.txt`, logs) is in
+  `aretomo/<name>/`; each tilt series' log is in `logs/`.
+
+AreTomo3's tomograms are AreTomo3's reconstructions, not RELION's. Before you use particles picked
+on them for subtomogram averaging in RELION, check that their hand and centre match a RELION
+reconstruction of `aligned_tilt_series.star` (choose the other *Tomogram layout* if the hand is
+inverted).
 
 ## Preferences (Ctrl+,)
 

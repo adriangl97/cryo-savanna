@@ -137,10 +137,11 @@ def say(text):
 
 # ---------------------------------------------------------------------------- arguments
 
-def parse(argv):
-    """argv[1:] -> (mode, job dir, number of threads, {option: value})."""
-    if not argv or argv[0] not in (MATCH, EXTRACT):
-        raise Usage("the first argument must be 'match' or 'extract'")
+def parse(argv, modes=(MATCH, EXTRACT)):
+    """argv[1:] -> (mode, job dir, number of threads, {option: value}). ``modes``: the first arguments
+    allowed (aretomo_runner.py has its own)."""
+    if not argv or argv[0] not in modes:
+        raise Usage("the first argument must be %s" % " or ".join("'%s'" % m for m in modes))
     mode, rest = argv[0], list(argv[1:])
     if len(rest) >= 2 and rest[-2] == "--pipeline_control":
         rest = rest[:-2]
