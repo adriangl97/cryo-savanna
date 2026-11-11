@@ -49,7 +49,7 @@ def make_thumbs(path: str, indices: list[int | None], size: int) -> dict[int | N
     real = [i for i in indices if i is not None]
     imgs: dict = read_images(path, real) if real else {}
     if None in indices:  # a single image or a volume (its central section)
-        imgs[None] = read_images(path, [None])[None]
+        imgs.update(read_images(path, [None]))  # left out when it cannot be read, as the others
     out = {}
     for i, img in imgs.items():
         small = downsample(img, size)[0]

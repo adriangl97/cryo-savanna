@@ -323,11 +323,14 @@ class QueueMapper:
         except (OSError, ValueError):
             pass  # a read-only project: mapping still works, the history only lasts this session
 
-    def history(self, job: str) -> list[str]:
-        """SLURM ids seen for a RELION job (in squeue or in the run logs), oldest first."""
+    def history(self, job: str, submitted: dict[str, str] | None = None) -> list[str]:
+        """SLURM ids seen for a RELION job (in squeue or in the run logs), oldest first. ``submitted``:
+        submitted_in_runs(), when the caller has it already (one look at the queue asks for several jobs)."""
         with self._lock:
             ids = {i for i, j in self.known.items() if j == job}
-        ids |= {i for i, j in self.submitted_in_runs().items() if j == job}
+        if submitted is None:
+            submitted = self.submitted_in_runs()
+        ids |= {i for i, j in submitted.items() if j == job}
         return sorted(ids, key=_id_order)
 
     def remember(self, accounting: list[AcctJob], job: str) -> list[AcctJob]:
@@ -530,9 +533,11 @@ class SlurmMonitor:
                     if status == STATUS_RUNNING and job not in state.live and self.mapper.goes_to_queue(job)
                     and not self._has_exit_file(job)]
         self._suspects = {j: hit for j, hit in self._suspects.items() if j in suspects}  # rerun: ask afresh
+        # the run logs are looked through once for this look at the queue, not several times per job
+        submitted = self.mapper.submitted_in_runs() if suspects else {}
         for job in suspects:
             try:
-                last = self._last_slurm_job(job, state.checked_at)
+                last = self._last_slurm_job(job, state.checked_at, submitted)
             except SlurmError as e:
                 state.error = str(e)
                 break
@@ -555,7 +560,7 @@ class SlurmMonitor:
             return False
         return end is not None and end < submitted
 
-    def _last_slurm_job(self, job: str, now: float) -> AcctJob | None:
+    def _last_slurm_job(self, job: str, now: float, submitted: dict[str, str] | None = None) -> AcctJob | None:
         """The newest SLURM job of a job that may be lost. sacct is not asked on every poll: a SLURM job
         that ended stays as it is (until the job gets a new SLURM id), others are asked again after
         LOST_RECHECK_S."""
@@ -564,21 +569,22 @@ class SlurmMonitor:
             ids, asked, last = hit
             # the ids are only looked up (run logs, slurm.json) when the answer could be used
             if ((last is not None and not last.active) or now - asked < LOST_RECHECK_S) \
-                    and ids == tuple(self.mapper.history(job)):
+                    and ids == tuple(self.mapper.history(job, submitted)):
                 return last
-        last = next(iter(self.history(job)), None)
-        self._suspects[job] = (tuple(self.mapper.history(job)), now, last)  # after history(): it may remember ids
+        last = next(iter(self.history(job, submitted)), None)
+        # after history(): it may remember ids
+        self._suspects[job] = (tuple(self.mapper.history(job, submitted)), now, last)
         return last
 
     def _has_exit_file(self, job: str) -> bool:
         d = self.project_dir / job
         return any((d / f).exists() for f in (RELION_JOB_EXIT_SUCCESS, RELION_JOB_EXIT_FAILURE, RELION_JOB_EXIT_ABORTED))
 
-    def history(self, job: str) -> list[AcctJob]:
+    def history(self, job: str, submitted: dict[str, str] | None = None) -> list[AcctJob]:
         """sacct of every SLURM job of a RELION job, newest first: the ids seen before, or else the
         jobs named after its directory, or else those whose submit line ran its run_submit.script
-        (submitted while cryo-savanna was not looking)."""
-        ids = self.mapper.history(job)
+        (submitted while cryo-savanna was not looking). ``submitted``: as for QueueMapper.history."""
+        ids = self.mapper.history(job, submitted)
         acct = self.client.accounting(ids) if ids else []
         if not acct:
             acct = self.mapper.remember(self.client.accounting_by_name([job]), job)

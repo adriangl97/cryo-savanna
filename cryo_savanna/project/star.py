@@ -37,6 +37,7 @@ from __future__ import annotations
 
 import errno
 import io
+import itertools
 import os
 import uuid
 from dataclasses import dataclass, field
@@ -219,19 +220,55 @@ def loop_rows(path: str | os.PathLike, block: str, label: str | None = None) -> 
             if line[0] == "_" and n == 0:
                 columns.append(line[1:].split()[0])
                 continue
-            if label is not None and col < 0:
+            if label is not None:  # the first row: this one and the rest, only as far as that column
                 if label not in columns:
                     return None
                 col = columns.index(label)
+                _take_columns(fh, line, [(values.append, col)])
+                n = len(values)
+                break
             n += 1
-            if col >= 0:
-                toks = tokenize_line(line) if ('"' in line or "'" in line) else line.split()
-                values.append(toks[col] if col < len(toks) else "")
     if not columns:
         return None
     if label is not None and col < 0:
         return (0, []) if label in columns else None
     return n, values
+
+
+def _take_columns(fh: Iterable[str], first: str, takes: list[tuple]) -> None:
+    """The rows of a loop from its first one (``first``) to the end of its block: of each row, value
+    ``i`` goes to ``take`` for every (take, i) of ``takes`` ("" where a row is too short).
+
+    A row is only split as far as the last column wanted: for columns near the start of a wide particle
+    table (coordinates, micrograph names) most of every line is never looked at.
+    """
+    if not takes:
+        return
+    upto = max(i for _, i in takes) + 1
+    for raw in itertools.chain((first,), fh):
+        if '"' in raw or "'" in raw:
+            line = raw.strip()
+            if not line or line[0] == "#":
+                continue
+            if line.startswith("data_"):
+                break
+            if line.startswith("loop_"):
+                continue
+            toks = tokenize_line(line)
+        else:
+            toks = raw.split(None, upto)
+            if not toks:
+                continue
+            head = toks[0]
+            if head[0] == "#":
+                continue
+            if head.startswith("data_"):
+                break
+            if head.startswith("loop_"):
+                continue
+        n = len(toks)
+        for take, i in takes:
+            take(toks[i] if i < n else "")
 
 
 def loop_columns(path: str | os.PathLike, block: str, labels: Iterable[str]) -> tuple[list[str], dict[str, list[str]]] | None:
@@ -266,12 +303,11 @@ def loop_columns(path: str | os.PathLike, block: str, labels: Iterable[str]) -> 
             if line[0] == "_" and picks is None:
                 columns.append(line[1:].split()[0])
                 continue
-            if picks is None:
-                picks = [(lab, columns.index(lab)) for lab in wanted if lab in columns]
-                out = {lab: [] for lab, _ in picks}
-            toks = tokenize_line(line) if ('"' in line or "'" in line) else line.split()
-            for lab, i in picks:
-                out[lab].append(toks[i] if i < len(toks) else "")
+            # the first row: the columns are known; this row and the rest are read in one go
+            picks = [(lab, columns.index(lab)) for lab in wanted if lab in columns]
+            out = {lab: [] for lab, _ in picks}
+            _take_columns(fh, line, [(out[lab].append, i) for lab, i in picks])
+            break
     if not columns:
         return None
     if picks is None:
@@ -449,7 +485,9 @@ def format_value(v) -> str:
 
 def format_row(row: Iterable) -> str:
     """One row of a loop as MetaDataTable::write writes it, with its newline."""
-    values = [format_value(v) for v in row]
+    # text first: the rows of a big table read with loop_tokens (a selection of millions of particles)
+    # are all text, which needs none of format_value's checks for numbers
+    values = [escape_string(v) if type(v) is str else format_value(v) for v in row]
     if values and values[0].startswith(_LINE_STARTS):
         # RELION writes it bare, and every reader (RELION's too) then takes a row starting with
         # "_" for a label, "data_" / "loop_" for a new block or loop, and skips one starting

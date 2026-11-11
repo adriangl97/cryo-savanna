@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import math
+import os
 from pathlib import Path
 
 import numpy as np
@@ -139,8 +140,10 @@ class TableModel(QAbstractTableModel):
         label = self.columns[col - 1][0]
         vals = self.extra[label] if label in self.extra else self.table.data[label]
         if label in ("rlnMicrographName", "rlnMicrographMovieName"):
-            return [Path(str(v)).name for v in vals]
+            return [_file_name(str(v)) for v in vals]
         if label not in self.extra and self.table.numeric(label) is not None:
+            if isinstance(vals, np.ndarray) and vals.dtype == np.float64:  # read_compact: already numbers
+                return _numbers(vals)
             return [_number(v) for v in vals]
         return ["" if v is None else str(v) for v in vals]
 
@@ -156,6 +159,29 @@ def _number(text: str) -> str:
     if x == int(x) and abs(x) < 1e15:
         return str(int(x))
     return f"{x:.6g}"
+
+
+def _file_name(path: str) -> str:
+    """Path(path).name, without making a Path of each of a million micrograph names."""
+    name = path.rsplit("/", 1)[-1]
+    return name if name and name != "." and os.sep == "/" else Path(path).name
+
+
+def _whole(x: float) -> str:
+    return str(int(x)) if -1e15 < x < 1e15 and x == int(x) else f"{x:.6g}"
+
+
+def _numbers(values: np.ndarray) -> list[str]:
+    """_number() of every value of a column of floats, in one pass. A column with few different values
+    (class numbers, optics groups, a constant B-factor: most columns of a particle file) is written out
+    once per value, not once per row."""
+    n = len(values)
+    if n > 4096 and len(np.unique(values[:: n // 2048])) <= 512:
+        distinct, rows = np.unique(values, return_inverse=True)
+        texts = np.empty(len(distinct), dtype=object)
+        texts[:] = [_whole(x) for x in distinct.tolist()]
+        return texts[rows.reshape(-1)].tolist()
+    return [_whole(x) for x in values.tolist()]
 
 
 FILTER_AT_ONCE_ROWS = 20_000  # tables up to this size are filtered at every letter typed
@@ -307,7 +333,8 @@ class RowFilter(QAbstractProxyModel):
         m = self.sourceModel()
         if not self._needle or m is None:
             return None
-        hit = np.zeros(m.rowCount(), bool)
+        n, needle = m.rowCount(), self._needle
+        hit = np.zeros(n, bool)
         # a text that cannot be part of a number ("mic0012", "job005/") is not looked for in the
         # number columns: most columns of a particle file, and most of the time a pass takes
         in_numbers = all(ch in _NUMBER_CHARS for ch in self._needle)
@@ -315,8 +342,9 @@ class RowFilter(QAbstractProxyModel):
         for c in range(m.columnCount()):
             if not in_numbers and only_numbers is not None and only_numbers(c):
                 continue
-            text = np.char.lower(np.array(m.column_text(c), dtype=str))
-            hit |= np.char.find(text, self._needle) >= 0
+            # the texts as they are: a numpy array of them is as wide as the longest (a million names of
+            # 60 letters: 240 MB for one column), and is no faster to look through
+            hit |= np.fromiter((needle in s.lower() for s in m.column_text(c)), bool, n)
         return hit
 
     def _apply_filter(self) -> None:

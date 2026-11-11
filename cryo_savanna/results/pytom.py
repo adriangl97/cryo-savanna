@@ -123,7 +123,7 @@ def read_score_map(path: str | os.PathLike, sample_every: int = 7) -> ScoreMap:
                 zz, yy, xx = np.unravel_index(i, block.shape)
                 peak, peak_at = float(flat[i]), (int(xx), int(yy), int(z0 + zz))
             total += float(flat.sum(dtype=np.float64))
-            total2 += float((flat.astype(np.float64) ** 2).sum())
+            total2 += float(np.einsum("i,i->", flat, flat, dtype=np.float64, casting="same_kind"))
             count += flat.size
     mean = total / count if count else 0.0
     std = float(np.sqrt(max(total2 / count - mean * mean, 0.0))) if count else 0.0

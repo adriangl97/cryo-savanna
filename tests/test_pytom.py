@@ -234,6 +234,42 @@ def test_inputs_go_in_external_fields(tomo_project):
     assert "Tomograms/job006/tomograms.star" in (o["in_mov"], o["in_mic"], o["in_part"], o["in_coords"])
 
 
+def test_tree_follows_the_main_input(tomo_project, tmp_path):
+    """A pytom job sits under the job of its form's main input: the tomograms (not the template, whatever
+    order the pipeline lists them in, or when only the template was linked), and the matching job of an
+    extraction added while the matching ran (its pytom_match.star was no pipeline node: nothing linked)."""
+    from cryo_savanna.project.lineage import primary_parents
+    from cryo_savanna.project.pipeline import Node, Process
+    dst = tmp_path / "tomo"
+    shutil.copytree(tomo_project, dst, symlinks=True)
+    p = Pipeline.read(dst)
+    tomos, ref = "Tomograms/job006/tomograms.star", "Reconstruct/job010/merged.mrc"
+
+    def add(name, kind, values, inputs):
+        js = CATALOG.variant(kind).make_jobstar(values, False, name, p)
+        (dst / name).mkdir(parents=True)
+        js.write(dst / name / "job.star")
+        p.processes[name] = Process(name, "None", "relion.external", "Running", inputs=list(inputs))
+        for n in inputs:
+            p.nodes[n].consumers.append(name)
+
+    add("External/job015/", "match", match_values(fn_template=ref), [ref, tomos])  # pipeline order: the template first
+    add("External/job016/", "match", match_values(fn_template=ref), [ref])  # the tomograms not linked
+    add("External/job017/", "extract", extract_values(), [])  # the matching job had no output nodes yet
+    add("External/job018/", "extract", extract_values(in_match="./External/job015/pytom_match.star"), [])
+    parents = primary_parents(p, dst, JobDefs.load())
+    assert parents["External/job015/"] == parents["External/job016/"] == "Tomograms/job006/"
+    assert parents["External/job017/"] == parents["External/job018/"] == "External/job015/"
+    # once the matching job's output is a node and linked, the extraction stays there
+    out = "External/job015/pytom_match.star"
+    p.nodes[out] = Node(out, P.NODE_SUMMARY, producer="External/job015/", consumers=["External/job017/"])
+    p.processes["External/job017/"].inputs.append(out)
+    assert primary_parents(p, dst, JobDefs.load())["External/job017/"] == "External/job015/"
+    # a main input chosen in cryo-savanna still wins
+    chosen = primary_parents(p, dst, JobDefs.load(), main_inputs={"External/job015/": ref})
+    assert chosen["External/job015/"] == "Reconstruct/job010/"
+
+
 def test_names():
     assert pytom_kind("python3 .cryo-savanna/pytom_runner.py match") == "match"
     assert pytom_kind("python3 .cryo-savanna/cli_runner.py relion_image_handler") is None
@@ -744,3 +780,49 @@ def test_a_tilt_without_an_angle_is_named(tmp_path):
     star.write_text(star.read_text().replace("nan", "0.0"))
     assert [t[0] for t in P.tilt_table({"rlnTomoName": "TS_1", "rlnTomoTiltSeriesStarFile": str(star)}, {})[1]] \
         == [-3.0, 0.0, 3.0]
+
+
+# pytom_match_template.py's options (pytom-match-pick 0.14, its --help)
+PYTOM_MATCH_FLAGS = {
+    "-t", "-v", "-d", "-m", "--non-spherical-mask", "--particle-diameter", "--angular-search",
+    "--z-axis-rotational-symmetry", "-s", "--search-x", "--search-y", "--search-z", "--tomogram-mask", "-a",
+    "--tilt-angles-first-column", "--per-tilt-weighting", "--voxel-size-angstrom", "--low-pass", "--high-pass",
+    "--dose-accumulation", "--defocus", "--amplitude-contrast", "--spherical-aberration", "--voltage",
+    "--phase-shift", "--tomogram-ctf-model", "--defocus-handedness", "--spectral-whitening", "-r",
+    "--half-precision", "--rng-seed", "--relion5-tomograms-star", "--warp-xml-file", "-g", "--log"}
+
+
+def test_match_command_uses_only_pytom_flags(tmp_path):
+    opts = {k: "Yes" for k in ("per_tilt_weighting", "spectral_whitening", "non_spherical", "random_phase",
+                                "half_precision")}
+    opts.update(phase_shift="5", tomogram_ctf_model="phase-flip", defocus_handedness="1", low_pass="20",
+                high_pass="400", particle_diameter="230", z_symmetry="2", rng_seed="7", volume_split="2 2 1",
+                search_x="0 100", search_y="0 100", search_z="10 50", mirror_template="Yes",
+                invert_template_contrast="Yes")
+    files = {"tomogram": "t.mrc", "tilts": "t.tlt", "voxel": 10.0, "dose": "d.txt", "defocus": "f.txt",
+             "ctf": (300, 2.7, 0.1), "tomogram_mask": "m.mrc"}
+    cmd = P.match_command(opts, files, "template.mrc", "mask.mrc", [0, 1], "tm")
+    flags = {w for w in cmd if w.startswith("-") and not w.lstrip("-").replace(".", "").isdigit()}
+    assert flags <= PYTOM_MATCH_FLAGS, flags - PYTOM_MATCH_FLAGS
+    assert "-r" in cmd and "--mirror-template" not in cmd and "--invert-template-contrast" not in cmd
+    assert not {"mirror_template", "invert_template_contrast"} & set(CATALOG.variant("match").options)
+
+
+def test_mask_mirror(project, fake_pytom):
+    opts = {"mask_mirror": "Yes", "template_mirror": "No"}
+    assert "--mirror" in P.template_command(opts, "m.mrc", "out.mrc", 1.0, 24, "mask")
+    assert "--mirror" not in P.template_command({"template_mirror": "Yes"}, "m.mrc", "out.mrc", 1.0, 24, "mask")
+    with mrcfile.new(project / "mask_in.mrc") as m:
+        m.set_data(np.ones((30, 30, 30), np.float32))
+    base = dict(mask_source=P.MASK_FILE, fn_mask="mask_in.mrc", do_prep_mask="Yes", tomo_names="TS_01",
+                template_mirror="Yes")
+    res = run_runner(project, "match", "External/job015/", match_values(**base))
+    assert res.returncode == 0, res.stderr
+    assert "template is mirrored but the mask file is not" in res.stdout
+    res = run_runner(project, "match", "External/job016/", match_values(mask_mirror="Yes", **base))
+    assert res.returncode == 0, res.stderr
+    assert "may not match" not in res.stdout
+    assert "--mirror" in [line for line in fake_pytom.read_text().splitlines() if "mask_in.mrc" in line][-1]
+    v = CATALOG.variant("match")
+    group_of = {k: r.group for t in v.tabs for r in t.rows for k in r.keys}
+    assert group_of["mask_mirror"] == group_of["mask_invert"]

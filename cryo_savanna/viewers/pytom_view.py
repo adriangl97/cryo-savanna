@@ -403,8 +403,8 @@ class PytomThresholdView(QWidget):
                 self.table.setItem(i, c, it)
         self.table.blockSignals(False)
 
-    def _update_row(self, name: str) -> None:
-        i = self.sel.names.index(name)
+    def _update_row(self, name: str, row: int | None = None) -> None:
+        i = self.sel.names.index(name) if row is None else row
         cand, chosen = self.sel.counts(name)
         t = self.sel.threshold.get(name)
         self.table.item(i, 2).setText(_fmt(t))
@@ -483,10 +483,11 @@ class PytomThresholdView(QWidget):
         """The threshold of the tomogram shown (of all of them with "Same threshold for all")."""
         if self.sel is None or self.current is None:
             return
-        names = self.sel.names if self.same.isChecked() else [self.current]
+        rows = {n: i for i, n in enumerate(self.sel.names)}  # once: the names are listed anew each time asked
+        names = list(rows) if self.same.isChecked() else [self.current]
         for n in names:
             self.sel.threshold[n] = value
-            self._update_row(n)
+            self._update_row(n, rows.get(n))
         self._syncing = True
         self.spin.setValue(value)
         self.line.setValue(value)
@@ -505,9 +506,9 @@ class PytomThresholdView(QWidget):
         self.same.blockSignals(True)
         self.same.setChecked(False)
         self.same.blockSignals(False)
-        for n in self.sel.names:
+        for i, n in enumerate(self.sel.names):
             self.sel.threshold[n] = self.sel.auto.get(n)
-            self._update_row(n)
+            self._update_row(n, i)
         self.dirty = True
         self.save_btn.setEnabled(self._writable())
         self._show_current()

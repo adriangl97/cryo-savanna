@@ -426,8 +426,8 @@ class PipelineOps:
             relinked = []
             for rec in (ins.records() if ins is not None else ()):
                 node, proc = rec.get("rlnPipeLineEdgeFromNode"), rec.get("rlnPipeLineEdgeProcess")
-                if proc == job or proc not in p.processes or job not in p.processes:
-                    continue
+                if not node or proc == job or proc not in p.processes or job not in p.processes:
+                    continue  # (no node: a table without rlnPipeLineEdgeFromNode, written by hand)
                 if node not in p.nodes and node.startswith(job) and node in old.nodes:
                     o = old.nodes[node]
                     p.nodes[node] = Node(node, o.type_label, o.type_depth, producer=job)
