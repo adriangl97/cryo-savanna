@@ -142,8 +142,31 @@ def primary_parents(
     main_inputs: Mapping[str, str] | None = None,
 ) -> dict[str, str | None]:
     """process name -> process that produced its primary input (None for roots)."""
-    return cut_loops({name: primary_parent(pipeline, name, project_dir, defs, read_jobstar, main_inputs)
+    read_once = _read_once(read_jobstar)
+    return cut_loops({name: primary_parent(pipeline, name, project_dir, defs, read_once, main_inputs)
                       for name in pipeline.processes})
+
+
+def _read_once(read_jobstar: Callable[[Path], JobStar]) -> Callable[[Path], JobStar]:
+    """``read_jobstar`` answering each file once, for one pass over a pipeline. A job's job.star is asked
+    for up to three times in a pass (its own main input twice, the order of its window once), and a
+    reader that caches by the file's stamp still looks at the file every time: three stats per job over
+    a network file system, at every change of the pipeline."""
+    seen: dict[Path, tuple[JobStar | None, Exception | None]] = {}
+
+    def read(path: Path) -> JobStar:
+        hit = seen.get(path)
+        if hit is None:
+            try:
+                hit = (read_jobstar(path), None)
+            except (OSError, ValueError, KeyError) as e:  # what the callers take for "no job.star"
+                hit = (None, e)
+            seen[path] = hit
+        if hit[1] is not None:
+            raise hit[1]
+        return hit[0]
+
+    return read
 
 
 def cut_loops(parents: dict[str, str | None]) -> dict[str, str | None]:

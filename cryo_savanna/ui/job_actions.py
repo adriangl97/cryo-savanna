@@ -1061,6 +1061,10 @@ class JobActions(QObject):
 
     def undelete(self) -> None:
         entries = self.ops.trash()
+        if not entries:  # emptied since the last look at the project
+            self._look_at_project()
+            self.message.emit("Nothing to undelete: Trash/ has no deleted jobs.")
+            return
         labels = [str(e.parent.relative_to(self.project_dir / "Trash")) for e in entries]
         label, ok = QInputDialog.getItem(self.window, "Undelete", "Put back from Trash/:", labels, 0, False)
         if not ok:

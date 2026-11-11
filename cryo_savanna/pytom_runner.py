@@ -843,10 +843,12 @@ def prepare_template_and_mask(sup, opts, job_dir, voxel):
         mask = text(opts, "fn_mask")
         if not mask or not os.path.isfile(mask):
             raise Usage("mask not found: %r" % mask)
+        # either is mirrored only when it is prepared: a template used as it is stays as it is
         mirrored = yes(opts, "do_prep_mask") and yes(opts, "mask_mirror")
-        if yes(opts, "do_prep_template") and yes(opts, "template_mirror") != mirrored:
+        template_mirrored = yes(opts, "do_prep_template") and yes(opts, "template_mirror")
+        if template_mirrored != mirrored:
             say("WARNING: the template is %smirrored but the mask file is %s: they may not match"
-                % ("" if yes(opts, "template_mirror") else "not ", "mirrored" if mirrored else "not"))
+                % ("" if template_mirrored else "not ", "mirrored" if mirrored else "not"))
         if yes(opts, "do_prep_mask"):
             out = os.path.join(job_dir, "mask.mrc")
             final = number(opts, "mask_angpix", what="Mask final pixel size") or tvoxel or voxel
