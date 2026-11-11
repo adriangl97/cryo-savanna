@@ -234,6 +234,42 @@ def test_inputs_go_in_external_fields(tomo_project):
     assert "Tomograms/job006/tomograms.star" in (o["in_mov"], o["in_mic"], o["in_part"], o["in_coords"])
 
 
+def test_tree_follows_the_main_input(tomo_project, tmp_path):
+    """A pytom job sits under the job of its form's main input: the tomograms (not the template, whatever
+    order the pipeline lists them in, or when only the template was linked), and the matching job of an
+    extraction added while the matching ran (its pytom_match.star was no pipeline node: nothing linked)."""
+    from cryo_savanna.project.lineage import primary_parents
+    from cryo_savanna.project.pipeline import Node, Process
+    dst = tmp_path / "tomo"
+    shutil.copytree(tomo_project, dst, symlinks=True)
+    p = Pipeline.read(dst)
+    tomos, ref = "Tomograms/job006/tomograms.star", "Reconstruct/job010/merged.mrc"
+
+    def add(name, kind, values, inputs):
+        js = CATALOG.variant(kind).make_jobstar(values, False, name, p)
+        (dst / name).mkdir(parents=True)
+        js.write(dst / name / "job.star")
+        p.processes[name] = Process(name, "None", "relion.external", "Running", inputs=list(inputs))
+        for n in inputs:
+            p.nodes[n].consumers.append(name)
+
+    add("External/job015/", "match", match_values(fn_template=ref), [ref, tomos])  # pipeline order: the template first
+    add("External/job016/", "match", match_values(fn_template=ref), [ref])  # the tomograms not linked
+    add("External/job017/", "extract", extract_values(), [])  # the matching job had no output nodes yet
+    add("External/job018/", "extract", extract_values(in_match="./External/job015/pytom_match.star"), [])
+    parents = primary_parents(p, dst, JobDefs.load())
+    assert parents["External/job015/"] == parents["External/job016/"] == "Tomograms/job006/"
+    assert parents["External/job017/"] == parents["External/job018/"] == "External/job015/"
+    # once the matching job's output is a node and linked, the extraction stays there
+    out = "External/job015/pytom_match.star"
+    p.nodes[out] = Node(out, P.NODE_SUMMARY, producer="External/job015/", consumers=["External/job017/"])
+    p.processes["External/job017/"].inputs.append(out)
+    assert primary_parents(p, dst, JobDefs.load())["External/job017/"] == "External/job015/"
+    # a main input chosen in cryo-savanna still wins
+    chosen = primary_parents(p, dst, JobDefs.load(), main_inputs={"External/job015/": ref})
+    assert chosen["External/job015/"] == "Reconstruct/job010/"
+
+
 def test_names():
     assert pytom_kind("python3 .cryo-savanna/pytom_runner.py match") == "match"
     assert pytom_kind("python3 .cryo-savanna/cli_runner.py relion_image_handler") is None

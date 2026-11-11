@@ -489,6 +489,22 @@ def pytom_kind_of(js: JobStar) -> str | None:
     return pytom_kind(js.options.get("fn_exe", "")) if js.type_label == EXTERNAL else None
 
 
+MAIN_INPUTS = {MATCH: "in_tomograms", EXTRACT: "in_match"}  # the form's field with the data the job works on
+
+
+def pytom_main_input(js: JobStar) -> str | None:
+    """The file in a pytom job's main input field (its tomograms / its matching job), else None (also for
+    jobs that are not pytom's). It places the job in the job tree, whichever External field it went in."""
+    kind = pytom_kind_of(js)
+    if kind is None:
+        return None
+    own, _ = decode(js.options.get("other_args", ""))
+    value = own.get(MAIN_INPUTS[kind], "").strip()
+    while value.startswith("./"):
+        value = value[2:]
+    return value or None
+
+
 def install_runner(project_dir: str | os.PathLike) -> Path:
     """Put this cryo-savanna's pytom_runner.py into the project (RUNNER_IN_PROJECT), replaced in one step."""
     dst = Path(project_dir) / RUNNER_IN_PROJECT

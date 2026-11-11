@@ -6,14 +6,19 @@ The main input of a job is, in this order:
 
 1. the one chosen for that job in cryo-savanna (``main_inputs``: job -> input node, kept by
    project/main_inputs.py), if it is still one of the job's inputs;
-2. its tomography optimisation set (TomoOptimisationSet), else its particle set
+2. for a pytom job (an External job, jobdefs/pytom_jobs.py), the file of its form's main input field
+   (its tomograms, its matching job), whichever External field it went in. When the pipeline has no
+   such input (an extraction added while its matching job ran: the matching job's output was no
+   pipeline node yet, so RELION could not link it), the job sits under the job whose directory holds
+   that file;
+3. its tomography optimisation set (TomoOptimisationSet), else its particle set
    (ParticleGroupMetadata): the data a job works on. With several, the first in the job window's
    order;
-3. else the first input-node option of the job's own job.star (window order, with the curated
+4. else the first input-node option of the job's own job.star (window order, with the curated
    LINEAGE_INPUTS overrides) whose value is one of its pipeline inputs: RELION records inputs in the
    order its command builder adds them, which is not the data path (PostProcess lists the mask
    before the half map);
-4. else the first pipeline input.
+5. else the first pipeline input.
 
 Other inputs are secondary links.
 """
@@ -25,6 +30,7 @@ from collections.abc import Callable, Mapping
 from pathlib import Path
 
 from cryo_savanna.jobdefs.model import JobDefs
+from cryo_savanna.jobdefs.pytom_jobs import pytom_main_input
 from cryo_savanna.project.jobstar import JobStar
 from cryo_savanna.project.pipeline import Pipeline
 
@@ -66,6 +72,25 @@ def default_input(pipeline: Pipeline, ordered: list[str]) -> str | None:
     return ordered[0] if ordered else None
 
 
+def _own_main_input(
+    process_name: str, project_dir: str | os.PathLike, read_jobstar: Callable[[Path], JobStar]
+) -> str | None:
+    """The main input a job's own form names (pytom jobs), else None."""
+    try:
+        return pytom_main_input(read_jobstar(Path(project_dir) / process_name / "job.star"))
+    except (OSError, ValueError, KeyError):
+        return None
+
+
+def _job_holding(pipeline: Pipeline, path: str) -> str | None:
+    """The job whose directory holds ``path`` (``Type/jobNNN/...``), if it is in the pipeline."""
+    parts = path.split("/")
+    if len(parts) < 3:
+        return None
+    job = f"{parts[0]}/{parts[1]}/"
+    return job if job in pipeline.processes else None
+
+
 def primary_input(
     pipeline: Pipeline,
     process_name: str,
@@ -82,7 +107,31 @@ def primary_input(
     chosen = (main_inputs or {}).get(process_name)
     if chosen in pr.inputs:
         return chosen
+    own = _own_main_input(process_name, project_dir, read_jobstar)
+    if own in pr.inputs:
+        return own
     return default_input(pipeline, input_order(pipeline, process_name, project_dir, defs, read_jobstar))
+
+
+def primary_parent(
+    pipeline: Pipeline,
+    process_name: str,
+    project_dir: str | os.PathLike,
+    defs: JobDefs,
+    read_jobstar: Callable[[Path], JobStar] = JobStar.read,
+    main_inputs: Mapping[str, str] | None = None,
+) -> str | None:
+    """The process that produced the job's primary input (None for a root)."""
+    pr = pipeline.processes[process_name]
+    if (main_inputs or {}).get(process_name) not in pr.inputs:  # no choice of cryo-savanna's applies
+        own = _own_main_input(process_name, project_dir, read_jobstar)
+        if own is not None and own not in pr.inputs:  # a pytom job whose main input RELION did not link
+            node = pipeline.nodes.get(own)
+            job = node.producer if node is not None and node.producer else _job_holding(pipeline, own)
+            if job is not None:
+                return job
+    node = primary_input(pipeline, process_name, project_dir, defs, read_jobstar, main_inputs)
+    return pipeline.nodes[node].producer if node is not None else None
 
 
 def primary_parents(
@@ -93,11 +142,8 @@ def primary_parents(
     main_inputs: Mapping[str, str] | None = None,
 ) -> dict[str, str | None]:
     """process name -> process that produced its primary input (None for roots)."""
-    out: dict[str, str | None] = {}
-    for name in pipeline.processes:
-        node = primary_input(pipeline, name, project_dir, defs, read_jobstar, main_inputs)
-        out[name] = pipeline.nodes[node].producer if node is not None else None
-    return cut_loops(out)
+    return cut_loops({name: primary_parent(pipeline, name, project_dir, defs, read_jobstar, main_inputs)
+                      for name in pipeline.processes})
 
 
 def cut_loops(parents: dict[str, str | None]) -> dict[str, str | None]:
