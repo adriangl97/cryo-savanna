@@ -176,11 +176,12 @@ takes the environment of the project's last pytom job.
   prepared (`pytom_create_template.py`: final pixel size, by default the tomogram's; final box;
   contrast inverted; mirrored; low-pass). The mask is either made (`pytom_create_mask.py`: a sphere or
   an ellipsoid with a soft edge, in the template's box) or read from a file, which can be prepared
-  too (final pixel size and box, inverted).
+  too (final pixel size and box, inverted, mirrored: mirror it when the template is mirrored, or
+  they no longer match).
 - *Weighting and CTF*: per-tilt weighting, dose, CTF, phase shift, how the tomograms were
   CTF-corrected, defocus handedness, spectral whitening, band-pass filters.
-- *Picking*: particle diameter or angular search, z-axis symmetry, non-spherical mask, mirroring
-  or inverting the template at search time, random-phase correction, half precision, volume split,
+- *Picking*: particle diameter or angular search, z-axis symmetry, non-spherical mask,
+  random-phase correction, half precision, volume split,
   search ranges, tomogram masks (`{name}` stands for each tomogram), more pytom arguments.
 - *Compute*: the GPU ids, separated by colons as in RELION (`0:1:2:3`), and how several GPUs are used: one tomogram per GPU at a time or each
   tomogram over all GPUs. Tomograms already done are skipped when the job is run

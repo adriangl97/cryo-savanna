@@ -744,3 +744,49 @@ def test_a_tilt_without_an_angle_is_named(tmp_path):
     star.write_text(star.read_text().replace("nan", "0.0"))
     assert [t[0] for t in P.tilt_table({"rlnTomoName": "TS_1", "rlnTomoTiltSeriesStarFile": str(star)}, {})[1]] \
         == [-3.0, 0.0, 3.0]
+
+
+# pytom_match_template.py's options (pytom-match-pick 0.14, its --help)
+PYTOM_MATCH_FLAGS = {
+    "-t", "-v", "-d", "-m", "--non-spherical-mask", "--particle-diameter", "--angular-search",
+    "--z-axis-rotational-symmetry", "-s", "--search-x", "--search-y", "--search-z", "--tomogram-mask", "-a",
+    "--tilt-angles-first-column", "--per-tilt-weighting", "--voxel-size-angstrom", "--low-pass", "--high-pass",
+    "--dose-accumulation", "--defocus", "--amplitude-contrast", "--spherical-aberration", "--voltage",
+    "--phase-shift", "--tomogram-ctf-model", "--defocus-handedness", "--spectral-whitening", "-r",
+    "--half-precision", "--rng-seed", "--relion5-tomograms-star", "--warp-xml-file", "-g", "--log"}
+
+
+def test_match_command_uses_only_pytom_flags(tmp_path):
+    opts = {k: "Yes" for k in ("per_tilt_weighting", "spectral_whitening", "non_spherical", "random_phase",
+                                "half_precision")}
+    opts.update(phase_shift="5", tomogram_ctf_model="phase-flip", defocus_handedness="1", low_pass="20",
+                high_pass="400", particle_diameter="230", z_symmetry="2", rng_seed="7", volume_split="2 2 1",
+                search_x="0 100", search_y="0 100", search_z="10 50", mirror_template="Yes",
+                invert_template_contrast="Yes")
+    files = {"tomogram": "t.mrc", "tilts": "t.tlt", "voxel": 10.0, "dose": "d.txt", "defocus": "f.txt",
+             "ctf": (300, 2.7, 0.1), "tomogram_mask": "m.mrc"}
+    cmd = P.match_command(opts, files, "template.mrc", "mask.mrc", [0, 1], "tm")
+    flags = {w for w in cmd if w.startswith("-") and not w.lstrip("-").replace(".", "").isdigit()}
+    assert flags <= PYTOM_MATCH_FLAGS, flags - PYTOM_MATCH_FLAGS
+    assert "-r" in cmd and "--mirror-template" not in cmd and "--invert-template-contrast" not in cmd
+    assert not {"mirror_template", "invert_template_contrast"} & set(CATALOG.variant("match").options)
+
+
+def test_mask_mirror(project, fake_pytom):
+    opts = {"mask_mirror": "Yes", "template_mirror": "No"}
+    assert "--mirror" in P.template_command(opts, "m.mrc", "out.mrc", 1.0, 24, "mask")
+    assert "--mirror" not in P.template_command({"template_mirror": "Yes"}, "m.mrc", "out.mrc", 1.0, 24, "mask")
+    with mrcfile.new(project / "mask_in.mrc") as m:
+        m.set_data(np.ones((30, 30, 30), np.float32))
+    base = dict(mask_source=P.MASK_FILE, fn_mask="mask_in.mrc", do_prep_mask="Yes", tomo_names="TS_01",
+                template_mirror="Yes")
+    res = run_runner(project, "match", "External/job015/", match_values(**base))
+    assert res.returncode == 0, res.stderr
+    assert "template is mirrored but the mask file is not" in res.stdout
+    res = run_runner(project, "match", "External/job016/", match_values(mask_mirror="Yes", **base))
+    assert res.returncode == 0, res.stderr
+    assert "may not match" not in res.stdout
+    assert "--mirror" in [line for line in fake_pytom.read_text().splitlines() if "mask_in.mrc" in line][-1]
+    v = CATALOG.variant("match")
+    group_of = {k: r.group for t in v.tabs for r in t.rows for k in r.keys}
+    assert group_of["mask_mirror"] == group_of["mask_invert"]

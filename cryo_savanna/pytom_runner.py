@@ -751,9 +751,9 @@ def match_command(opts, files, template, mask, gpus, dest):
     sym = number(opts, "z_symmetry", int, what="Z-axis rotational symmetry")
     if sym and sym > 1:
         cmd += ["--z-axis-rotational-symmetry", str(sym)]
-    for key, flag in (("non_spherical", "--non-spherical-mask"), ("mirror_template", "--mirror-template"),
-                      ("invert_template_contrast", "--invert-template-contrast"),
-                      ("random_phase", "--random-phase-correction"), ("half_precision", "--half-precision")):
+    # pytom_match_template.py has no mirror or invert option: that is done when preparing the template
+    for key, flag in (("non_spherical", "--non-spherical-mask"), ("random_phase", "-r"),
+                      ("half_precision", "--half-precision")):
         if yes(opts, key):
             cmd.append(flag)
     seed = number(opts, "rng_seed", int, what="Random seed")
@@ -791,6 +791,8 @@ def template_command(opts, source, out, voxel, box, prefix):
         lp = number(opts, "template_lowpass", what="Template low-pass")
         if lp:
             cmd += ["--low-pass", num(lp)]
+    elif yes(opts, "mask_mirror"):
+        cmd.append("--mirror")
     return cmd + ["--log", (text(opts, "log_level") or "info").lower()]
 
 
@@ -841,6 +843,10 @@ def prepare_template_and_mask(sup, opts, job_dir, voxel):
         mask = text(opts, "fn_mask")
         if not mask or not os.path.isfile(mask):
             raise Usage("mask not found: %r" % mask)
+        mirrored = yes(opts, "do_prep_mask") and yes(opts, "mask_mirror")
+        if yes(opts, "do_prep_template") and yes(opts, "template_mirror") != mirrored:
+            say("WARNING: the template is %smirrored but the mask file is %s: they may not match"
+                % ("" if yes(opts, "template_mirror") else "not ", "mirrored" if mirrored else "not"))
         if yes(opts, "do_prep_mask"):
             out = os.path.join(job_dir, "mask.mrc")
             final = number(opts, "mask_angpix", what="Mask final pixel size") or tvoxel or voxel

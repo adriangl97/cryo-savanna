@@ -182,7 +182,8 @@ def match_options() -> tuple[list[OptionDef], list[Tab], dict[int, Group]]:
         _yn("template_invert", "Invert contrast?", "Yes", "Multiply the template by -1 (--invert). Yes for "
             "a map with white density and tomograms with dark density (as RELION reconstructs them)."),
         _yn("template_mirror", "Mirror?", "No", "Mirror the template (--mirror), e.g. for a map of the "
-            "other hand."),
+            "other hand. A mask from a file must then be mirrored too (Prepare the mask? > Mirror?), or it "
+            "no longer matches the template; a created sphere or ellipsoid needs nothing."),
         _yn("template_center", "Center by centre of mass?", "No", "--center"),
         _o("template_lowpass", "Low-pass filter (Å):", "", "Low-pass before resampling. Empty: 2 × final pixel."),
         _radio("mask_source", "Mask:", (R.MASK_FILE, R.MASK_CREATE), R.MASK_CREATE,
@@ -196,6 +197,8 @@ def match_options() -> tuple[list[OptionDef], list[Tab], dict[int, Group]]:
         _o("mask_angpix", "Final pixel size (Å):", "", "Empty: the template's pixel size."),
         _o("mask_box", "Final box size (px):", "", "Empty: the template's box (pytom needs the same box)."),
         _yn("mask_invert", "Invert contrast?", "No", "Use 1 − mask (for a mask file that is 0 on the particle)."),
+        _yn("mask_mirror", "Mirror?", "No", "Mirror the mask (--mirror), as the template. Yes when the "
+            "template is mirrored, so that the mask still matches it."),
         _o("mask_radius", "Radius (px):", "", "Radius in the template's pixels (the x radius of an ellipsoid). "
            "Empty: half the particle diameter, else 0.4 × the box."),
         _o("mask_minor", "Minor radii (px):", "", "Two numbers: the y and z radii of an ellipsoid. Empty: a sphere."),
@@ -230,9 +233,6 @@ def match_options() -> tuple[list[OptionDef], list[Tab], dict[int, Group]]:
            "search over the last angle is n times shorter."),
         _yn("non_spherical", "Non-spherical mask?", "No", "Needed when the mask is not a sphere (about twice "
             "as slow)."),
-        _yn("mirror_template", "Mirror the template at search?", "No", "--mirror-template (template and mask)."),
-        _yn("invert_template_contrast", "Invert the template at search?", "No", "--invert-template-contrast. "
-            "Not with an inverted prepared template."),
         _yn("random_phase", "Random-phase correction?", "No", "Subtract the scores of a phase-randomised "
             "template (STOPGAP's method, -r)."),
         _o("rng_seed", "Random seed:", "", "For the random-phase template. Empty: random."),
@@ -267,7 +267,7 @@ def match_options() -> tuple[list[OptionDef], list[Tab], dict[int, Group]]:
             Row(("template_center",), group=1), Row(("template_lowpass",), group=1),
             Row(("mask_source",)), Row(("fn_mask",), group=2), Row(("do_prep_mask",), group=2),
             Row(("mask_angpix_in",), group=3), Row(("mask_angpix",), group=3), Row(("mask_box",), group=3),
-            Row(("mask_invert",), group=3),
+            Row(("mask_invert",), group=3), Row(("mask_mirror",), group=3),
             Row(("mask_radius",), group=4), Row(("mask_minor",), group=4), Row(("mask_sigma",), group=4),
             Row(("mask_box_create",), group=4))),
         Tab("Weighting and CTF", (
@@ -275,8 +275,7 @@ def match_options() -> tuple[list[OptionDef], list[Tab], dict[int, Group]]:
             Row(("tomogram_ctf_model",)), Row(("defocus_handedness",)), Row(("spectral_whitening",)),
             Row(("low_pass",)), Row(("high_pass",)))),
         Tab("Picking", tuple(Row((k,)) for k in (
-            "particle_diameter", "angular_search", "z_symmetry", "non_spherical", "mirror_template",
-            "invert_template_contrast", "random_phase", "rng_seed", "half_precision", "volume_split", "search_x",
+            "particle_diameter", "angular_search", "z_symmetry", "non_spherical", "random_phase", "rng_seed", "half_precision", "volume_split", "search_x",
             "search_y", "search_z", "tomogram_mask", "match_args"))),
         Tab("Compute", tuple(Row((k,)) for k in ("gpu_ids", "gpu_mode", "skip_done", "cuda_module", "pytom_env", "conda",
                                                    "log_level"))),
