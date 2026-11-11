@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import time
 
 from qtpy.QtCore import QModelIndex, QSortFilterProxyModel, Qt, Signal
@@ -17,8 +18,11 @@ from cryo_savanna.ui import style
 NAME_ROLE = Qt.UserRole + 1  # job name ("Class2D/job005/") on column 0
 SORT_ROLE = Qt.UserRole + 2
 STARRED_ROLE = Qt.UserRole + 3  # on column 0
+ICON_ROLE = Qt.UserRole + 4  # on column 0: (status, pending update) its icon was made for
 COLUMNS = ("Job", "Type", "Status", "Queue", "Summary", "Modified", "Also uses")
 COL_JOB, COL_TYPE, COL_STATUS, COL_QUEUE, COL_SUMMARY, COL_MODIFIED, COL_ALSO = range(len(COLUMNS))
+
+FITTED = (COL_JOB, COL_STATUS, COL_QUEUE, COL_SUMMARY)  # columns kept as wide as their contents
 
 STATUS_FILTERS = {
     "All statuses": None,
@@ -104,7 +108,7 @@ class JobTreeView(QTreeView):
         self.setAnimated(False)  # no animations: they cost bandwidth over X11
         h = self.header()
         h.setStretchLastSection(True)
-        for c in (COL_JOB, COL_STATUS, COL_QUEUE, COL_SUMMARY):  # never cut an alias, a status or a summary
+        for c in FITTED:  # never cut an alias, a status or a summary
             h.setSectionResizeMode(c, QHeaderView.ResizeToContents)
         self.setColumnHidden(COL_QUEUE, True)  # shown once SLURM is found
         self.queue = None  # slurm.QueueState
@@ -119,7 +123,25 @@ class JobTreeView(QTreeView):
         self.clicked.connect(self._on_clicked)
 
     # ------------------------------------------------------------------ public
+    @contextlib.contextmanager
+    def _many_changes(self):
+        """Around a change of many rows: the fitted columns are measured once at the end, not after
+        every cell (each time over every row: seconds for the summaries of a few hundred jobs)."""
+        h = self.header()
+        fitted = [c for c in FITTED if h.sectionResizeMode(c) == QHeaderView.ResizeToContents]
+        for c in fitted:
+            h.setSectionResizeMode(c, QHeaderView.Fixed)
+        try:
+            yield
+        finally:
+            for c in fitted:
+                h.setSectionResizeMode(c, QHeaderView.ResizeToContents)
+
     def set_snapshot(self, snap: ProjectSnapshot) -> None:
+        with self._many_changes():
+            self._set_snapshot(snap)
+
+    def _set_snapshot(self, snap: ProjectSnapshot) -> None:
         self._snapshot = snap
         key = snap.structure_key()
         if key == self._structure:
@@ -160,8 +182,9 @@ class JobTreeView(QTreeView):
         """Show each job's place in the SLURM queue (a slurm.QueueState)."""
         self.queue = state
         self.setColumnHidden(COL_QUEUE, not state.available)
-        for name, row in self._items.items():
-            self._fill_queue(row, name)
+        with self._many_changes():
+            for name, row in self._items.items():
+                self._fill_queue(row, name)
         if self.proxy.is_active():
             self.proxy.refilter()
 
@@ -171,27 +194,32 @@ class JobTreeView(QTreeView):
         if item.text() != text:
             item.setText(text)
             item.setData(text, SORT_ROLE)
-        item.setToolTip(details)
-        item.setData(style.QUEUE_COLORS[kind] if kind else None, Qt.ForegroundRole)  # None: the palette's
+        if item.toolTip() != details:
+            item.setToolTip(details)
+        colour = style.QUEUE_COLORS[kind] if kind else None  # None: the palette's
+        if item.data(Qt.ForegroundRole) != colour:  # only a change: the model tells the views of every set
+            item.setData(colour, Qt.ForegroundRole)
 
     def refresh_times(self) -> None:
         if self._snapshot is None:
             return
         now = time.time()
-        for name, row in self._items.items():
-            info = self._snapshot.jobs[name]
-            row[COL_MODIFIED].setText(style.ago(info.modified, now))
-            if info.status == "Running":
-                row[COL_STATUS].setText(self._status_text(info, now))
+        with self._many_changes():
+            for name, row in self._items.items():
+                info = self._snapshot.jobs[name]
+                row[COL_MODIFIED].setText(style.ago(info.modified, now))
+                if info.status == "Running":
+                    row[COL_STATUS].setText(self._status_text(info, now))
 
     def set_summaries(self, summaries: dict[str, JobSummary]) -> None:
         self.summaries.update(summaries)
         if self._snapshot is None:
             return
-        for name, s in summaries.items():
-            row = self._items.get(name)
-            if row is not None:
-                self._fill_summary(row, self._snapshot.jobs[name], s)
+        with self._many_changes():
+            for name, s in summaries.items():
+                row = self._items.get(name)
+                if row is not None:
+                    self._fill_summary(row, self._snapshot.jobs[name], s)
 
     def clear_summaries(self) -> None:
         self.summaries.clear()
@@ -239,7 +267,12 @@ class JobTreeView(QTreeView):
         job.setData(pr.name, NAME_ROLE)
         job.setData(info.starred, STARRED_ROLE)
         job.setData(pr.job_number or 0, SORT_ROLE)
-        job.setIcon(style.status_icon(info.status, info.pending_update))
+        # Qt cannot tell that an icon is the one the item has: every setIcon makes the sorted, filtered
+        # list and its fitted columns work the row out again, on every refresh while a job runs
+        icon = (info.status, info.pending_update)
+        if job.data(ICON_ROLE) != icon:
+            job.setData(icon, ICON_ROLE)
+            job.setIcon(style.status_icon(*icon))
         job.setToolTip(pr.name + (f"\nalias: {pr.alias}" if pr.has_alias else "") + ("\nstarred" if info.starred else ""))
         t = row[COL_TYPE]
         t.setText(style.job_type(info, self.type_names))

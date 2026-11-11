@@ -187,6 +187,7 @@ class MainWindow(QMainWindow):
         self.relion_version: str | None = None  # of the loaded RELION, once relion_pipeliner --version answered
         self.version_warning: str | None = None
         self._version_call: _Call | None = None
+        self._pipeliner_exe: str | None = self.env.which("relion_pipeliner")  # PATH is searched once, not per refresh
 
         self._build_ui()
         self.poll_timer = QTimer(self)
@@ -250,6 +251,7 @@ class MainWindow(QMainWindow):
 
         self.actions = JobActions(self, self.defs, self.env, self.type_names, self.tomo, self.readonly,
                                   flag_source=self.flag_source)
+        self.info.cli, self.info.pytom = self.actions.cli, self.actions.pytom  # the editor's forms, also read-only
         self.actions.changed.connect(self._force_refresh)
         self.actions.select.connect(self._select_soon)
         self.actions.message.connect(lambda m: self.statusBar().showMessage(m, 6000))
@@ -267,11 +269,18 @@ class MainWindow(QMainWindow):
         new_btn.setMenu(self.actions.new_menu)
         new_btn.setPopupMode(QToolButton.InstantPopup)
         tb.addWidget(new_btn)
+        ext_btn = QToolButton()
+        ext_btn.setText("Additional external jobs")
+        ext_btn.setToolTip("Programs that are not RELION's (pytom template matching, ...), run as RELION External jobs")
+        ext_btn.setMenu(self.actions.external_menu)
+        ext_btn.setPopupMode(QToolButton.InstantPopup)
+        tb.addWidget(ext_btn)
         for a in (self.actions.act_clone, self.actions.act_continue, self.actions.act_run):
             tb.addAction(a)
         tb.addSeparator()
-        self.act_tree = self._action(tb, "List", "Ctrl+1", lambda: self.views.setCurrentWidget(self.tree))
-        self.act_graph = self._action(tb, "Tree", "Ctrl+2", lambda: self.views.setCurrentWidget(self.graph))
+        # List/Tree are reachable from the view tabs; keep them only in the View menu and as shortcuts
+        self.act_tree = self._action(None, "List", "Ctrl+1", lambda: self.views.setCurrentWidget(self.tree))
+        self.act_graph = self._action(None, "Tree", "Ctrl+2", lambda: self.views.setCurrentWidget(self.graph))
         self.act_fit = self._action(tb, "Fit tree", "Ctrl+0", self._fit_graph)
         self.all_links = QCheckBox("All links")
         self.all_links.setToolTip("Also draw links to references, masks and other secondary inputs of every job\n"
@@ -296,6 +305,7 @@ class MainWindow(QMainWindow):
             project.addSeparator() if a is None else project.addAction(a)
         mb.addMenu(self.actions.job_menu)
         mb.addMenu(self.actions.cli_menu)
+        mb.addMenu(self.actions.external_menu)
         view = mb.addMenu("View")
         for a in (self.act_tree, self.act_graph, self.act_fit):
             view.addAction(a)
@@ -357,6 +367,7 @@ class MainWindow(QMainWindow):
             self.info.cache.max_disk = setting(s, "cache_mb") * 1024 * 1024
         apply_environment(s)
         apply_relion_defaults(s, self.env)
+        self._pipeliner_exe = self.env.which("relion_pipeliner")
         self.actions.editor.own_scratch = setting(s, "scratch_own")
         self.actions.editor.refresh_defaults()  # an open editor shows the new scratch directory
         style.apply_theme(QApplication.instance(), setting(s, "theme"))
@@ -473,7 +484,7 @@ class MainWindow(QMainWindow):
     def _on_loaded(self, snap: ProjectSnapshot) -> None:
         if snap.project_dir != self.loader.project_dir:
             return
-        self.snapshot = snap
+        prev, self.snapshot = self.snapshot, snap
         self._error = ""
         if not self._tomo_decided:
             self._tomo_decided = True
@@ -496,7 +507,13 @@ class MainWindow(QMainWindow):
         elif self.current is None and snap.jobs:
             self.select_job(list(snap.jobs)[-1])  # newest job, like RELION's GUI
         else:
-            self.info.show_job(snap, self.current)
+            # another job writing to its log makes a snapshot at every poll: the selected job's files are
+            # only looked at again (job.star, its outputs, its viewers) when the job itself changed
+            if prev is not None and prev.pipeline is snap.pipeline and self.current in snap.jobs \
+                    and prev.jobs.get(self.current) == snap.jobs[self.current]:
+                self.info.keep_job(snap)
+            else:
+                self.info.show_job(snap, self.current)
             self.logs.refresh()
         if self.queue_state.checked_at == 0 and self.queue_timer.isActive():
             self._poll_queue()  # first look at the queue as soon as the jobs are known
@@ -548,9 +565,13 @@ class MainWindow(QMainWindow):
         monitor = self.slurm_monitor
         if monitor is None or not self.slurm_client.available:
             return
-        if not (monitor.mapper.history(job) or monitor.mapper.goes_to_queue(job)):
-            return
-        self._start(_Call(("history", monitor, job), lambda: monitor.history(job)))
+
+        def history():  # the run logs and job.star are read here, not in the window's thread
+            if not (monitor.mapper.history(job) or monitor.mapper.goes_to_queue(job)):
+                return None  # never sent to the queue: nothing to show
+            return monitor.history(job)
+
+        self._start(_Call(("history", monitor, job), history))
 
     def history_now(self, job: str) -> None:
         self.info.set_history(job, self.slurm_monitor.history(job))
@@ -577,6 +598,8 @@ class MainWindow(QMainWindow):
                 self._request_history(self.current)  # it moved in the queue: show the new SLURM state
         elif tag[0] == "history":
             job = tag[2]
+            if result is None:
+                return
             if isinstance(result, SlurmError):
                 result = f"sacct: {result}"
             elif isinstance(result, Exception):
@@ -665,7 +688,7 @@ class MainWindow(QMainWindow):
             counts[j.status] = counts.get(j.status, 0) + 1
         parts = [f"{len(snap.jobs)} jobs"] + [f"{n} {s.lower()}" for s, n in counts.items() if s != "Succeeded"]
         self.status_project.setText(f"{snap.project_dir}   ·   " + ", ".join(parts))
-        pipeliner = self.env.which("relion_pipeliner")
+        pipeliner = self._pipeliner_exe
         state = [f"updated {time.strftime('%H:%M:%S', time.localtime(snap.loaded_at))}",
                  f"polling every {self.poll_s:g} s"] + (["read-only"] if self.readonly else [])
         if not pipeliner:

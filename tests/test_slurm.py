@@ -14,7 +14,7 @@ from pathlib import Path
 import pytest
 
 from cryo_savanna.project.pipeline import Pipeline
-from cryo_savanna.project.slurm import QueueMapper, SlurmClient, SlurmMonitor, parse_sacct, parse_squeue
+from cryo_savanna.project.slurm import AcctJob, QueueMapper, SlurmClient, SlurmMonitor, parse_sacct, parse_squeue
 from tests.fixtures.fake_slurm import State, install
 
 
@@ -315,3 +315,52 @@ def test_older_sacct_without_submit_line(spa_copy, slurm, monkeypatch):
     assert monitor.history(job) == [] and monitor.history(job) == []
     s = monitor.poll({job: "Running"})
     assert not s.error and job not in s.lost and len(asked) == 1
+
+
+def test_run_records_are_read_once(spa_copy, monkeypatch):
+    """The run records pile up over a project's life and never change: each is parsed once, however often
+    the SLURM ids of the runs are asked for (every look at the queue, every job selected)."""
+    job = "Refine3D/job011/"
+    queue_job(spa_copy, job)
+    runs = spa_copy / ".cryo-savanna/runs"
+    runs.mkdir(parents=True)
+    for i in range(3):
+        (runs / f"r{i}.json").write_text(json.dumps({"id": f"r{i}", "jobs": [job], "log": f".cryo-savanna/runs/r{i}.log"}))
+        (runs / f"r{i}.log").write_text(f"Submitted batch job {100 + i}\n")
+    mapper = QueueMapper(spa_copy)
+    assert mapper.history(job) == ["100", "101", "102"]
+    reads = []
+    read_text = Path.read_text
+    monkeypatch.setattr(Path, "read_text", lambda self, *a, **k: reads.append(self.name) or read_text(self, *a, **k))
+    assert mapper.history(job) == ["100", "101", "102"] and reads == []
+    (runs / "r3.json").write_text(json.dumps({"id": "r3", "jobs": [job], "log": ".cryo-savanna/runs/r3.log"}))
+    (runs / "r3.log").write_text("Submitted batch job 103\n")
+    with open(runs / "r0.log", "a") as fh:  # a repeating run submits again: its log is read again
+        fh.write("Submitted batch job 104\n")
+    assert mapper.history(job) == ["100", "101", "102", "103", "104"]
+    assert sorted(reads) == ["r0.log", "r3.json", "r3.log"]
+
+
+def test_mapper_is_used_from_two_threads(spa_copy):
+    """The window asks for a job's SLURM ids while the queue thread remembers new ones."""
+    import threading
+    job = "Refine3D/job011/"
+    mapper = QueueMapper(spa_copy, persist=False)
+    errors, stop = [], threading.Event()
+
+    def ask():
+        try:
+            while not stop.is_set():
+                mapper.history(job)
+        except Exception as e:  # noqa: BLE001
+            errors.append(e)
+
+    t = threading.Thread(target=ask)
+    t.start()
+    try:
+        for i in range(3000):
+            mapper.remember([AcctJob(id=str(i))], job)
+    finally:
+        stop.set()
+        t.join()
+    assert errors == [] and len(mapper.history(job)) == 3000

@@ -21,6 +21,8 @@ session, per project).
 from __future__ import annotations
 
 import os
+import threading
+from collections import OrderedDict
 from pathlib import Path
 
 import numpy as np
@@ -45,6 +47,8 @@ from cryo_savanna.images.mrc import ImageRef, MrcReader, contrast_limits
 from cryo_savanna.images.volume import load_volume
 from cryo_savanna.results.tables import Table
 from cryo_savanna.results.tomo import (
+    RAW_TOMOGRAM,
+    SCORES,
     SERIES_COLUMNS,
     TILT_COLUMNS,
     TiltSeriesSet,
@@ -307,6 +311,30 @@ class SideView(pg.GraphicsView):
         self.on_click(p.x(), p.y())
 
 
+_SIDES: OrderedDict[tuple, object] = OrderedDict()  # (path, stamp) -> binned Volume for the side views
+_SIDES_LOCK = threading.Lock()
+SIDES_KEPT = 4
+
+
+def side_volume(path: str):
+    """The binned copy of a tomogram that the side views show. Making it reads the whole tomogram, so
+    the last few are kept (by the file's stamp): going back to a tomogram, or switching "beside it" on,
+    reads nothing again. Only the binned copy is kept, never the full map."""
+    key = (os.path.realpath(path), _stamp(Path(path)))
+    with _SIDES_LOCK:
+        hit = _SIDES.get(key)
+        if hit is not None:
+            _SIDES.move_to_end(key)
+            return hit
+    side = load_volume(path, max_size=256)
+    side.full = None  # sections come from the file: up to 128 MB per tomogram shown otherwise
+    with _SIDES_LOCK:
+        _SIDES[key] = side
+        while len(_SIDES) > SIDES_KEPT:
+            _SIDES.popitem(last=False)
+    return side
+
+
 class TomogramViewer(QWidget):
     def __init__(self, project_dir: Path, star: str, picks: str = "", diameter: float | None = None, cache=None,
                  parent=None):
@@ -322,6 +350,8 @@ class TomogramViewer(QWidget):
         self.side_data = None  # binned copy for the side views
         self.levels = (0.0, 1.0)
         self._stamp = None
+        self.picks_loaded = None  # called with the TomoPicks when they were (re)read
+        self._side_dots = None  # what the side views' dots were drawn from (they do not move with the slab)
 
         self.model = TableModel(self)
         self.proxy = RowFilter(self)
@@ -334,7 +364,8 @@ class TomogramViewer(QWidget):
         self.kind.setToolTip("Which tomogram to show")
         self.kind.currentIndexChanged.connect(lambda _: self._show_current())
         self.compare = QCheckBox("Raw beside it")
-        self.compare.setToolTip("Show the raw reconstruction next to the denoised one, at the same place")
+        self.compare.setToolTip("Show another tomogram next to this one, at the same place: the raw reconstruction "
+                                "beside a denoised one or a score map, the score map beside the raw one")
         self.compare.toggled.connect(lambda _: self._show_current())
         self.compare.hide()
         self.slab = QSpinBox()
@@ -473,12 +504,12 @@ class TomogramViewer(QWidget):
         i = self.kind.findData(current_kind)
         self.kind.setCurrentIndex(max(0, i))
         self.kind.blockSignals(False)
-        kinds = [c for c, _ in ts.tomogram_kinds()]
-        self.compare.setVisible("rlnTomoReconstructedTomogramDenoised" in kinds and
-                                "rlnTomoReconstructedTomogram" in kinds)
+        self._update_compare()
         cols = [("rlnTomoName", "Tomogram")] + [(c, t) for c, t in SERIES_COLUMNS if ts.table.has(c)]
         self.model.set_table(ts.table, cols)
         if picks is not None:
+            if self.picks_loaded is not None:  # e.g. the pytom threshold view's selection
+                self.picks_loaded(picks)
             self.classes.set_counts(picks.classes)
             self._count_picks()
         else:
@@ -493,6 +524,30 @@ class TomogramViewer(QWidget):
         row = ts.names.index(keep) if keep in ts.names else 0
         if len(ts):
             self.select(row)
+
+    def _beside(self) -> str | None:
+        """The tomogram shown beside the chosen one: the raw reconstruction (beside a denoised one or
+        pytom's scores), or the scores beside the raw one; None when there is no such pair."""
+        if self.set is None:
+            return None
+        kinds = [c for c, _ in self.set.tomogram_kinds()]
+        cur = self.kind.currentData()
+        if cur != RAW_TOMOGRAM and RAW_TOMOGRAM in kinds:
+            return RAW_TOMOGRAM
+        if cur == RAW_TOMOGRAM and SCORES in kinds:
+            return SCORES
+        return None
+
+    def _update_compare(self) -> None:
+        beside = self._beside()
+        titles = dict(self.set.tomogram_kinds()) if self.set is not None else {}
+        self.compare.setVisible(beside is not None)
+        if beside is not None:
+            self.compare.setText(("Raw" if beside == RAW_TOMOGRAM else titles[beside]) + " beside it")
+
+    def select_name(self, name: str) -> None:
+        if self.set is not None and name in self.set.names:
+            self.select(self.set.names.index(name))
 
     def select(self, row: int) -> None:
         idx = self.proxy.mapFromSource(self.model.index(row, 0))
@@ -551,15 +606,14 @@ class TomogramViewer(QWidget):
             self._missing = False
             if self.picks is not None and self.set is not None:
                 self._count_picks()
-        compare = self.compare.isVisible() and self.compare.isChecked() and \
-            self.kind.currentData() == "rlnTomoReconstructedTomogramDenoised"
+        self._update_compare()
+        compare = not self.compare.isHidden() and self.compare.isChecked() and self._beside() is not None
         self.raw.setVisible(compare)
 
         def read():
             with MrcReader(ref.path) as r:
                 shape, voxel = (r.nz, r.ny, r.nx), r.voxel
-            side = load_volume(ref.path, max_size=256)
-            return shape, voxel, side
+            return shape, voxel, side_volume(ref.path)
 
         self.tasks.run(read, lambda res, rf=ref: self._on_geometry(rf, res), channel="geometry")
 
@@ -601,8 +655,11 @@ class TomogramViewer(QWidget):
         if self.shape is None:
             return
         refs = [self._ref()]
-        if self.raw.isVisible():
-            refs.append(self._ref("rlnTomoReconstructedTomogram"))
+        beside = self._beside()
+        if not self.raw.isHidden() and beside is not None:
+            ref = self._ref(beside)
+            if ref is not None:
+                refs.append(ref)
         nz = self.shape[0]
         half = self.slab.value() // 2
         z0, z1 = max(0, self.z - half), min(nz, self.z + half + 1)
@@ -667,6 +724,7 @@ class TomogramViewer(QWidget):
             for s in (self.xz, self.yz):
                 s.dots.prepareGeometryChange()  # see ImageCanvas.set_points
                 s.dots.clear()
+            self._side_dots = None
             return
         r = self.diameter.value() / 2 / self.voxel
         dz = np.abs(xyz[:, 2] - (self.z + 0.5))
@@ -676,6 +734,14 @@ class TomogramViewer(QWidget):
         cut_colors = [c for c, k in zip(colors, cut) if k] if isinstance(colors, list) else colors
         for c in (self.canvas, self.raw):
             c.set_points(xyz[cut, 0], xyz[cut, 1], np.maximum(size, 2), cut_colors)
+        self.cut_count = int(cut.sum())
+        # the side views show every particle, wherever the slab is: drawn again only when the particles
+        # or their colours changed, not at every step of the Z slider
+        drawn = (xyz.tobytes(), None if cls is None else np.asarray(cls).tobytes(),
+                 tuple(colors) if isinstance(colors, list) else colors)
+        if drawn == self._side_dots:
+            return
+        self._side_dots = drawn
         if isinstance(colors, list):
             brushes = {c: pg.mkBrush(*c, 160) for c in set(colors)}
             brush = [brushes[c] for c in colors]
@@ -685,4 +751,3 @@ class TomogramViewer(QWidget):
             s.dots.prepareGeometryChange()
         self.xz.dots.setData(x=xyz[:, 0], y=xyz[:, 2], brush=brush)
         self.yz.dots.setData(x=xyz[:, 1], y=xyz[:, 2], brush=brush)
-        self.cut_count = int(cut.sum())

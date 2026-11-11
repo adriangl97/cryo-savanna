@@ -412,3 +412,34 @@ def test_warp_particles_on_their_tomograms(qtbot, tmp_path, settle):
         assert v.shape == (20, 40, 50) and len(v.picks_voxels()) == 10
     finally:
         _WARP_FOLDERS.clear()
+
+
+def test_side_volume_is_read_once_and_side_dots_drawn_once(qtbot, tomo_project, monkeypatch):
+    """Going back to a tomogram (or switching "beside it") reads nothing again, the full map is not
+    kept, and the side views' dots are not drawn again at every step of the Z slider."""
+    from cryo_savanna.viewers import tomo_viewer as tv
+    tv._SIDES.clear()
+    loads = []
+    load = tv.load_volume
+    monkeypatch.setattr(tv, "load_volume", lambda p, **k: loads.append(str(p)) or load(p, **k))
+    star = "Tomograms/job006/tomograms.star"
+    parts = "Picks/job008/particles.star" if (tomo_project / "Picks/job008/particles.star").is_file() else ""
+    v = tv.TomogramViewer(tomo_project, star, picks=parts)
+    qtbot.addWidget(v)
+    for _ in range(4):
+        v.tasks.wait()
+    assert len(loads) == 1 and v.side_data.full is None
+    v._show_current()
+    v.tasks.wait()
+    assert len(loads) == 1  # from the kept copy
+    if parts and len(v.picks_voxels()):
+        drawn = []
+        setter = v.xz.dots.setData
+        monkeypatch.setattr(v.xz.dots, "setData", lambda *a, **k: drawn.append(1) or setter(*a, **k))
+        for z in (1, 2, 3):
+            v.z = z
+            v._draw_picks()
+        assert drawn == []  # the same particles: only the circles of the slab change
+        v.show_picks.setChecked(False)
+        v.show_picks.setChecked(True)
+        assert drawn == [1]

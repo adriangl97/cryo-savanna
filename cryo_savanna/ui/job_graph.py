@@ -90,6 +90,8 @@ class JobNodeItem(QGraphicsItem):
         self._hover = False
 
     def set_info(self, info: JobInfo) -> None:
+        if info == self.info:  # every poll while a job runs: only the cards that changed are painted again
+            return
         self.info = info
         self._update_tooltip()
         self.update()

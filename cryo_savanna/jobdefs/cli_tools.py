@@ -349,6 +349,10 @@ def external_program(fn_exe: str) -> str:
     program = runner_program(fn_exe)
     if program is not None:
         return program
+    from cryo_savanna.jobdefs.pytom_jobs import TITLES, pytom_kind  # (imports this module)
+    kind = pytom_kind(fn_exe)
+    if kind is not None:
+        return TITLES[kind]
     parts = fn_exe.split()
     return Path(parts[0]).name if parts else ""
 

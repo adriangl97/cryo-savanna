@@ -255,7 +255,8 @@ class PipelineOps:
                         if c not in procs:
                             procs.append(c)
             i += 1
-        order = [n for n in p.processes if n in set(procs)]
+        chosen = set(procs)
+        order = [n for n in p.processes if n in chosen]
         return order, nodes  # every downstream job (RELION's loop can stop early; see the module docstring)
 
     def delete(self, job: str, recursive: bool = False) -> list[str]:

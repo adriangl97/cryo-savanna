@@ -175,11 +175,17 @@ def read_movie_sum(path: str, max_frames: int = 8) -> np.ndarray:
         try:
             with tifffile.TiffFile(path) as t:
                 n = min(max_frames, len(t.pages))
-                return np.sum([t.pages[i].asarray().astype(np.float32) for i in range(n)], axis=0)
+                total = t.pages[0].asarray().astype(np.float32)  # frame by frame: one frame in memory, not all
+                for i in range(1, n):
+                    total += t.pages[i].asarray()
+                return total
         except (OSError, ValueError, IndexError) as e:
             raise ImageError(f"{path}: {e}") from e
     with MrcReader(path) as r:
-        return r.planes(0, min(r.nz, max_frames)).sum(axis=0)
+        total = r.section(0)  # frame by frame, into the array of the first: one frame in memory, not all
+        for z in range(1, min(r.nz, max_frames)):
+            total += r.section(z)
+        return total
 
 
 # ---------------------------------------------------------------------------- display helpers

@@ -11,6 +11,7 @@ from cryo_savanna.jobdefs.model import JobDefs
 from cryo_savanna.project.pipeline import Node, Pipeline, Process
 from cryo_savanna.project.rebuild import (
     MINI_PIPELINE,
+    _last_iteration,
     RebuildError,
     adopt_folder,
     find_job_dirs,
@@ -308,3 +309,18 @@ def test_window_offers_to_generate_a_lost_pipeline(qtbot, spa_copy, spa_project,
     w.open_project(spa_copy)
     assert len(Pipeline.read(spa_copy).processes) == 18
     qtbot.waitUntil(lambda: w.snapshot is not None and w.snapshot.project_dir == spa_copy.resolve(), timeout=5000)
+
+
+def test_last_iteration_is_that_of_the_latest_run():
+    """A run continued from iteration 10 and now at 20 counts, not the run_it025 the first run left
+    (as the job summaries read continued runs)."""
+    first = [f"Class3D/job009/run_it{i:03d}_data.star" for i in (0, 10, 24, 25)]
+    assert _last_iteration(first) == ["Class3D/job009/run_it025_data.star"]
+    continued = first + [f"Class3D/job009/run_ct10_it{i:03d}_data.star" for i in (11, 20)]
+    assert _last_iteration(continued) == ["Class3D/job009/run_ct10_it020_data.star"]
+    past = continued + ["Class3D/job009/run_ct10_it030_data.star"]
+    assert _last_iteration(past) == ["Class3D/job009/run_ct10_it030_data.star"]
+    maps = [f"Class3D/job009/run_ct10_it020_class{k:03d}.mrc" for k in (1, 2)] + ["Class3D/job009/run_it025_class001.mrc"]
+    assert _last_iteration(maps) == maps[:2]
+    assert _last_iteration(["a/job001/x.star", "a/job001/y.star"]) == ["a/job001/x.star", "a/job001/y.star"]
+    assert _last_iteration([]) == []

@@ -67,6 +67,19 @@ def _dir_stamp(path: Path):
     return _stamp(path)
 
 
+def _while_unchanged(directory: Path, fn):
+    """fn, answered from its last result while no file was added to or removed from ``directory``."""
+    last: list = []
+
+    def cached():
+        st = _dir_stamp(directory)
+        if not last or last[0] != st:
+            last[:] = [st, fn()]
+        return list(last[1])
+
+    return cached
+
+
 def _message(text: str) -> QLabel:
     lbl = QLabel(text)
     lbl.setAlignment(Qt.AlignCenter)
@@ -645,8 +658,12 @@ def build_view(spec: R.ViewSpec, ctx: R.JobContext, cache: ThumbCache | None, re
     if spec.kind == R.ANGLES:
         return AnglesView(project, a["job"])
     if spec.kind == R.VOLUME:
-        follow = (lambda job=a["job"]: latest_iteration_maps(project, job)) if a.get("latest") else None
-        history = (lambda job=a["job"]: iteration_maps(project, job)) if a.get("history") else None
+        # asked at every poll while the viewer shows: the job directory is listed again only when files
+        # were added to it
+        follow = _while_unchanged(project / a["job"], lambda job=a["job"]: latest_iteration_maps(project, job)) \
+            if a.get("latest") else None
+        history = _while_unchanged(project / a["job"], lambda job=a["job"]: iteration_maps(project, job)) \
+            if a.get("history") else None
         return VolumeViewer(project, a.get("maps", []), mask=a.get("mask", ""), color=a.get("color", ""),
                             masks=a.get("masks", []), follow=follow, history=history)
     if spec.kind == R.TILT_SERIES:
@@ -666,6 +683,13 @@ def build_view(spec: R.ViewSpec, ctx: R.JobContext, cache: ThumbCache | None, re
         if spec.kind == R.CTF_CHANGES:
             return V.CtfChangesView(project, a["star"], a.get("input", ""))
         return V.AberrationsView(project, a["job"], a.get("star", ""))
+    if spec.kind in (R.PYTOM_SCORES, R.PYTOM_THRESHOLDS, R.SVG_PLOTS):
+        from cryo_savanna.viewers import pytom_view as V
+        if spec.kind == R.PYTOM_SCORES:
+            return V.PytomScoresView(project, a["job"])
+        if spec.kind == R.PYTOM_THRESHOLDS:
+            return V.PytomThresholdView(project, a["job"], a.get("summary", ""), a.get("diameter"), cache)
+        return V.SvgPlotsView(project, a["job"], a.get("folder", "plots"))
     if spec.kind == R.FILES:
         return FilesView(project, a["job"], cache)
     return _message(f"No viewer for {spec.kind}")

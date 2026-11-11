@@ -80,7 +80,7 @@ from pathlib import Path
 
 import numpy as np
 
-from cryo_savanna.project.star import StarBlock, read_star, write_star
+from cryo_savanna.project.star import FormattedLoop, StarBlock, format_row, loop_tokens, read_star, write_star
 
 SELECT_FILES = ("particles.star", "class_averages.star", "backup_selection.star")
 
@@ -170,27 +170,36 @@ def write_class_selection(inp: ClassInput, job: str, selected: list[int], recent
     sel_flags = [n in chosen for n in numbers]
     result = ClassSelectionResult(0, sum(sel_flags))
 
-    # particles.star
-    blocks = read_star(project / inp.data)
-    parts = blocks.get("particles")
-    if parts is None or not parts.has("rlnClassNumber"):
+    # particles.star. The particles are read one at a time and only those of the selected classes are
+    # kept (as the line each becomes in the new file, unless they are regrouped first): a data.star
+    # of millions of particles, held as rows of values, takes several times its size in memory
+    rows_in = loop_tokens(project / inp.data, "particles")
+    columns = next(rows_in, None)
+    if columns is None or "rlnClassNumber" not in columns:
         raise SelectionError(f"{inp.data}: no particles with rlnClassNumber")
-    ci = parts.col_index("rlnClassNumber")
-    by_class: dict[int, list[list]] = {}
-    for row in parts.rows:
-        by_class.setdefault(int(float(row[ci])), []).append(row)
+    ci = columns.index("rlnClassNumber")
+    wanted = {n for n, on in zip(numbers, sel_flags) if on}
+    keep = (lambda row: row) if regroup > 0 else format_row
+    by_class: dict[int, list] = {}
+    for row in rows_in:
+        n = int(float(row[ci]))
+        if n in wanted:
+            by_class.setdefault(n, []).append(keep(row))
     rows = [r for n, on in zip(numbers, sel_flags) if on for r in by_class.get(n, [])]
+    del by_class
     result.particles = len(rows)
     if not rows:
         raise SelectionError("No classes selected." if not any(sel_flags) else "The selected classes have no particles.")
-    out = StarBlock("particles", list(parts.columns), [list(r) for r in rows], True, parts.version)
     if regroup > 0:
         if inp.groups is None:
             raise SelectionError(f"{inp.model}: no model_groups to regroup with")
+        out = StarBlock("particles", list(columns), rows, True)
         result.messages.append(regroup_particles(out, inp.groups, regroup))
+    else:
+        out = FormattedLoop("particles", list(columns), rows)
     out_dir.mkdir(parents=True, exist_ok=True)
-    others = [b for name, b in blocks.items() if name in ("general", "optics")]
-    write_star(out_dir / "particles.star", others + [out])
+    blocks = read_star(project / inp.data, ["general", "optics"])  # in the file's order
+    write_star(out_dir / "particles.star", list(blocks.values()) + [out])
     result.files.append(job + "particles.star")
 
     # class_averages.star (2D only)

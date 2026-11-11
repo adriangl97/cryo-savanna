@@ -30,6 +30,7 @@ import os
 import re
 import shutil
 import subprocess
+import threading
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -279,7 +280,10 @@ class SlurmClient:
 # ---------------------------------------------------------------------------- mapping
 
 class QueueMapper:
-    """Which SLURM jobs belong to which jobs of one RELION project."""
+    """Which SLURM jobs belong to which jobs of one RELION project.
+
+    Used by the thread that looks at the queue and by the window (a job's history when it is selected):
+    what it remembers is read and changed under a lock."""
 
     def __init__(self, project_dir: str | os.PathLike, persist: bool = True):
         self.project_dir = Path(project_dir)
@@ -287,7 +291,9 @@ class QueueMapper:
         self._real = os.path.realpath(self.project_dir)
         self.known: dict[str, str] = {}  # SLURM id -> RELION job
         self._logs: dict[Path, tuple[tuple, list[str]]] = {}
+        self._records: dict[str, dict | None] = {}  # run record file -> its record (None: unreadable)
         self._do_queue: dict[str, tuple[float, bool]] = {}
+        self._lock = threading.RLock()
         self._load()
 
     # -- remembered ids -----------------------------------------------------------------------
@@ -312,23 +318,26 @@ class QueueMapper:
             return {"jobs": dict(sorted(known.items(), key=lambda kv: _id_order(kv[0])))}
 
         try:
-            self.known = dict(update_json(self._known_path, merge)["jobs"])
+            with self._lock:
+                self.known = dict(update_json(self._known_path, merge)["jobs"])
         except (OSError, ValueError):
             pass  # a read-only project: mapping still works, the history only lasts this session
 
     def history(self, job: str) -> list[str]:
         """SLURM ids seen for a RELION job (in squeue or in the run logs), oldest first."""
-        ids = {i for i, j in self.known.items() if j == job}
+        with self._lock:
+            ids = {i for i, j in self.known.items() if j == job}
         ids |= {i for i, j in self.submitted_in_runs().items() if j == job}
         return sorted(ids, key=_id_order)
 
     def remember(self, accounting: list[AcctJob], job: str) -> list[AcctJob]:
         """Keep the sacct records of this project's ``job`` (by working directory), remembering their ids."""
         mine = [a for a in accounting if not a.workdir or os.path.realpath(a.workdir) == self._real]
-        new = {a.id: job for a in mine if self.known.get(a.id) != job}
-        if new:
-            self.known.update(new)
-            self._save()
+        with self._lock:
+            new = {a.id: job for a in mine if self.known.get(a.id) != job}
+            if new:
+                self.known.update(new)
+                self._save()
         return mine
 
     def by_submit_line(self, job: str, rows: list[tuple[str, str, str]]) -> list[str]:
@@ -376,13 +385,14 @@ class QueueMapper:
             for q in rest:
                 if submitted.get(q.id) in jobs:
                     found[q.id] = submitted[q.id]
-        changed = False
-        for i, job in found.items():
-            if self.known.get(i) != job:
-                self.known[i] = job
-                changed = True
-        if changed:
-            self._save()
+        with self._lock:
+            changed = False
+            for i, job in found.items():
+                if self.known.get(i) != job:
+                    self.known[i] = job
+                    changed = True
+            if changed:
+                self._save()
         out: dict[str, QueueJob] = {}
         for q in sorted(queue, key=lambda q: _id_order(q.id)):
             if q.id in found:
@@ -409,17 +419,38 @@ class QueueMapper:
         """SLURM id -> RELION job from the sbatch lines in cryo-savanna's run logs."""
         out: dict[str, str] = {}
         runs = self.project_dir / GUI_DIR / "runs"
-        for rec_file in sorted(runs.glob("*.json")) if runs.is_dir() else []:
+        try:
+            names = sorted(n for n in os.listdir(runs) if n.endswith(".json"))
+        except OSError:
+            return out
+        to_queue: dict[str, bool] = {}  # one look at a job's job.star per call, not one per run of it
+        with self._lock:
+            for name in names:
+                rec = self._record(runs / name)
+                if rec is None:
+                    continue
+                ids = self._submitted_ids(self.project_dir / rec.get("log", ""))
+                if not ids:
+                    continue
+                for j in rec.get("jobs", []):
+                    if j not in to_queue:
+                        to_queue[j] = self.goes_to_queue(j)
+                queued = [j for j in rec.get("jobs", []) if to_queue[j]]
+                if queued:
+                    for k, i in enumerate(ids):  # repeated runs submit the same jobs again, in order
+                        out[i] = queued[k % len(queued)]
+        return out
+
+    def _record(self, rec_file: Path) -> dict | None:
+        """A run record, read once: it is written whole and never changes (project/pipeliner.py), and the
+        records pile up over a project's life."""
+        if rec_file.name not in self._records:
             try:
                 rec = json.loads(rec_file.read_text())
             except (OSError, ValueError):
-                continue
-            ids = self._submitted_ids(self.project_dir / rec.get("log", ""))
-            queued = [j for j in rec.get("jobs", []) if self.goes_to_queue(j)]
-            if ids and queued:
-                for k, i in enumerate(ids):  # repeated runs submit the same jobs again, in order
-                    out[i] = queued[k % len(queued)]
-        return out
+                return None  # tried again at the next look
+            self._records[rec_file.name] = rec if isinstance(rec, dict) else None
+        return self._records[rec_file.name]
 
     def _submitted_ids(self, log: Path) -> list[str]:
         try:
@@ -442,16 +473,17 @@ class QueueMapper:
             mtime = path.stat().st_mtime
         except OSError:
             return False
-        hit = self._do_queue.get(job)
-        if hit is None or hit[0] != mtime:
-            try:
-                text = path.read_text(errors="replace")
-            except OSError:
-                return False
-            m = re.search(r"^\s*do_queue\s+(\S+)", text, re.M)
-            hit = (mtime, bool(m) and m.group(1).strip("\"'") == "Yes")
-            self._do_queue[job] = hit
-        return hit[1]
+        with self._lock:
+            hit = self._do_queue.get(job)
+            if hit is None or hit[0] != mtime:
+                try:
+                    text = path.read_text(errors="replace")
+                except OSError:
+                    return False
+                m = re.search(r"^\s*do_queue\s+(\S+)", text, re.M)
+                hit = (mtime, bool(m) and m.group(1).strip("\"'") == "Yes")
+                self._do_queue[job] = hit
+            return hit[1]
 
 
 # ---------------------------------------------------------------------------- monitor
@@ -528,9 +560,11 @@ class SlurmMonitor:
         that ended stays as it is (until the job gets a new SLURM id), others are asked again after
         LOST_RECHECK_S."""
         hit = self._suspects.get(job)
-        if hit is not None and hit[0] == tuple(self.mapper.history(job)):
+        if hit is not None:
             ids, asked, last = hit
-            if (last is not None and not last.active) or now - asked < LOST_RECHECK_S:
+            # the ids are only looked up (run logs, slurm.json) when the answer could be used
+            if ((last is not None and not last.active) or now - asked < LOST_RECHECK_S) \
+                    and ids == tuple(self.mapper.history(job)):
                 return last
         last = next(iter(self.history(job)), None)
         self._suspects[job] = (tuple(self.mapper.history(job)), now, last)  # after history(): it may remember ids

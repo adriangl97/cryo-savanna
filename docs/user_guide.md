@@ -86,6 +86,8 @@ polling interval (Preferences, or `--poll`), and views of running jobs read new 
   With MPI they run locally only, with at most RELION_ERROR_LOCAL_MPI processes (default 32), as
   RELION allows for its own local jobs. Abort asks the program to stop; one that has not stopped
   after 30 s is terminated, and killed 30 s later.
+- **Additional external jobs** (toolbar, menu bar): programs that are not RELION's, run as External
+  jobs and in the pipeline like any job. See [pytom template matching](#pytom-template-matching).
 - **Queue:** "Submit to queue" uses the queue settings of the loaded RELION module (RELION_QSUB_*).
   On a SLURM cluster the list shows each queued job's state (queued and why, or running where and
   for how long), Abort can cancel it with scancel, and jobs that SLURM ended without RELION noticing
@@ -119,6 +121,10 @@ Each job gets the tabs that fit what it made:
 | Aberrations | CtfRefine | Per optics group, the phase differences in Fourier space for beam tilt and trefoil, 4th-order aberrations and the magnification displacements: observed, fitted and residuals, at ±1 rad or ±π |
 | Tilt series | tomography Import … AlignTiltSeries | Tilt series, their tilts and values, the tilt image and CTF spectrum, values against tilt angle |
 | Tomograms / Picks | ReconstructTomograms, Denoise, Pick, Extract, Class3D | Z slab with side views, denoised and raw side by side, particles where the slab cuts them (of the classes chosen) |
+| Scores | pytom template matching | Every tomogram's status (pending, running, done, failed), run time and pytom's search statistics, updated as the job goes; the score histogram of the tomogram chosen (with the score Gaussian noise passes once) and the maximum projection of its score map along z |
+| Tomograms | pytom template matching | The tomograms and their score maps, Z slab and side views, one beside the other |
+| Thresholds | pytom extraction | The threshold of each tomogram (or one for all), as a line to drag on the histogram of its candidates' scores, with the particles above it on the tomogram; Save rewrites particles.star |
+| pytom plots | pytom extraction | pytom's own SVG plots (extraction histograms, tophat filter, ROC) |
 | Files | every job | Every file: STAR tables (with plots), images, stacks, volumes, text |
 
 "Open in napari" starts RELION's own `relion_python_tomo_view`; "Open in ChimeraX" starts
@@ -149,6 +155,61 @@ every tilt image with its Keep mark, excluded ones red and as lines in the plots
 nothing. **Change selection…** (top right of that tab), or Continue, opens the selection window
 again and rewrites the job's files; the tab follows. Selections saved by relion_display or napari
 show the same way.
+
+## Aditional external jobs 
+
+### pytom template matching
+
+[pytom-match-pick](https://github.com/SBC-Utrecht/pytom-match-pick) finds particles in tomograms by
+template matching on GPUs. cryo-savanna runs its programs as two RELION External jobs, from
+**Additional external jobs**. pytom is does not come with cryo-savanna; install it in a conda environment
+of its own, and give the environment's name (or path) in the job's
+Compute tab. Its programs then run with `conda run -n <environment>`; leave the name empty when they
+are on the PATH already. `$CRYO_SAVANNA_PYTOM_ENV` sets the default name, and a new job
+takes the environment of the project's last pytom job.
+
+**Template matching** (`pytom_match_template.py`):
+
+- *Inputs and template*: the tomograms.star of a Reconstruct tomograms or Denoise job. For each tomogram the job writes pytom's inputs from it and
+  its tilt-series STAR files, in `inputs/<tomogram>/`: tilt angles (nominal or aligned), accumulated
+  dose and defocus per tilt, voltage, Cs, amplitude contrast and the voxel size. The template can be
+  prepared (`pytom_create_template.py`: final pixel size, by default the tomogram's; final box;
+  contrast inverted; mirrored; low-pass). The mask is either made (`pytom_create_mask.py`: a sphere or
+  an ellipsoid with a soft edge, in the template's box) or read from a file, which can be prepared
+  too (final pixel size and box, inverted).
+- *Weighting and CTF*: per-tilt weighting, dose, CTF, phase shift, how the tomograms were
+  CTF-corrected, defocus handedness, spectral whitening, band-pass filters.
+- *Picking*: particle diameter or angular search, z-axis symmetry, non-spherical mask, mirroring
+  or inverting the template at search time, random-phase correction, half precision, volume split,
+  search ranges, tomogram masks (`{name}` stands for each tomogram), more pytom arguments.
+- *Compute*: the GPU ids, separated by colons as in RELION (`0:1:2:3`), and how several GPUs are used: one tomogram per GPU at a time or each
+  tomogram over all GPUs. Tomograms already done are skipped when the job is run
+  again (Continue), so after a failure only the rest run.
+- *CUDA module*: loaded with `module load` before pytom runs, so that pytom (CuPy) finds CUDA. The
+  default is the CUDA module loaded where cryo-savanna runs, else the default CUDA module that
+  `module avail` lists (`$CRYO_SAVANNA_CUDA_MODULE` overrides it). With no CUDA modules the field
+  is empty: nothing is loaded and pytom uses the CUDA on the job's PATH. The same
+  field is on the extraction job's *Compute* tab, and new pytom jobs take it, with the conda
+  environment, from the project's last pytom job.
+- *Running*: as for any job, locally or through the queue (RELION_QSUB_*). On a cluster, ask for
+  the GPUs in your submission template.  
+
+The job writes `pytom_match.star` (one row per tomogram: the tomograms.star columns, the score map,
+the status) as tomograms finish, so its Scores and Tomograms tabs show the results while it runs.
+
+**Extract candidates** (`pytom_extract_candidates.py`): from a template matching job, with pytom's
+automatic cut-off (from the number of false positives allowed) or a fixed one, optionally with the
+tophat filter, other tomogram masks, and `pytom_estimate_roc.py`. With "Keep candidates below the
+cut-off", the peaks down to a fraction of each tomogram's cut-off are kept as candidates, and the
+**Thresholds** tab sets the threshold of each tomogram (or one for all) on the histogram of their
+scores, showing the particles above it on the tomogram; **Save thresholds** rewrites particles.star.
+pytom writes into the extraction job's own directory (the matching job's score maps are linked
+there). The output is RELION 5's: `particles.star` (rlnTomoName, rlnCenteredCoordinate[XYZ]Angst,
+the angles as rlnAngleRot/Tilt/Psi or rlnTomoSubtomogramRot/Tilt/Psi, rlnLCCmax and
+rlnAutopickFigureOfMerit) and `optimisation_set.star` with the tomograms, for Extract subtomos.
+Like matching, extraction has to run on a machine with a GPU and its NVIDIA driver: pytom's
+programs look for a GPU as they start, even for the extraction itself. Submit it to a GPU queue
+(one GPU is enough) or run it on a GPU workstation. On a machine without one (a CPU node) every tomogram fails with `cudaErrorInsufficientDriver`.
 
 ## Preferences (Ctrl+,)
 

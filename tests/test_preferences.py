@@ -360,3 +360,37 @@ def test_print_tree_shows_the_tomography_menu_for_a_tomography_project(tomo_proj
     from cryo_savanna import app
     assert app.main(["--project", str(tomo_project), "--print-tree"]) == 0
     assert "job menu (tomo)" in capsys.readouterr().out
+
+
+def test_slow_work_runs_in_a_thread_with_the_window_alive(qtbot):
+    """run_busy: the result (or the error) of work done in a thread, with the event loop running
+    meanwhile; when_done: a value shown once it is there."""
+    import threading
+    import time
+
+    from qtpy.QtCore import QTimer
+    from qtpy.QtWidgets import QWidget
+
+    from cryo_savanna.ui.busy import run_busy, when_done
+    main = threading.get_ident()
+    ticks = []
+    timer = QTimer()
+    timer.timeout.connect(lambda: ticks.append(1))
+    timer.start(10)
+
+    def slow():
+        time.sleep(0.6)
+        return threading.get_ident()
+
+    assert run_busy(slow, "Working…") != main and len(ticks) > 5  # the event loop ran meanwhile
+    assert run_busy(lambda: 7) == 7  # quick work: at once
+    with pytest.raises(ValueError, match="no"):
+        run_busy(lambda: (_ for _ in ()).throw(ValueError("no")))
+    owner, got = QWidget(), []
+    qtbot.addWidget(owner)
+    when_done(owner, lambda: 1, got.append)
+    assert got == [1]
+    when_done(owner, lambda: time.sleep(0.4) or 2, got.append)
+    assert got == [1]
+    qtbot.waitUntil(lambda: got == [1, 2], timeout=3000)
+    timer.stop()

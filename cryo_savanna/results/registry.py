@@ -41,6 +41,9 @@ SELECTION = "selection"  # what an interactive Select / Exclude tilt images job 
 CTF_REFINE = "ctf_refine"  # CtfRefine: what it fitted, optics before/after, statistics of the changes
 CTF_CHANGES = "ctf_changes"  # CtfRefine: per-particle CTF changes, and per micrograph
 ABERRATIONS = "aberrations"  # CtfRefine: phase images of beam tilt / trefoil / 4th order, magnification
+PYTOM_SCORES = "pytom_scores"  # pytom template matching: progress and score statistics per tomogram
+PYTOM_THRESHOLDS = "pytom_thresholds"  # pytom extraction: thresholds per tomogram, chosen interactively
+SVG_PLOTS = "svg_plots"  # the plots a program wrote as SVG files (pytom)
 FILES = "files"  # every file of the job: STAR tables, images, stacks
 
 
@@ -130,11 +133,12 @@ def tomo_pick_diameter(ctx: JobContext) -> float | None:
     return None
 
 
-def class_job_particles(ctx: JobContext) -> str | None:
+def class_job_particles(ctx: JobContext, its: list | None = None) -> str | None:
     """The micrograph particles of an SPA classification job with several classes, for its Picks tab: its
     output, else (while it runs) those of its latest iteration. Also Warp particles (named by their
     .tomostar, which have rlnMicrographName too): those are shown on their tomograms. RELION
-    tomography particles get theirs as any tomogram particles do."""
+    tomography particles get theirs as any tomogram particles do. ``its``: the job's iterations(), if the
+    caller has them already."""
     try:
         if int(ctx.options.get("nr_classes", "1")) < 2:
             return None
@@ -142,7 +146,7 @@ def class_job_particles(ctx: JobContext) -> str | None:
         return None
     data = ctx.output("ParticleGroupMetadata")
     if not data:
-        its = iterations(ctx.job_dir)
+        its = iterations(ctx.job_dir) if its is None else its
         data = ctx.name + data_star_for(its[-1][1]).name if its else None
     if not data or not ctx.exists(data):
         return None
@@ -153,6 +157,34 @@ def class_job_particles(ctx: JobContext) -> str | None:
     if TOMO_NAME in cols or "rlnMicrographName" not in cols or "rlnCoordinateX" not in cols:
         return None
     return data
+
+
+def _pytom_views(ctx: JobContext, add, add_maps) -> None:
+    """pytom jobs (jobdefs/pytom_jobs.py): their views come from the files in the job directory, so that
+    they show while the job runs (an External job has its outputs only at the end)."""
+    from cryo_savanna import pytom_runner as P
+    from cryo_savanna.jobdefs.pytom_jobs import decode, pytom_kind
+    kind = pytom_kind(ctx.options.get("fn_exe", ""))
+    if kind is None:
+        return
+    own = decode(ctx.options.get("other_args", ""))[0]
+    if kind == P.MATCH:
+        summary = ctx.name + P.SUMMARY
+        add(PYTOM_SCORES, "Scores", job=ctx.name)
+        if ctx.exists(summary):
+            add(TOMOGRAMS, "Tomograms", star=summary)
+        add_maps([ctx.name + "template.mrc", ctx.name + "mask.mrc"], masks=[ctx.name + "mask.mrc"])
+        return
+    summary = own.get("in_match", "")
+    add(PYTOM_THRESHOLDS, "Thresholds", job=ctx.name, summary=summary, diameter=_float(own.get("particle_diameter")))
+    particles = ctx.name + P.PARTICLES
+    if ctx.exists(particles) and ctx.exists(summary):
+        add(TOMOGRAMS, "Picks", star=summary, picks=particles, diameter=_float(own.get("particle_diameter")))
+    if (ctx.job_dir / P.PLOTS_DIR).is_dir():
+        add(SVG_PLOTS, "pytom plots", job=ctx.name, folder=P.PLOTS_DIR)
+    if ctx.exists(particles):
+        add(TABLE_PLOT, "Particle plots", star=particles, block="particles",
+            columns=[P.LCC, "rlnCenteredCoordinateZAngst"])
 
 
 def views_for(ctx: JobContext) -> list[ViewSpec]:
@@ -178,6 +210,13 @@ def views_for(ctx: JobContext) -> list[ViewSpec]:
                 color=color if ctx.exists(color) else "", masks=list(masks or []), **extra)
 
     density = [n for n, nt in ctx.outputs if nt.split(".", 1)[0] == "DensityMap"]
+    listed: list[list] = []
+
+    def job_iterations() -> list:
+        """iterations() of the job, listed once: this runs in the window's thread at every refresh."""
+        if not listed:
+            listed.append(iterations(ctx.job_dir))
+        return listed[0]
 
     def add_job_maps(maps: list[str], mask: str) -> None:
         """An iterative job's maps: while it runs (or when it stopped before writing its final maps), those
@@ -225,18 +264,18 @@ def views_for(ctx: JobContext) -> list[ViewSpec]:
                 box=ctx.options.get("extract_size", ""))
             add(TABLE_PLOT, "Plots", star=parts, block="particles")
     elif t == "relion.class2d":
-        if iterations(ctx.job_dir):
+        if job_iterations():
             add(CLASSES, "Classes", job=ctx.name, tool="classes")
             add(PLOTS, "Convergence", job=ctx.name, figures="convergence")
     elif t in ("relion.class3d", "relion.initialmodel"):
-        if iterations(ctx.job_dir):
+        if job_iterations():
             add(CLASSES, "Classes", job=ctx.name, tool="classes")
         add_job_maps(density, ctx.options.get("fn_mask", ""))
-        if iterations(ctx.job_dir):
+        if job_iterations():
             add(PLOTS, "Convergence", job=ctx.name, figures="convergence")
             add(ANGLES, "Angular distribution", job=ctx.name)
     if t in ("relion.class2d", "relion.class3d", "relion.initialmodel"):
-        parts = class_job_particles(ctx)
+        parts = class_job_particles(ctx, job_iterations())
         if parts and is_warp_particles(ctx.project_dir / parts):
             # Warp particles: on the tomograms Warp reconstructed (no RELION tomogram set)
             add(TOMOGRAMS, "Picks", star="", picks=parts, diameter=tomo_pick_diameter(ctx))
@@ -249,7 +288,7 @@ def views_for(ctx: JobContext) -> list[ViewSpec]:
     elif t in ("relion.refine3d", "relion.multibody"):
         # the full map before the half maps
         add_job_maps(sorted(density, key=lambda n: "half" in n), ctx.options.get("fn_mask", ""))
-        if iterations(ctx.job_dir) or ctx.file("run_model.star"):
+        if job_iterations() or ctx.file("run_model.star"):
             add(PLOTS, "FSC", job=ctx.name, figures="model_fsc")
             add(PLOTS, "Convergence", job=ctx.name, figures="convergence")
             add(ANGLES, "Angular distribution", job=ctx.name)
@@ -286,6 +325,8 @@ def views_for(ctx: JobContext) -> list[ViewSpec]:
             add(PARTICLES, "Particles", star=parts)
     elif t == "relion.excludetilts" and interactive_kind(ctx.type_label, ctx.options) == "tilts":
         add(SELECTION, "Selection", job=ctx.name, what="tilts")
+    elif t == "relion.external":
+        _pytom_views(ctx, add, add_maps)
 
     # anything else a viewer can show; of several tomogram particle files (a continued job lists its
     # earlier ones too), the newest gets the Picks tab

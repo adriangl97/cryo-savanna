@@ -37,7 +37,9 @@ TOMOGRAM_COLUMNS = [  # (column, title)
     ("rlnTomoReconstructedTomogram", "Reconstructed"),
     ("rlnTomoReconstructedTomogramHalf1", "Half 1"),
     ("rlnTomoReconstructedTomogramHalf2", "Half 2"),
+    ("savannaPytomScores", "pytom scores"),  # a pytom template matching job's score maps (pytom_match.star)
 ]
+RAW_TOMOGRAM, SCORES = "rlnTomoReconstructedTomogram", "savannaPytomScores"
 TILT_COLUMNS = [  # per-tilt values worth a column
     ("rlnTomoNominalStageTiltAngle", "Tilt (°)"), ("rlnMicrographPreExposure", "Dose (e/Å²)"),
     ("rlnDefocusU", "Defocus U (Å)"), ("rlnDefocusV", "Defocus V (Å)"), ("rlnCtfMaxResolution", "Max. res. (Å)"),
@@ -215,6 +217,7 @@ class TomoPicks:
     cls_by_tomo: dict[str, np.ndarray] | None = None  # tomogram -> rlnClassNumber of its particles
     classes: dict[int, int] = field(default_factory=dict)  # class -> particles
     pixel_size: float | None = None  # Warp: corner coordinates in pixels of this size (Å), not tilt-series pixels
+    keep: dict[str, np.ndarray] | None = None  # tomogram -> which of its particles to show (pytom thresholds)
 
     def count(self, name: str, classes: set[int] | None = None) -> int:
         return int(self.in_classes(name, classes).sum())
@@ -227,8 +230,13 @@ class TomoPicks:
         n = len(self.by_tomo.get(name, ()))
         cls = self.class_numbers(name)
         if classes is None or cls is None:
-            return np.ones(n, bool)
-        return np.isin(cls, list(classes))
+            out = np.ones(n, bool)
+        else:
+            out = np.isin(cls, list(classes))
+        if self.keep is not None:
+            k = self.keep.get(name)
+            out &= k if k is not None and len(k) == n else np.zeros(n, bool)
+        return out
 
     def voxels(self, name: str, voxel: float, shape: tuple[int, int, int], binning: float | None = None) -> np.ndarray:
         """Coordinates of a tomogram's particles in its voxels: [n, 3] (x, y, z)."""
@@ -241,6 +249,15 @@ class TomoPicks:
         if self.centered_angst:
             return xyz / voxel + np.array([nx / 2, ny / 2, nz / 2])
         return xyz / (binning or 1.0)
+
+
+def rows_by_name(names: list[str]) -> dict[str, np.ndarray]:
+    """name -> the rows that have it (in the file's order, names in order of first appearance): one pass,
+    not one comparison of every row per tomogram."""
+    rows: dict[str, list[int]] = {}
+    for i, n in enumerate(names):
+        rows.setdefault(n, []).append(i)
+    return {str(n): np.array(v, dtype=np.intp) for n, v in rows.items()}
 
 
 def is_tomo_particles(path: str | os.PathLike) -> bool:
@@ -315,10 +332,10 @@ def read_tomo_picks(project_dir: str | os.PathLike, star_rel: str) -> TomoPicks:
     if cols is None:
         raise ValueError(f"{star_rel}: no particle coordinates")
     xyz = np.stack([t.numeric(c) for c in cols], axis=1)
-    names = np.array(t.column(TOMO_NAME))
-    by = {str(n): xyz[names == n] for n in dict.fromkeys(names.tolist())}
+    rows = rows_by_name(t.column(TOMO_NAME))
+    by = {n: xyz[i] for n, i in rows.items()}
     cls = t.numeric(CLASS).astype(int) if t.has(CLASS) else None
-    cls_by = {k: cls[names == k] for k in by} if cls is not None else None
+    cls_by = {n: cls[i] for n, i in rows.items()} if cls is not None else None
     return TomoPicks(star_rel, by, cols is centred, cls_by, class_counts(cls))
 
 
@@ -362,10 +379,10 @@ def read_warp_picks(project_dir: str | os.PathLike, star_rel: str) -> TomoPicks:
         raise ValueError(f"{star_rel}: no pixel size for the coordinates (rlnPixelSize, rlnImagePixelSize)")
     t = Table(block, list(r[1]), r[1])
     xyz = np.stack([t.numeric(c) for c in corner], axis=1)
-    names = np.array(t.column(MIC))
-    by = {str(n): xyz[names == n] for n in dict.fromkeys(names.tolist())}
+    rows = rows_by_name(t.column(MIC))
+    by = {n: xyz[i] for n, i in rows.items()}
     cls = t.numeric(CLASS).astype(int) if t.has(CLASS) else None
-    cls_by = {k: cls[names == k] for k in by} if cls is not None else None
+    cls_by = {n: cls[i] for n, i in rows.items()} if cls is not None else None
     return TomoPicks(star_rel, by, False, cls_by, class_counts(cls), pixel_size=px)
 
 

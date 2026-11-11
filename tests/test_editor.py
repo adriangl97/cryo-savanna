@@ -465,14 +465,53 @@ def test_cli_tool_job_runs_in_the_pipeline(window, tmp_path, monkeypatch):
     assert p.processes["External/job001/"].outputs == ["External/job001/flipped.mrc"]
     assert p.nodes["External/job001/flipped.mrc"].type_label == "DensityMap.mrc"
 
-    # clone opens the tool's form again, with its values
+    # the Options tab shows the tool's form, not External's fields
     w.load_now()
     w.select_job("External/job001/")
+    rows = _option_rows(w.info.options)
+    assert rows["--i"].text(1) == "in.mrc" and rows["--i"].font(1).bold()
+    assert rows["--o"].text(1) == "flipped.mrc" and rows["--invert_hand"].text(1) == "Yes"
+    assert "External executable" not in rows
+
+    # clone opens the tool's form again, with its values
     a.clone_job()
     assert ed.is_cli and ed.variant.program == "relion_image_handler"
     assert (ed.widgets["--i"].value(), ed.widgets["--o"].value(), ed.widgets["--invert_hand"].value()) == \
         ("in.mrc", "flipped.mrc", "Yes")
     shutil.rmtree(project / ".cryo-savanna", ignore_errors=True)
+
+
+def _option_rows(tree) -> dict:
+    return {tree.topLevelItem(i).child(j).text(0): tree.topLevelItem(i).child(j)
+            for i in range(tree.topLevelItemCount()) for j in range(tree.topLevelItem(i).childCount())}
+
+
+def test_options_tab_reads_a_cli_tools_help_off_the_gui_thread(qtbot, tmp_path):
+    """With the tool's --help still to read, the Options tab says so, then shows the tool's form."""
+    from cryo_savanna.jobdefs.cli_tools import CliCatalog
+    from cryo_savanna.ui.job_info import JobInfoPanel
+
+    fake = tmp_path / "relion_image_handler"  # prints no usable --help: the bundled text is used
+    fake.write_text("#!/bin/sh\nexit 0\n")
+    fake.chmod(fake.stat().st_mode | stat.S_IXUSR)
+    flags = FlagSource(which=lambda p: str(fake) if p == "relion_image_handler" else None)
+    defs = JobDefs.load()
+    v = CliCatalog(defs, ENV, FLAGS).variant("relion_image_handler")
+    values = v.default_values(ENV)
+    values.update({"--i": "in.mrc", "--angpix": "1.06"})
+    js = v.make_jobstar(values, False, "External/job020/", None)
+    panel = JobInfoPanel(defs, ENV, {})
+    qtbot.addWidget(panel)
+    panel.cli = CliCatalog(defs, ENV, flags)
+    panel._jobstar = js
+    panel._fill_options()
+    assert "Reading the options of relion_image_handler" in panel.options.topLevelItem(0).text(0)
+    panel.wait_flags()
+    rows = _option_rows(panel.options)
+    assert rows["--i"].text(1) == "in.mrc" and rows["--angpix"].text(1) == "1.06"
+    assert rows["--angpix"].font(1).bold() and not rows["--invert_hand"].font(1).bold()
+    panel.only_changed.setChecked(True)
+    assert set(_option_rows(panel.options)) == {"--i", "--angpix"}
 
 
 def test_browsed_files_keep_the_projects_symlinks(qtbot, tmp_path):

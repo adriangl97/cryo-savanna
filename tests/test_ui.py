@@ -135,6 +135,18 @@ def test_filter_finds_the_program_of_external_jobs(window, spa_copy):
     w.search.setText("my_picker")
     assert "External/job031/" in w.tree.visible_jobs()
 
+    # the Options tab shows the tool's form (once its --help is read), not External's fields
+    w.search.clear()
+    w.select_job("External/job030/")
+    w.info.wait_flags()
+    tree = w.info.options
+    rows = {tree.topLevelItem(i).child(j).text(0): tree.topLevelItem(i).child(j).text(1)
+            for i in range(tree.topLevelItemCount()) for j in range(tree.topLevelItem(i).childCount())}
+    assert rows["--i"] == "Refine3D/job011/run_class001.mrc" and rows["--invert_hand"] == "Yes"
+    assert "External executable" not in rows
+    w.select_job("External/job031/")  # any other External job: External's fields
+    assert tree.topLevelItem(0).child(0).text(1) == "/home/me/scripts/my_picker.sh"
+
 
 def test_options_tab_marks_changed_values(window, spa_project):
     w = window(spa_project)
@@ -480,3 +492,98 @@ def test_log_keeps_a_half_written_character_for_the_next_read(qtbot, tmp_path):
     os.utime(log, ns=(time.time_ns() + 10**9,) * 2)
     view.refresh()
     assert view.toPlainText() == data.decode()
+
+
+def test_list_refresh_tells_the_views_only_of_what_changed(window, spa_project):
+    """A refresh with nothing new (every poll while a job writes its log) must not touch the rows: Qt
+    cannot tell an icon is the same one, and each set made the sorted list work the row out again."""
+    from qtpy.QtCore import Qt
+    w = window(spa_project)
+    snap = w.snapshot
+    changed = []
+    w.tree.source.dataChanged.connect(lambda top, bottom, roles=(): changed.append((top.row(), list(roles))))
+    w.tree.set_snapshot(snap)
+    w.tree.set_queue(w.queue_state)
+    assert changed == []
+    job = "Refine3D/job011/"
+    jobs = dict(snap.jobs)
+    jobs[job] = dataclasses.replace(snap.jobs[job], status="Failed")
+    w.tree.set_snapshot(dataclasses.replace(snap, jobs=jobs))
+    assert any(Qt.DecorationRole in roles for _, roles in changed)  # its icon, and only its row
+    assert len({row for row, _ in changed}) == 1
+    changed.clear()
+    w.tree.set_snapshot(snap)  # and back
+    assert any(Qt.DecorationRole in roles for _, roles in changed)
+
+
+def test_selected_job_is_not_read_again_while_another_job_changes(window, spa_project, monkeypatch):
+    """A snapshot in which the job shown is as it was (another job wrote to its log) reads none of its files."""
+    w = window(spa_project)
+    snap = w.snapshot
+    shown = []
+    monkeypatch.setattr(w.info, "show_job", lambda s, name: shown.append(name))
+    same = w.loader._rebuild(snap.pipeline, snap.pipeline_stamp, snap)  # only live state changed
+    w._on_loaded(same)
+    assert shown == [] and w.info._snap is same
+    jobs = dict(same.jobs)
+    jobs[w.current] = dataclasses.replace(same.jobs[w.current], modified=(same.jobs[w.current].modified or 0) + 5)
+    w._on_loaded(dataclasses.replace(same, jobs=jobs))
+    assert shown == [w.current]
+    w._on_loaded(w.loader.refresh(force=True))  # the pipeline read again: looked at again
+    assert shown == [w.current, w.current]
+
+
+def test_log_written_anew_is_not_added_to_the_old_text(qtbot, tmp_path):
+    """A job run again writes a new run.out; once that is longer than the old one was, it still is not
+    text added to the old log."""
+    log = tmp_path / "run.out"
+    log.write_text("first run, line 1\nfirst run, line 2\n")
+    v = LogView()
+    qtbot.addWidget(v)
+    v.load(log)
+    with open(log, "a") as fh:
+        fh.write("first run, line 3\n")
+    assert v.refresh() and v.toPlainText() == "first run, line 1\nfirst run, line 2\nfirst run, line 3\n"
+    log.write_text("second run: a new log, already longer than the first one was\n" * 3)
+    assert v.refresh()
+    assert v.toPlainText() == "second run: a new log, already longer than the first one was\n" * 3
+    with open(log, "a") as fh:
+        fh.write("and more\n")
+    assert v.refresh() and v.toPlainText().endswith("than the first one was\nand more\n")
+    assert v.toPlainText().count("second run") == 3
+
+
+def test_summaries_fill_the_list_without_measuring_the_columns_at_every_cell(window, qtbot):
+    """The fitted columns are measured once per batch of changes, not after every cell (seconds for the
+    summaries of a few hundred jobs), and are still as wide as their contents afterwards."""
+    from cryo_savanna.project.summary import JobSummary
+    import tempfile
+    root = Path(tempfile.mkdtemp()) / "big"
+    make_large_project(root, rounds=35)
+    w = window(root)
+    w.show()
+    qtbot.waitExposed(w)
+    h = w.tree.header()
+    resized = []
+    h.sectionResized.connect(lambda c, old, new: resized.append(c))
+    width = h.sectionSize(COL_SUMMARY)
+    t = time.perf_counter()
+    w.tree.set_summaries({n: JobSummary(result=["a rather long summary text " + n]) for n in w.snapshot.jobs})
+    assert time.perf_counter() - t < 1.5  # was ~4.5 s for these 253 jobs
+    assert h.sectionResizeMode(COL_SUMMARY) == QHeaderView.ResizeToContents
+    assert h.sectionSize(COL_SUMMARY) > width and resized.count(COL_SUMMARY) <= 2
+    assert h.sectionSize(COL_SUMMARY) >= w.tree.sizeHintForColumn(COL_SUMMARY)
+
+
+def test_graph_paints_only_the_cards_that_changed(window, spa_project):
+    w = window(spa_project)
+    snap = w.snapshot
+    painted = []
+    for name, item in w.graph.nodes.items():
+        item.update = lambda *a, name=name: painted.append(name)
+    w.graph.set_snapshot(snap)
+    assert painted == []
+    jobs = dict(snap.jobs)
+    jobs["Refine3D/job011/"] = dataclasses.replace(snap.jobs["Refine3D/job011/"], status="Failed")
+    w.graph.set_snapshot(dataclasses.replace(snap, jobs=jobs))
+    assert painted == ["Refine3D/job011/"]
