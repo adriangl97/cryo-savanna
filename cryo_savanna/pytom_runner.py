@@ -458,7 +458,7 @@ class Supervisor(object):
         """Raise Aborted when RELION or a signal asked to stop (after stopping the processes)."""
         if self.stopped is None and not self.aborted and os.path.exists(os.path.join(self.job_dir, ABORT_NOW)):
             self.aborted = True
-            say("abort requested: stopping pytom")
+            say("abort requested: stopping wrapper")
             self.kill_all(signal.SIGTERM)
         if self.stopped is not None or self.aborted:
             end = time.time() + KILL_GRACE_S
