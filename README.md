@@ -13,6 +13,11 @@ and can be used interchangeably, even at the same time, on the same project.
 
 > **Disclaimer:** this project uses AI-assisted coding. Please report any issues you find.
 
+## Screenshots
+
+<img width="3004" height="1767" alt="Screenshot 2026-11-12 at 09 51 34" src="https://github.com/user-attachments/assets/2b30a908-7f58-48a8-9f07-93e6df71dc24" />
+
+
 ## What it adds compared to RELION's GUI
 
 **Fully works over X-11 forwarding**
