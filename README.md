@@ -17,6 +17,9 @@ and can be used interchangeably, even at the same time, on the same project.
 
 <img width="3004" height="1767" alt="Screenshot 2026-11-12 at 09 51 34" src="https://github.com/user-attachments/assets/2b30a908-7f58-48a8-9f07-93e6df71dc24" />
 
+<img width="3003" height="1763" alt="Screenshot 2026-11-12 at 09 54 41" src="https://github.com/user-attachments/assets/494af515-e88d-439a-b890-cbf3dbf3a442" />
+
+
 
 ## What it adds compared to RELION's GUI
 
