@@ -187,6 +187,24 @@ def _pytom_views(ctx: JobContext, add, add_maps) -> None:
             columns=[P.LCC, "rlnCenteredCoordinateZAngst"])
 
 
+def _aretomo_views(ctx: JobContext, add) -> bool:
+    """AreTomo3 jobs (jobdefs/aretomo_jobs.py): the tilt series and tomograms done so far, from the files
+    the job rewrites as tilt series finish (so they show while it runs), and its summary table."""
+    from cryo_savanna import aretomo_runner as A
+    from cryo_savanna.jobdefs.aretomo_jobs import aretomo_kind
+    if aretomo_kind(ctx.options.get("fn_exe", "")) is None:
+        return False
+    tomograms, aligned, summary = (ctx.name + f for f in (A.TOMOGRAMS, A.ALIGNED, A.SUMMARY))
+    if ctx.exists(tomograms) and has_tomograms(ctx.project_dir / tomograms):
+        add(TOMOGRAMS, "Tomograms", star=tomograms)
+    if ctx.exists(aligned) and columns_of(ctx.project_dir / aligned, "global"):
+        add(TILT_SERIES, "Tilt series", star=aligned)
+    if ctx.exists(summary):
+        add(TABLE_PLOT, "AreTomo3", star=summary, block="global",
+            columns=[A.COL_THICKNESS, A.COL_AXIS, A.COL_DARK, A.COL_CTF_RES])
+    return True
+
+
 def views_for(ctx: JobContext) -> list[ViewSpec]:
     t = base_type(ctx.type_label)
     views: list[ViewSpec] = []
@@ -326,7 +344,8 @@ def views_for(ctx: JobContext) -> list[ViewSpec]:
     elif t == "relion.excludetilts" and interactive_kind(ctx.type_label, ctx.options) == "tilts":
         add(SELECTION, "Selection", job=ctx.name, what="tilts")
     elif t == "relion.external":
-        _pytom_views(ctx, add, add_maps)
+        if not _aretomo_views(ctx, add):
+            _pytom_views(ctx, add, add_maps)
 
     # anything else a viewer can show; of several tomogram particle files (a continued job lists its
     # earlier ones too), the newest gets the Picks tab

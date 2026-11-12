@@ -32,6 +32,7 @@ from cryo_savanna.env.relion_env import RelionEnv, RelionEnvError
 from cryo_savanna.jobdefs.cli_catalog import POSITIONAL
 from cryo_savanna.jobdefs.cli_tools import CliCatalog, cli_program_of
 from cryo_savanna.jobdefs.model import JobDefs, JobVariant
+from cryo_savanna.jobdefs.aretomo_jobs import AretomoCatalog, aretomo_kind_of
 from cryo_savanna.jobdefs.pytom_jobs import PytomCatalog, decode, pytom_kind_of
 from cryo_savanna.project.jobstar import JobStar
 from cryo_savanna.project.snapshot import ProjectSnapshot, stamp
@@ -81,6 +82,7 @@ class JobInfoPanel(QTabWidget):
         # (the main window gives the ones of its JobActions, so a --help is read once)
         self.cli: CliCatalog | None = None
         self.pytom = PytomCatalog(defs, env)
+        self.aretomo = AretomoCatalog(defs, env)
         self._flags_pool = QThreadPool(self)
         self._flag_tasks: set[FlagsTask] = set()
         self.queue = None  # slurm.QueueState
@@ -366,10 +368,13 @@ class JobInfoPanel(QTabWidget):
 
     # ------------------------------------------------------------------ options
     def _variant_for(self, js: JobStar, kind: str | None, program: str | None) -> JobVariant:
-        """The form the editor uses for this job: pytom's or the CLI tool's for External jobs made from
-        those menus, else the job type's."""
+        """The form the editor uses for this job: pytom's, AreTomo3's or the CLI tool's for External jobs
+        made from those menus, else the job type's."""
         if kind is not None:
             return self.pytom.variant(kind)
+        aretomo = aretomo_kind_of(js)
+        if aretomo is not None:
+            return self.aretomo.variant(aretomo)
         if program is not None and self.cli is not None:
             v = self.cli.variant(program, js.is_tomo)
             if v is not None:
@@ -404,7 +409,7 @@ class JobInfoPanel(QTabWidget):
         if js is None:
             return
         kind = pytom_kind_of(js)
-        program = cli_program_of(js) if kind is None else None
+        program = cli_program_of(js) if kind is None and aretomo_kind_of(js) is None else None
         if program is not None and self._read_flags_first(program):
             QTreeWidgetItem(self.options, [f"Reading the options of {program} (its --help)…"])
             return

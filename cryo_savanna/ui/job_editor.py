@@ -525,7 +525,7 @@ class JobEditor(QWidget):
         self._update_mode_widgets()
 
     def _type_name(self, variant: JobVariant) -> str:
-        if getattr(variant, "kind", None) in ("match", "extract"):  # pytom (jobdefs/pytom_jobs.py)
+        if getattr(variant, "kind", None) in ("match", "extract", "align"):  # pytom, AreTomo3 (jobdefs/)
             return f"{variant.program} (runs as an External job)"
         if getattr(variant, "is_cli", False):
             return f"{variant.program} (CLI tool, runs as an External job)"
