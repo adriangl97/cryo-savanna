@@ -127,3 +127,55 @@ def test_mirror_warning_counts_a_template_used_as_it_is(tmp_path, monkeypatch, c
             "template_mirror": "Yes", "do_prep_mask": "No"}
     P.prepare_template_and_mask(None, opts, "job/", 10.0)  # nothing is prepared: nothing is mirrored
     assert "may not match" not in capsys.readouterr().out
+
+
+def test_a_slab_is_averaged_as_before_one_section_at_a_time(tmp_path):
+    import mrcfile
+
+    from cryo_savanna.images.mrc import MrcReader
+    rng = np.random.default_rng(3)
+    for dtype in (np.float32, np.int16, np.float16):
+        vol = (rng.normal(0, 40, (9, 12, 10))).astype(dtype)
+        path = tmp_path / f"{np.dtype(dtype).name}.mrc"
+        with mrcfile.new(path) as m:
+            m.set_data(vol)
+        with MrcReader(path) as r:
+            for z0, z1 in ((0, 9), (2, 7), (4, 5), (8, 9)):
+                want = r.planes(z0, z1).mean(axis=0)
+                got = r.mean_planes(z0, z1)
+                assert got.dtype == want.dtype == np.float32 and np.array_equal(got, want)
+
+
+def test_a_lock_removed_by_hand_does_not_fail_the_change(tmp_path):
+    """LockError tells the user to remove a stale lock: a change that held it meanwhile still ends well."""
+    import shutil
+
+    from cryo_savanna.project.lock import PipelineLock, is_locked
+    with PipelineLock(tmp_path) as lock:
+        assert is_locked(tmp_path)
+        shutil.rmtree(lock.dir)
+    assert not lock.held and not is_locked(tmp_path)
+    with PipelineLock(tmp_path) as lock:  # the file only: the directory is still removed
+        lock.file.unlink()
+    assert not is_locked(tmp_path)
+
+
+def test_working_directories_of_slurm_jobs_are_resolved_once(tmp_path, monkeypatch):
+    import os
+
+    from cryo_savanna.project import slurm
+    project, other = tmp_path / "project", tmp_path / "other"
+    project.mkdir()
+    other.mkdir()
+    (tmp_path / "link").symlink_to(project)
+    mapper = slurm.QueueMapper(project, persist=False)
+    asked = []
+    real = os.path.realpath
+    monkeypatch.setattr(slurm.os.path, "realpath", lambda p, *a, **k: (asked.append(str(p)), real(p, *a, **k))[1])
+    queue = [slurm.QueueJob(str(i), "RUNNING", name="Class2D/job001", workdir=str(w))
+             for i, w in enumerate((project, tmp_path / "link", other, project, other))]
+    for _ in range(3):
+        found = mapper.map({"Class2D/job001/"}, queue)
+        assert [mapper.here(q) for q in queue] == [True, True, False, True, False]
+        assert found["Class2D/job001/"].id == "3"
+    assert sorted(asked) == sorted(str(w) for w in (project, tmp_path / "link", other))

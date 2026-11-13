@@ -40,6 +40,8 @@ from cryo_savanna.jobdefs.cli_catalog import CATEGORIES, describe
 from cryo_savanna.jobdefs.cli_tools import CliCatalog, CliVariant, cli_program_of
 from cryo_savanna.jobdefs import aretomo_jobs
 from cryo_savanna.jobdefs.aretomo_jobs import AretomoCatalog, aretomo_kind_of
+from cryo_savanna.jobdefs import tomomask_jobs
+from cryo_savanna.jobdefs.tomomask_jobs import TomoMaskCatalog, mask_kind_of
 from cryo_savanna.jobdefs.model import JobDefs, JobVariant
 from cryo_savanna.jobdefs.pytom_jobs import TITLES as PYTOM_TITLES
 from cryo_savanna.jobdefs.pytom_jobs import warm_defaults as warm_pytom_defaults
@@ -212,6 +214,7 @@ class JobActions(QObject):
         self.cli = CliCatalog(defs, env, self.editor.flag_source)
         self.pytom = PytomCatalog(defs, env)
         self.aretomo = AretomoCatalog(defs, env)
+        self.tomomask = TomoMaskCatalog(defs, env)
         warm_pytom_defaults()  # "module avail cuda", in the background: not when the first form opens
         self.editor.submit.connect(self._on_submit)
         # the editor goes in its own window or in the dock (Preferences → Job editor: set_editor_place)
@@ -310,6 +313,11 @@ class JobActions(QObject):
             a.setToolTip(PYTOM_DESCRIPTIONS[kind])
             a.setStatusTip(PYTOM_DESCRIPTIONS[kind])
             a.triggered.connect(lambda _=False, k=kind: self.new_pytom_job(k))
+        for kind, text in tomomask_jobs.MENU_TEXT.items():  # pytom's tomogram masks
+            a = self.external_menu.addAction(text)
+            a.setToolTip(tomomask_jobs.DESCRIPTIONS[kind])
+            a.setStatusTip(tomomask_jobs.DESCRIPTIONS[kind])
+            a.triggered.connect(lambda _=False, k=kind: self.new_tomomask_job(k))
         self.external_menu.addSeparator()
         for kind, text in aretomo_jobs.MENU_TEXT.items():
             a = self.external_menu.addAction(text)
@@ -536,7 +544,8 @@ class JobActions(QObject):
     def new_job(self, variant_key: str) -> None:
         variant = self.defs.variants[variant_key]
         last = read_last_used(self.project_dir, variant.label, variant.is_tomo) if self.project_dir else None
-        if last is not None and (cli_program_of(last) or pytom_kind_of(last) or aretomo_kind_of(last)):  # a CLI tool's, ...
+        if last is not None and (cli_program_of(last) or pytom_kind_of(last) or aretomo_kind_of(last)
+                                 or mask_kind_of(last)):  # a CLI tool's, ...
             last = None
         note = ("Settings of the last job of this type (from RELION's .gui files); 'Defaults' resets them."
                 if last is not None else "")
@@ -598,6 +607,21 @@ class JobActions(QObject):
         self._edit(variant.program, self.editor.new_job, variant, values,
                    f"{variant.description}. Runs as a RELION External job (AreTomo3 from its executable).")
 
+    def new_tomomask_job(self, kind: str = tomomask_jobs.MASKS) -> None:
+        """A tomogram mask job: the form, with the newest tomogram set."""
+        try:
+            variant = self.tomomask.variant(kind)
+        except RelionEnvError as e:
+            self._env_error("Tomogram masks", e)
+            return
+        values = variant.default_values(self.env)
+        pipeline = self.snapshot.pipeline if self.snapshot is not None else None
+        if pipeline is not None:
+            values.update(tomomask_jobs.newest_input(pipeline))
+        self._edit(variant.program, self.editor.new_job, variant, values,
+                   f"{variant.description}. Runs as a RELION External job; the masks are then drawn in its "
+                   "Masks view.")
+
     def _variant_for(self, js: JobStar) -> JobVariant:
         """The form for a job: its job type's, or a CLI tool's, pytom's or AreTomo3's for External jobs made
         from those menus."""
@@ -607,6 +631,9 @@ class JobActions(QObject):
         kind = aretomo_kind_of(js)
         if kind is not None:
             return self.aretomo.variant(kind)
+        kind = mask_kind_of(js)
+        if kind is not None:
+            return self.tomomask.variant(kind)
         program = cli_program_of(js)
         if program is not None:
             v = self.cli.variant(program, js.is_tomo)

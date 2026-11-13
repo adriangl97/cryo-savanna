@@ -252,6 +252,7 @@ class MainWindow(QMainWindow):
         self.actions = JobActions(self, self.defs, self.env, self.type_names, self.tomo, self.readonly,
                                   flag_source=self.flag_source)
         self.info.cli, self.info.pytom, self.info.aretomo = self.actions.cli, self.actions.pytom, self.actions.aretomo  # the editor's forms, also read-only
+        self.info.tomomask = self.actions.tomomask
         self.actions.changed.connect(self._force_refresh)
         self.actions.select.connect(self._select_soon)
         self.actions.message.connect(lambda m: self.statusBar().showMessage(m, 6000))

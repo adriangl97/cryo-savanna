@@ -79,6 +79,7 @@ THRESHOLDS = "thresholds.star"  # extract: threshold per tomogram
 PARTICLES = "particles.star"  # extract: the candidates above the thresholds
 OPTIMISATION_SET = "optimisation_set.star"
 TM_DIR, INPUTS_DIR, LOG_DIR, PLOTS_DIR = "tm", "inputs", "logs", "plots"
+TOMO_MASK_SUFFIX = "_mask.mrc"  # a folder of tomogram masks: <rlnTomoName>_mask.mrc (as mask_runner.py names them)
 
 # node types of the outputs (RELION_OUTPUT_NODES.star)
 NODE_SUMMARY = "ProcessData.star.pytom.match"
@@ -116,11 +117,11 @@ MASK_FILE, MASK_CREATE = "Input file", "Create sphere or ellipsoid"
 CUT_AUTO, CUT_FIXED = "Automatic (false positives)", "Fixed cut-off"
 TMASK_JOB, TMASK_OTHER, TMASK_IGNORE = "The match job's", "Other mask(s)", "None (ignore masks)"
 
-# clips a resampled mask to [0, 1] and inverts it on request (run with the python of the pytom environment)
+# clips a resampled mask to [0, 1] (run with the python of the pytom environment). The mask is never
+# inverted: only the template's contrast is (pytom's mask is 1 on the particle, whatever the contrast)
 MASK_FIX = ("import sys, numpy as np, mrcfile\n"
             "with mrcfile.open(sys.argv[1], mode='r+') as m:\n"
-            "    d = np.clip(np.asarray(m.data, dtype=np.float32), 0, 1)\n"
-            "    m.set_data(1 - d if sys.argv[2] == '1' else d)\n")
+            "    m.set_data(np.clip(np.asarray(m.data, dtype=np.float32), 0, 1))\n")
 
 
 class Usage(Exception):
@@ -685,13 +686,35 @@ def prepare_tomogram(row, opts, job_dir):
         files["defocus"] = os.path.join(d, name + "_defocus.txt")
         write_lines(files["defocus"], ["%.4f" % t[2] for t in tilts])
         files["ctf"] = ctf_values(row, star)
-    pattern = text(opts, "tomogram_mask")
-    if pattern:
-        mask = pattern.replace("{name}", name)
-        if not os.path.isfile(mask):
-            raise Usage("%s: tomogram mask not found: %s" % (name, mask))
+    mask = tomogram_mask_file(opts, name)
+    if mask:
+        tx, ty, tz = mrc_header(tomogram)[:3]
+        mx, my, mz = mrc_header(mask)[:3]
+        if (mx, my, mz) != (tx, ty, tz):
+            raise Usage("%s: the tomogram mask %s is %d×%d×%d, the tomogram %d×%d×%d: they need the same size"
+                        % (name, mask, mx, my, mz, tx, ty, tz))
         files["tomogram_mask"] = mask
     return files
+
+
+def tomogram_mask_file(opts, name):
+    """The tomogram mask of tomogram ``name`` (option tomogram_mask), else "": in a folder,
+    <name>_mask.mrc (TOMO_MASK_SUFFIX, as cryo-savanna's Tomogram masks job writes them); a path with
+    {name}, that path for the tomogram; else one file for every tomogram."""
+    value = text(opts, "tomogram_mask")
+    if not value:
+        return ""
+    if "{name}" in value:
+        mask = value.replace("{name}", name)
+    elif os.path.isdir(value):
+        mask = os.path.join(value, name + TOMO_MASK_SUFFIX)
+        if not os.path.isfile(mask):
+            raise Usage("%s: no tomogram mask %s in the masks folder %s" % (name, name + TOMO_MASK_SUFFIX, value))
+    else:
+        mask = value
+    if not os.path.isfile(mask):
+        raise Usage("%s: tomogram mask not found: %s" % (name, mask))
+    return mask
 
 
 def _numbers(value):
@@ -856,9 +879,9 @@ def prepare_template_and_mask(sup, opts, job_dir, voxel):
             box = number(opts, "mask_box", int) or tx
             if sup.run(template_command(opts, mask, out, final, box, "mask"), logs) != 0 or not os.path.isfile(out):
                 raise Usage("pytom_create_template.py failed on the mask (see %s)" % logs)
-            fix = conda_prefix(opts) + ["python", "-c", MASK_FIX, out, "1" if yes(opts, "mask_invert") else "0"]
+            fix = conda_prefix(opts) + ["python", "-c", MASK_FIX, out]
             if sup.run(fix, logs) != 0:
-                raise Usage("could not clip%s the mask (see %s)" % (" and invert" if yes(opts, "mask_invert") else "", logs))
+                raise Usage("could not clip the mask to 0–1 (see %s)" % logs)
             mask = out
             nodes.append((out, NODE_MASK))
     mx, my, mz, _ = mrc_header(mask)
@@ -1074,9 +1097,9 @@ def _tomogram_mask_args(opts, job_file):
         return ["--ignore_tomogram_mask"]
     if mode == TMASK_OTHER:
         name = os.path.basename(job_file)[:-len("_job.json")]
-        mask = text(opts, "tomogram_mask").replace("{name}", name)
-        if not os.path.isfile(mask):
-            raise Usage("%s: tomogram mask not found: %s" % (name, mask))
+        mask = tomogram_mask_file(opts, name)
+        if not mask:
+            raise Usage("no tomogram masks given (Tomogram masks folder)")
         return ["--tomogram-mask", mask]
     return []
 

@@ -34,7 +34,7 @@ from pathlib import Path
 
 from cryo_savanna.env.child import external_environ
 from cryo_savanna.jobdefs.cli_tools import cli_program_of, install_runner
-from cryo_savanna.jobdefs import aretomo_jobs, pytom_jobs
+from cryo_savanna.jobdefs import aretomo_jobs, pytom_jobs, tomomask_jobs
 from cryo_savanna.project.jobstar import JobStar
 from cryo_savanna.project.ops import TRASH_DIR, PipelineOps
 from cryo_savanna.project.pipeline import Pipeline
@@ -243,14 +243,16 @@ class Pipeliner:
 
     def _runner_for(self, jobstar: JobStar) -> None:
         """A CLI tool job runs the project's copy of cli_runner.py, a pytom job that of pytom_runner.py, an
-        AreTomo3 job that of aretomo_runner.py: put it there (jobdefs/cli_tools.py, pytom_jobs.py,
-        aretomo_jobs.py)."""
+        AreTomo3 job that of aretomo_runner.py, a tomogram mask job that of mask_runner.py: put it there
+        (jobdefs/cli_tools.py, pytom_jobs.py, aretomo_jobs.py, tomomask_jobs.py)."""
         if cli_program_of(jobstar) is not None:
             install_runner(self.project_dir)
         elif pytom_jobs.pytom_kind_of(jobstar) is not None:
             pytom_jobs.install_runner(self.project_dir)
         elif aretomo_jobs.aretomo_kind_of(jobstar) is not None:
             aretomo_jobs.install_runner(self.project_dir)
+        elif tomomask_jobs.mask_kind_of(jobstar) is not None:
+            tomomask_jobs.install_runner(self.project_dir)
 
     def _same_options(self, job: str, jobstar: JobStar) -> bool:
         try:

@@ -65,6 +65,10 @@ and can be used interchangeably, even at the same time, on the same project.
   its own conda environment), with pytom's inputs written from RELION 5's tomograms.star, one
   tomogram per GPU, results while it runs, thresholds chosen interactively, and a RELION 5
   particles.star.
+  - Tomogram masks for pytom, drawn on the tomograms in the viewer: a polygon in XY, through all Z or
+  between two planes that can be tilted to follow the lamella, the same for all tomograms or each
+  its own, written as `<rlnTomoName>_mask.mrc` (identical masks as links to one file) in the folder
+  pytom's tomogram mask field takes.
   - AreTomo3 tilt-series alignment and tomogram reconstruction of RELION 5 tilt series, one tilt
   series per GPU, with the alignment written back into RELION's tilt-series STAR files (for
   RELION's Reconstruct tomograms) and the tomograms in a tomograms.star; or reconstruction only,
@@ -144,6 +148,8 @@ copied into the project as `.cryo-savanna/pytom_runner.py`. It only runs pytom's
 conda environment named in the job): cryo-savanna does not include or import pytom.
 AreTomo3 jobs run through `cryo_savanna/aretomo_runner.py` (copied as `.cryo-savanna/aretomo_runner.py`,
 with the `pytom_runner.py` whose helpers it uses), which runs the AreTomo3 executable named in the job.
+Tomogram mask jobs run through `cryo_savanna/mask_runner.py` (copied as `.cryo-savanna/mask_runner.py`,
+also with `pytom_runner.py`); the masks are then drawn in the job's Masks tab.
 
 ### SLURM
 

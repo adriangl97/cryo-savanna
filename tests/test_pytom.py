@@ -452,7 +452,9 @@ def test_prepared_mask_file(project, fake_pytom):
                                                          do_prep_mask="Yes", mask_invert="Yes", tomo_names="TS_01"))
     assert res.returncode == 0, res.stderr
     with mrcfile.open(project / job / "mask.mrc") as m:
-        assert m.data.shape == (24, 24, 24) and float(m.data.max()) == 0.0  # resampled to the template, inverted
+        # resampled to the template; never inverted (an earlier job's --mask_invert is ignored): 1 on the particle
+        assert m.data.shape == (24, 24, 24) and float(m.data.min()) == float(m.data.max()) == 1.0
+    assert "mask_invert" not in CATALOG.variant("match").options
     res = run_runner(project, "match", "External/job017/", match_values(
         mask_source=P.MASK_FILE, fn_mask="mask_in.mrc", tomo_names="TS_01"))
     assert res.returncode == 1 and "same box" in res.stderr
@@ -825,4 +827,4 @@ def test_mask_mirror(project, fake_pytom):
     assert "--mirror" in [line for line in fake_pytom.read_text().splitlines() if "mask_in.mrc" in line][-1]
     v = CATALOG.variant("match")
     group_of = {k: r.group for t in v.tabs for r in t.rows for k in r.keys}
-    assert group_of["mask_mirror"] == group_of["mask_invert"]
+    assert group_of["mask_mirror"] == group_of["mask_box"]

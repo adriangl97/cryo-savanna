@@ -672,7 +672,7 @@ class TomogramViewer(QWidget):
             out = []
             for ref in refs:
                 with MrcReader(ref.path) as r:
-                    out.append(r.planes(z0, z1).mean(axis=0))
+                    out.append(r.mean_planes(z0, z1))
             return out
 
         self.tasks.run(read, lambda imgs: self._on_slab(imgs, refit), channel="slab")

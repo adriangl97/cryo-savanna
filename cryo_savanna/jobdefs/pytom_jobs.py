@@ -196,7 +196,6 @@ def match_options() -> tuple[list[OptionDef], list[Tab], dict[int, Group]]:
         _o("mask_angpix_in", "Input pixel size (Å):", "", "Pixel size of the mask file. Empty: from its header."),
         _o("mask_angpix", "Final pixel size (Å):", "", "Empty: the template's pixel size."),
         _o("mask_box", "Final box size (px):", "", "Empty: the template's box (pytom needs the same box)."),
-        _yn("mask_invert", "Invert contrast?", "No", "Use 1 − mask (for a mask file that is 0 on the particle)."),
         _yn("mask_mirror", "Mirror?", "No", "Mirror the mask (--mirror), as the template. Yes when the "
             "template is mirrored, so that the mask still matches it."),
         _o("mask_radius", "Radius (px):", "", "Radius in the template's pixels (the x radius of an ellipsoid). "
@@ -243,9 +242,11 @@ def match_options() -> tuple[list[OptionDef], list[Tab], dict[int, Group]]:
         _o("search_y", "Search range y (px):", "", "Start and end voxel in y, e.g. 0 200. Empty: all."),
         _o("search_z", "Search range z (px):", "", "Start and end voxel in z, e.g. 40 160 to leave out the volume above and "
            "below the lamella. Empty: all."),
-        _o("tomogram_mask", "Tomogram mask(s):", "", "A mask of the tomogram's size; subvolumes without voxels "
-           "above 0 are not searched. {name} is replaced by the rlnTomoName, e.g. masks/{name}_mask.mrc. Empty: "
-           "none."),
+        _o("tomogram_mask", "Tomogram masks folder:", "", "A folder with a mask per tomogram, of the tomogram's "
+           "size, named <rlnTomoName>_mask.mrc: the masks/ folder of a Tomogram masks job (Additional external "
+           "jobs), which draws them. Subvolumes without voxels above 0 are not searched; a tomogram without a mask "
+           "in the folder stops the job. Also accepted: a path with {name} for the rlnTomoName (e.g. "
+           "masks/{name}.mrc), or one mask file for every tomogram. Empty: none.", kind="folder"),
         _o("match_args", "More pytom_match_template.py arguments:", "", "Added to its command line."),
         # Compute
         _o("gpu_ids", "GPUs to use:", "0", "GPU ids separated by colons, as in RELION, e.g. 0:1:2:3. Empty: every GPU the job "
@@ -267,7 +268,7 @@ def match_options() -> tuple[list[OptionDef], list[Tab], dict[int, Group]]:
             Row(("template_center",), group=1), Row(("template_lowpass",), group=1),
             Row(("mask_source",)), Row(("fn_mask",), group=2), Row(("do_prep_mask",), group=2),
             Row(("mask_angpix_in",), group=3), Row(("mask_angpix",), group=3), Row(("mask_box",), group=3),
-            Row(("mask_invert",), group=3), Row(("mask_mirror",), group=3),
+            Row(("mask_mirror",), group=3),
             Row(("mask_radius",), group=4), Row(("mask_minor",), group=4), Row(("mask_sigma",), group=4),
             Row(("mask_box_create",), group=4))),
         Tab("Weighting and CTF", (
@@ -314,8 +315,9 @@ def extract_options() -> tuple[list[OptionDef], list[Tab], dict[int, Group]]:
         _radio("tomogram_mask_mode", "Tomogram mask:", (R.TMASK_JOB, R.TMASK_OTHER, R.TMASK_IGNORE), R.TMASK_JOB,
                "Which tomogram mask limits the peaks: the one used for matching (if any), other masks, or none "
                "(--ignore_tomogram_mask)."),
-        _o("tomogram_mask", "Tomogram mask(s):", "", "{name} is replaced by the rlnTomoName, e.g. "
-           "masks/{name}_mask.mrc."),
+        _o("tomogram_mask", "Tomogram masks folder:", "", "A folder with a mask per tomogram, named "
+           "<rlnTomoName>_mask.mrc (the masks/ folder of a Tomogram masks job); peaks where the mask is not above 0 "
+           "are left out. Also accepted: a path with {name} for the rlnTomoName, or one mask file.", kind="folder"),
         _yn("do_roc", "Estimate the ROC?", "No", "Also run pytom_estimate_roc.py (a Gaussian fit of the score "
             "histogram, as a plot)."),
         _o("roc_particles", "ROC: number of peaks:", "", "Empty: 3 × the maximum number of particles."),
@@ -440,6 +442,9 @@ class PytomVariant(JobVariant):
                 if k == "fn_mask" and values.get("mask_source") != R.MASK_FILE:
                     continue
                 files.append(v)
+        masks = self._masks_node(values, pipeline)
+        if masks and masks not in files:
+            files.append(masks)
         free = [k for k, _ in INPUT_SLOTS]
         left = []
         for f in files:
@@ -453,6 +458,15 @@ class PytomVariant(JobVariant):
         for f in left:
             if free:
                 o[free.pop(0)] = f
+
+    def _masks_node(self, values: dict[str, str], pipeline: Pipeline) -> str | None:
+        """The output of the Tomogram masks job whose folder is the tomogram masks (so the job hangs under it)."""
+        if "tomogram_mask" not in self.own_keys:
+            return None
+        if self.kind == EXTRACT and values.get("tomogram_mask_mode") != R.TMASK_OTHER:
+            return None
+        from cryo_savanna.jobdefs.tomomask_jobs import masks_job_of
+        return masks_job_of(values.get("tomogram_mask", ""), pipeline)
 
     def values_from_jobstar(self, js: JobStar, env: RelionEnv) -> tuple[dict[str, str], list[str]]:
         values = self.default_values(env)

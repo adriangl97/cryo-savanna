@@ -131,6 +131,18 @@ class MrcReader:
         return self.read(z0 * plane, (z1 - z0) * plane).reshape(z1 - z0, self.ny, self.nx)
 
 
+    def mean_planes(self, z0: int, z1: int) -> np.ndarray:
+        """The average of sections z0 .. z1 - 1, as planes(z0, z1).mean(axis=0) gives it, but read and
+        added one section at a time: two sections in memory however thick the slab (99 sections of a
+        4k×4k tomogram are 6 GB as one array)."""
+        total = self.section(z0)  # an array of its own (read()): added to in place, as in read_movie_sum
+        if z1 - z0 <= 1:
+            return total
+        for z in range(z0 + 1, z1):
+            total += self.section(z)
+        return np.true_divide(total, np.intp(z1 - z0), out=total, casting="unsafe")
+
+
 def header(path: str | os.PathLike) -> MrcHeader:
     with MrcReader(path) as r:
         return r.header()

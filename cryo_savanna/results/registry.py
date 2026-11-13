@@ -44,6 +44,7 @@ ABERRATIONS = "aberrations"  # CtfRefine: phase images of beam tilt / trefoil / 
 PYTOM_SCORES = "pytom_scores"  # pytom template matching: progress and score statistics per tomogram
 PYTOM_THRESHOLDS = "pytom_thresholds"  # pytom extraction: thresholds per tomogram, chosen interactively
 SVG_PLOTS = "svg_plots"  # the plots a program wrote as SVG files (pytom)
+TOMO_MASKS = "tomo_masks"  # tomogram masks: drawn interactively on the tomograms
 FILES = "files"  # every file of the job: STAR tables, images, stacks
 
 
@@ -205,6 +206,15 @@ def _aretomo_views(ctx: JobContext, add) -> bool:
     return True
 
 
+def _tomomask_views(ctx: JobContext, add) -> bool:
+    """Tomogram mask jobs (jobdefs/tomomask_jobs.py): the mask editor, once the job wrote masks.json."""
+    from cryo_savanna.jobdefs.tomomask_jobs import mask_kind
+    if mask_kind(ctx.options.get("fn_exe", "")) is None:
+        return False
+    add(TOMO_MASKS, "Masks", job=ctx.name)
+    return True
+
+
 def views_for(ctx: JobContext) -> list[ViewSpec]:
     t = base_type(ctx.type_label)
     views: list[ViewSpec] = []
@@ -344,7 +354,7 @@ def views_for(ctx: JobContext) -> list[ViewSpec]:
     elif t == "relion.excludetilts" and interactive_kind(ctx.type_label, ctx.options) == "tilts":
         add(SELECTION, "Selection", job=ctx.name, what="tilts")
     elif t == "relion.external":
-        if not _aretomo_views(ctx, add):
+        if not _aretomo_views(ctx, add) and not _tomomask_views(ctx, add):
             _pytom_views(ctx, add, add_maps)
 
     # anything else a viewer can show; of several tomogram particle files (a continued job lists its

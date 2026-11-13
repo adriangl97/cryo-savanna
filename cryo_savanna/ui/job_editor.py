@@ -272,6 +272,26 @@ class FileWidget(TextWidget):
             self.set_value(self.editor.relative(path))
 
 
+class FolderWidget(FileWidget):
+    """A folder, chosen with the system's folder dialog (or typed)."""
+
+    def __init__(self, opt: OptionDef, editor: "JobEditor"):
+        super().__init__(opt, editor)
+        self.browse.setToolTip("Choose a folder")
+
+    def _start_dir(self) -> Path:
+        proj = self.editor.project_dir
+        current = self.value()
+        if current and "{" not in current and (proj / current).is_dir():
+            return proj / current
+        return super()._start_dir()
+
+    def _browse(self) -> None:
+        path = QFileDialog.getExistingDirectory(self, self.opt.label.rstrip(": "), str(self._start_dir()))
+        if path:
+            self.set_value(self.editor.relative(path))
+
+
 class NodeWidget(FileWidget):
     """Input node: outputs of earlier jobs with the right node type (newest first), or any file."""
 
@@ -337,6 +357,8 @@ def make_widget(opt: OptionDef, editor: "JobEditor") -> OptionWidget:
         return NodeWidget(opt, editor)
     if opt.kind == "filename":
         return FileWidget(opt, editor)
+    if opt.kind == "folder":
+        return FolderWidget(opt, editor)
     return TextWidget(opt, editor)
 
 
@@ -525,7 +547,7 @@ class JobEditor(QWidget):
         self._update_mode_widgets()
 
     def _type_name(self, variant: JobVariant) -> str:
-        if getattr(variant, "kind", None) in ("match", "extract", "align"):  # pytom, AreTomo3 (jobdefs/)
+        if getattr(variant, "kind", None) in ("match", "extract", "align", "masks"):  # pytom, AreTomo3, masks (jobdefs/)
             return f"{variant.program} (runs as an External job)"
         if getattr(variant, "is_cli", False):
             return f"{variant.program} (CLI tool, runs as an External job)"

@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import os
+import threading
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -98,13 +99,15 @@ class ScoreMap:
 
 
 _SCORES: dict[str, tuple[tuple, ScoreMap]] = {}
+_SCORES_LOCK = threading.Lock()  # read in the viewers' thread pool: two views can read maps at once
 
 
 def read_score_map(path: str | os.PathLike, sample_every: int = 7) -> ScoreMap:
     """Reads the whole map (a section block at a time). Cached by the file's stamp: a map is read once."""
     key = str(path)
     st = _stamp(Path(path))
-    hit = _SCORES.get(key)
+    with _SCORES_LOCK:
+        hit = _SCORES.get(key)
     if hit is not None and hit[0] == st:
         return hit[1]
     with MrcReader(path) as r:
@@ -129,9 +132,10 @@ def read_score_map(path: str | os.PathLike, sample_every: int = 7) -> ScoreMap:
     std = float(np.sqrt(max(total2 / count - mean * mean, 0.0))) if count else 0.0
     out = ScoreMap(key, (nz, ny, nx), mip, np.concatenate(samples) if samples else np.empty(0), peak, peak_at,
                    mean, std)
-    _SCORES[key] = (st, out)
-    while len(_SCORES) > 8:
-        _SCORES.pop(next(iter(_SCORES)))
+    with _SCORES_LOCK:
+        _SCORES[key] = (st, out)
+        while len(_SCORES) > 8:
+            _SCORES.pop(next(iter(_SCORES)))
     return out
 
 

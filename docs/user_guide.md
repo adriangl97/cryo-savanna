@@ -87,8 +87,8 @@ polling interval (Preferences, or `--poll`), and views of running jobs read new 
   RELION allows for its own local jobs. Abort asks the program to stop; one that has not stopped
   after 30 s is terminated, and killed 30 s later.
 - **Additional external jobs** (toolbar, menu bar): programs that are not RELION's, run as External
-  jobs and in the pipeline like any job. See [pytom template matching](#pytom-template-matching) and
-  [AreTomo3](#aretomo3-tilt-series-alignment-and-reconstruction).
+  jobs and in the pipeline like any job. See [pytom template matching](#pytom-template-matching),
+  [Tomogram masks](#tomogram-masks-for-pytom) and [AreTomo3](#aretomo3-tilt-series-alignment-and-reconstruction).
 - **Queue:** "Submit to queue" uses the queue settings of the loaded RELION module (RELION_QSUB_*).
   On a SLURM cluster the list shows each queued job's state (queued and why, or running where and
   for how long), Abort can cancel it with scancel, and jobs that SLURM ended without RELION noticing
@@ -126,6 +126,7 @@ Each job gets the tabs that fit what it made:
 | Tomograms | pytom template matching | The tomograms and their score maps, Z slab and side views, one beside the other |
 | Thresholds | pytom extraction | The threshold of each tomogram (or one for all), as a line to drag on the histogram of its candidates' scores, with the particles above it on the tomogram; Save rewrites particles.star |
 | pytom plots | pytom extraction | pytom's own SVG plots (extraction histograms, tophat filter, ROC) |
+| Masks | Tomogram masks | The mask of each tomogram drawn on it: a polygon on the XY slab, through all Z or between two (tilted) planes dragged in the side views; one mask for all tomograms, or each its own; Save rewrites the masks |
 | Tomograms, Tilt series, AreTomo3 | AreTomo3 | The tomograms and the aligned tilt series done so far, updated as the job goes; the AreTomo3 tab plots each tilt series' thickness, tilt axis, dark tilts and CTF resolution, with its status |
 | Files | every job | Every file: STAR tables (with plots), images, stacks, volumes, text |
 
@@ -178,13 +179,15 @@ takes the environment of the project's last pytom job.
   prepared (`pytom_create_template.py`: final pixel size, by default the tomogram's; final box;
   contrast inverted; mirrored; low-pass). The mask is either made (`pytom_create_mask.py`: a sphere or
   an ellipsoid with a soft edge, in the template's box) or read from a file, which can be prepared
-  too (final pixel size and box, inverted, mirrored: mirror it when the template is mirrored, or
-  they no longer match).
+  too (final pixel size and box, mirrored: mirror it when the template is mirrored, or they no
+  longer match).
 - *Weighting and CTF*: per-tilt weighting, dose, CTF, phase shift, how the tomograms were
   CTF-corrected, defocus handedness, spectral whitening, band-pass filters.
 - *Picking*: particle diameter or angular search, z-axis symmetry, non-spherical mask,
   random-phase correction, half precision, volume split,
-  search ranges, tomogram masks (`{name}` stands for each tomogram), more pytom arguments.
+  search ranges, the tomogram masks folder (a folder with `<rlnTomoName>_mask.mrc` for each tomogram,
+  e.g. a [Tomogram masks](#tomogram-masks-for-pytom) job's `masks/`, chosen with **…**; a path with
+  `{name}` for each tomogram also works), more pytom arguments.
 - *Compute*: the GPU ids, separated by colons as in RELION (`0:1:2:3`), and how several GPUs are used: one tomogram per GPU at a time or each
   tomogram over all GPUs. Tomograms already done are skipped when the job is run
   again (Continue), so after a failure only the rest run.
@@ -213,6 +216,37 @@ rlnAutopickFigureOfMerit) and `optimisation_set.star` with the tomograms, for Ex
 Like matching, extraction has to run on a machine with a GPU and its NVIDIA driver: pytom's
 programs look for a GPU as they start, even for the extraction itself. Submit it to a GPU queue
 (one GPU is enough) or run it on a GPU workstation. On a machine without one (a CPU node) every tomogram fails with `cudaErrorInsufficientDriver`.
+
+### Tomogram masks (for pytom)
+
+**Additional external jobs → Tomogram masks (for pytom)** makes a mask per tomogram of a tomogram set,
+for pytom's tomogram mask: pytom searches (and extracts) only where the mask is above 0, e.g. to leave
+out the volume above and below a lamella, or ice and carbon at its edges.
+
+The job (an External job, run like any other) writes a starting mask for each tomogram, the whole
+tomogram or a slab around its middle, as `masks/<rlnTomoName>_mask.mrc` in the job: binary (int8),
+with the tomogram's size and voxel size. Draw the masks in the job's **Masks** tab:
+
+- Choose a tomogram in the table. On the XY slab, drag the corners of the polygon or the whole polygon. Click
+  an edge to add a corner, and right-click a corner to remove it. What lies outside the mask at the
+  slab's Z is shaded.
+- *Z*: **All Z** leaves Z unmasked: the polygon goes through the whole tomogram, so tomograms of
+  other thicknesses are not cut. **Between two planes** keeps only the slab between a bottom and a top
+  plane, shown as lines in the XZ and YZ views. Drag a line to move its plane, or drag one end to tilt
+  it (along x in XZ, along y in YZ) to follow a tilted lamella.
+- **Same mask for all tomograms** gives every tomogram the mask of the one shown. While it is on,
+  each edit goes to all of them. Switch it off to edit the tomograms one by one from there. Corners
+  and planes are kept relative to each tomogram's centre, so a shared mask stays centred in
+  tomograms of another size.
+- **Save masks** rewrites the masks that changed. Identical masks are written once: the others are
+  symbolic links to that file. **Reset** goes back to the whole tomogram.
+
+Give the job's `masks/` folder to template matching (*Picking → Tomogram masks folder*) or to
+extraction (*Tomogram mask → Other mask(s)*). The pytom job then appears under the mask job in the
+pipeline. pytom stops with a message if a tomogram has no mask in the folder or its mask is not the
+tomogram's size: draw the masks on the tomograms pytom searches. Running the mask job again
+(Continue) keeps the masks already drawn and adds the new tomograms. The geometry is kept in
+`masks.json`, and the list of masks in `tomogram_masks.star` (the job's output).
 
 ### AreTomo3: tilt-series alignment and reconstruction
 

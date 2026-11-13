@@ -33,6 +33,7 @@ from pathlib import Path
 from cryo_savanna.jobdefs.model import JobDefs
 from cryo_savanna.jobdefs.aretomo_jobs import aretomo_main_input
 from cryo_savanna.jobdefs.pytom_jobs import pytom_main_input
+from cryo_savanna.jobdefs.tomomask_jobs import mask_main_input
 from cryo_savanna.project.jobstar import JobStar
 from cryo_savanna.project.pipeline import Pipeline
 
@@ -77,10 +78,10 @@ def default_input(pipeline: Pipeline, ordered: list[str]) -> str | None:
 def _own_main_input(
     process_name: str, project_dir: str | os.PathLike, read_jobstar: Callable[[Path], JobStar]
 ) -> str | None:
-    """The main input a job's own form names (pytom and AreTomo3 jobs), else None."""
+    """The main input a job's own form names (pytom, AreTomo3 and tomogram mask jobs), else None."""
     try:
         js = read_jobstar(Path(project_dir) / process_name / "job.star")
-        return pytom_main_input(js) or aretomo_main_input(js)
+        return pytom_main_input(js) or aretomo_main_input(js) or mask_main_input(js)
     except (OSError, ValueError, KeyError):
         return None
 

@@ -357,6 +357,10 @@ def external_program(fn_exe: str) -> str:
     kind = aretomo_jobs.aretomo_kind(fn_exe)
     if kind is not None:
         return aretomo_jobs.TITLES[kind]
+    from cryo_savanna.jobdefs import tomomask_jobs
+    kind = tomomask_jobs.mask_kind(fn_exe)
+    if kind is not None:
+        return tomomask_jobs.TITLES[kind]
     parts = fn_exe.split()
     return Path(parts[0]).name if parts else ""
 

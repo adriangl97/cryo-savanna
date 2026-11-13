@@ -103,10 +103,15 @@ class PipelineLock:
         if not self.held:
             return
         self.held = False
+        # already gone: someone removed a lock they took for stale (as LockError's message tells them to),
+        # while the change it guarded went through; nothing is left to release
         try:
-            self.file.unlink()
+            self.file.unlink(missing_ok=True)
         finally:
-            os.rmdir(self.dir)
+            try:
+                os.rmdir(self.dir)
+            except FileNotFoundError:
+                pass
 
     def __enter__(self) -> "PipelineLock":
         self.acquire()

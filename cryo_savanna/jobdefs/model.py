@@ -49,7 +49,7 @@ LINEAGE_INPUTS = {
 @dataclass(frozen=True)
 class OptionDef:
     key: str
-    kind: str  # any | filename | inputnode | radio | boolean | slider
+    kind: str  # any | filename | folder | inputnode | radio | boolean | slider
     label: str
     default: str
     help: str = ""
