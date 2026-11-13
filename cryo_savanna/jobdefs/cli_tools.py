@@ -179,7 +179,7 @@ class CliVariant(JobVariant):
                 else:
                     out.append(_arg(v))  # '' when empty, so the arguments keep their places
             return out
-        for name, flag in self.flags.items():
+        for name, flag in (self.flags or {}).items():
             v = values.get(name, self.options[name].default)
             if flag.is_switch:
                 if v == "Yes":
@@ -197,6 +197,7 @@ class CliVariant(JobVariant):
 
     def make_jobstar(self, values: dict[str, str], is_continue: bool, job_dir: str,
                      pipeline: Pipeline | None) -> JobStar:
+        assert self.external is not None and self.env is not None  # given by CliCatalog, which makes these
         js = self.external.new_jobstar(self.env, is_continue)
         js.is_tomo = self.is_tomo
         o = js.options
@@ -267,23 +268,24 @@ class CliVariant(JobVariant):
         return values, []
 
     def _read_flags(self, tokens: list[str], values: dict[str, str]) -> list[str]:
-        for name, flag in self.flags.items():  # an output not given was cleared
+        flags = self.flags or {}
+        for name, flag in flags.items():  # an output not given was cleared
             if output_kind(flag):
                 values[name] = ""
         extra: list[str] = []
         i = 0
         while i < len(tokens):
             t = tokens[i]
-            flag = self.flags.get(t)
-            if flag is None:
+            found = flags.get(t)
+            if found is None:
                 extra.append(t)
                 i += 1
-            elif flag.is_switch:
+            elif found.is_switch:
                 values[t] = "Yes"
                 i += 1
             else:
                 v = _unquote(tokens[i + 1]) if i + 1 < len(tokens) else ""
-                kind = output_kind(flag)
+                kind = output_kind(found)
                 if kind:
                     v = _JOB_DIR.sub("", v, count=1) if _JOB_DIR.match(v) else v
                     if kind == "dir" and v in ("", "/"):
@@ -293,7 +295,7 @@ class CliVariant(JobVariant):
         return extra
 
     def _read_positional(self, tokens: list[str], values: dict[str, str]) -> list[str]:
-        args = self.positional.args
+        args = self.positional.args if self.positional is not None else ()
         words = [_unquote(t) for t in tokens]
         multi = next((i for i, a in enumerate(args) if a.multi), None)
         before = args if multi is None else args[:multi]
@@ -346,23 +348,8 @@ def runner_program(fn_exe: str) -> str | None:
 
 def external_program(fn_exe: str) -> str:
     """What an External job runs: the CLI tool for jobs from that menu, else its executable's name."""
-    program = runner_program(fn_exe)
-    if program is not None:
-        return program
-    from cryo_savanna.jobdefs.pytom_jobs import TITLES, pytom_kind  # (imports this module)
-    kind = pytom_kind(fn_exe)
-    if kind is not None:
-        return TITLES[kind]
-    from cryo_savanna.jobdefs import aretomo_jobs
-    kind = aretomo_jobs.aretomo_kind(fn_exe)
-    if kind is not None:
-        return aretomo_jobs.TITLES[kind]
-    from cryo_savanna.jobdefs import tomomask_jobs
-    kind = tomomask_jobs.mask_kind(fn_exe)
-    if kind is not None:
-        return tomomask_jobs.TITLES[kind]
-    parts = fn_exe.split()
-    return Path(parts[0]).name if parts else ""
+    from cryo_savanna.jobdefs.external_jobs import program_title  # (imports this module)
+    return program_title(fn_exe)
 
 
 def cli_program_of(js: JobStar) -> str | None:
@@ -446,7 +433,8 @@ class CliCatalog:
         tabs.append(Tab("Running", tuple(running)))
         groups = dict(external.groups)  # queue fields follow "Submit to queue?" as in RELION's windows
         tabs = self._queue_groups(tabs, external)
-        category, description = (FLAG_TOOLS.get(program) or (positional.category, positional.description))
+        _category, description = FLAG_TOOLS.get(program, ("", program)) if positional is None else \
+            (positional.category, positional.description)
         return CliVariant(key=f"cli:{program}" + (":tomo" if tomo else ""), label=EXTERNAL, proc_id=external.proc_id,
                           dirname=external.dirname, is_tomo=tomo, options=options, tabs=tabs, groups=groups,
                           program=program, description=description, flags=flags, positional=positional,

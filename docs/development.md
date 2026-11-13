@@ -22,6 +22,16 @@ Make the synthetic projects to look at:
 
 The Qt tests run offscreen (`QT_QPA_PLATFORM=offscreen`), so no display is needed.
 
+Before a commit, also:
+
+```bash
+./env/bin/python -m ruff check .   # unused names, loop variables caught by mistake, ...
+./env/bin/python -m mypy           # types, of everything but the windows (ui/, viewers/)
+```
+
+Both are set up in `pyproject.toml` and should say nothing. mypy does not look at `ui/` and `viewers/` yet:
+most of what it says there is about Qt's enums through qtpy and about widgets made in a later step.
+
 ## Layout
 
 | Path | What |
@@ -39,6 +49,8 @@ The Qt tests run offscreen (`QT_QPA_PLATFORM=offscreen`), so no display is neede
 | `cryo_savanna/jobdefs/aretomo_jobs.py`, `cryo_savanna/aretomo_runner.py` | "Additional external jobs": AreTomo3's form and its runner (standard library only; it imports the helpers of `pytom_runner.py`, and both are copied into the project) |
 | `cryo_savanna/jobdefs/flags.py`, `jobdefs/help/` | Flags of the program behind each job's "Additional arguments", from `--help` (bundled 5.1.1 texts as fallback) |
 | `cryo_savanna/env/relion_env.py` | Reads `RELION_*` variables the same way RELION does |
+| `cryo_savanna/jobdefs/external_jobs.py` | The kinds of External jobs with a form and a runner of cryo-savanna's own (CLI tools, pytom, AreTomo3, tomogram masks) in one place: which kind a job is, its runner, its form, its main input. A new wrapper is one more entry there |
+| `cryo_savanna/ui/errors.py` | Errors nothing caught: in the status bar and in `errors.log` of the cache folder, not only in the terminal |
 | `cryo_savanna/stamps.py` | `stamp()`: whether a file changed (what every reader and viewer compares before reading again), and `Cache`: the last few results of a slow read, shared by the viewers' threads |
 | `cryo_savanna/tools/validate.py` | Checks cryo-savanna against a real RELION install |
 | `tools/extract_jobdefs/` | Regenerates the job definitions from a RELION source tree |
@@ -65,7 +77,10 @@ It compares the default `job.star` of every job type with what `relion_pipeliner
 your environment and for the compiled-in defaults. It also runs a few External jobs through
 `relion_pipeliner` in a scratch project (add, alias, run, chain, continue, abort, failure, clean,
 lock), then two jobs of the CLI tools menu made as the window makes them (`relion_image_handler`
-on a small map, the second on the first one's output), and saves `--help` of the RELION programs.
+on a small map, the second on the first one's output), then the "Additional external jobs" (AreTomo3 on a
+tiny tilt series, tomogram masks on its tomogram, pytom template matching with those masks: AreTomo3 and
+pytom are stand-ins that write the files the real ones write, so no GPU is needed), and saves `--help` of
+the RELION programs.
 Run it from a shell with your cluster's RELION module loaded, so that its `RELION_QSUB_*` settings
 are checked too. Nothing is submitted to the queue.
 

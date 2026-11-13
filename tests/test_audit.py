@@ -246,3 +246,139 @@ def test_stamp_changes_with_the_file(tmp_path):
     f.write_text("ab")
     assert stamp(f) != st and stamp(str(f)) == stamp(f)
 
+
+def test_uncaught_errors_are_kept_and_told(qtbot, tmp_path, capsys, monkeypatch):
+    import sys
+    import threading
+
+    from cryo_savanna.ui.errors import ErrorReporter
+    # Python's own hooks underneath, not pytest's (which would take the errors raised here for the test's)
+    monkeypatch.setattr(sys, "excepthook", sys.__excepthook__)
+    monkeypatch.setattr(threading, "excepthook", threading.__excepthook__)
+    rep = ErrorReporter(log=tmp_path / "cache" / "errors.log")
+    told = []
+    rep.reported.connect(lambda text, log: told.append((text, log)))
+    before = sys.excepthook, threading.excepthook
+    rep.install()
+    try:
+        def clean():
+            raise TypeError("unsupported operand\nsecond line")
+
+        try:
+            clean()
+        except TypeError:
+            sys.excepthook(*sys.exc_info())  # as Qt does for an exception in a slot
+        thread = threading.Thread(target=lambda: 1 / 0)
+        thread.start()
+        thread.join()
+        qtbot.waitUntil(lambda: len(told) == 2)
+    finally:
+        rep.uninstall()
+    assert (sys.excepthook, threading.excepthook) == before
+    assert told[0][0].startswith("TypeError: unsupported operand (test_audit.py:") and told[0][0].endswith(" in clean)")
+    assert told[0][1] == str(rep.log) and told[1][0].startswith("ZeroDivisionError")
+    text = rep.log.read_text()
+    assert text.count("Traceback") == 2 and "second line" in text and "ZeroDivisionError" in text
+    assert "TypeError" in capsys.readouterr().err  # still printed, as before
+    # a log that cannot be written: still told
+    blocked = ErrorReporter(log=tmp_path / "cache" / "errors.log" / "below a file")
+    blocked.reported.connect(lambda text, log: told.append((text, log)))
+    blocked.report(ValueError, ValueError("x"), None)
+    assert told[-1] == ("ValueError: x", "")
+
+
+def test_names_that_look_like_numbers_stay_as_written(tmp_path, qtbot):
+    from cryo_savanna.results.tables import Table, read_compact
+    from cryo_savanna.viewers.star_table import TableModel
+    star = tmp_path / "t.star"
+    star.write_text("data_global\n\nloop_\n_rlnTomoName #1\n_rlnTomoSizeX #2\n_rlnNote #3\n"
+                    "010 4000 a\n002 4000.0 b\n001 0500 c\n")
+    for t in (read_compact(star, "global"), Table.read(star, "global")):
+        assert list(t.column("rlnTomoName")) == ["010", "002", "001"] and t.numeric("rlnTomoName") is None
+        assert t.numeric("rlnTomoSizeX").tolist() == [4000.0, 4000.0, 500.0]  # numbers are still numbers
+        assert "rlnTomoName" not in t.numeric_columns()
+        model = TableModel()
+        model.set_table(t)
+        assert [model.data(model.index(r, 1)) for r in range(3)] == ["010", "002", "001"]
+        assert [model.data(model.index(r, 2)) for r in range(3)] == ["4000", "4000", "500"]
+        assert model.sort_key(1).tolist() == [10.0, 2.0, 1.0]  # sorted by number, shown as written
+        assert model.sort_key(3).tolist() == ["a", "b", "c"]
+
+
+def test_picks_are_counted_once_per_coordinate_file(tmp_path, monkeypatch):
+    from cryo_savanna.results import micrographs as M
+    coords = tmp_path / "AutoPick" / "job001"
+    coords.mkdir(parents=True)
+    rows = []
+    for i, n in enumerate((3, 0, 5)):
+        f = coords / f"m{i}_autopick.star"
+        f.write_text("data_\n\nloop_\n_rlnCoordinateX #1\n_rlnCoordinateY #2\n" + "1 2\n" * n)
+        rows.append(f"m{i}.mrc AutoPick/job001/m{i}_autopick.star")
+    rows.append("m3.mrc AutoPick/job001/gone_autopick.star")
+    (coords / "autopick.star").write_text("data_coordinate_files\n\nloop_\n_rlnMicrographName #1\n"
+                                          "_rlnMicrographCoordinates #2\n" + "\n".join(rows) + "\n")
+    opened = []
+    real = M.loop_rows
+    monkeypatch.setattr(M, "loop_rows", lambda path, *a, **k: (opened.append(Path(path).name), real(path, *a, **k))[1])
+    M._COUNTS.clear()
+
+    def counts():
+        ps = M.read_picks(tmp_path, "AutoPick/job001/autopick.star")  # the list read again: a new PickSet
+        return [ps.count(m) for m in ps.micrographs]
+
+    assert counts() == [3, 0, 5, 0] and len(opened) == 3  # the file that is gone is not opened
+    opened.clear()
+    assert counts() == [3, 0, 5, 0] and opened == []
+    (coords / "m1_autopick.star").write_text("data_\n\nloop_\n_rlnCoordinateX #1\n_rlnCoordinateY #2\n1 2\n1 2\n")
+    assert counts() == [3, 2, 5, 0] and opened == ["m1_autopick.star"]
+
+
+def test_every_kind_of_external_job_is_known_in_one_place(tmp_path):
+    """jobdefs/external_jobs.py: what pipeliner, lineage, snapshot, the forms and the viewers ask."""
+    from cryo_savanna.env.relion_env import RelionEnv
+    from cryo_savanna.jobdefs import external_jobs as X
+    from cryo_savanna.jobdefs.cli_tools import external_program
+    from cryo_savanna.jobdefs.flags import FlagSource
+    from cryo_savanna.results import registry as R
+    env, defs = RelionEnv({}), JobDefs.load()
+    forms = X.Forms(defs, env, FlagSource(which=lambda program: None))  # the bundled --help texts
+    made = {
+        X.CLI: ("relion_image_handler", {"--i": "Refine3D/job010/run_class001.mrc"}, None, "cli_runner.py"),
+        X.PYTOM: ("match", {"in_tomograms": "./Tomograms/job006/tomograms.star"}, "Tomograms/job006/tomograms.star",
+                  "pytom_runner.py"),
+        X.ARETOMO: ("align", {"in_tiltseries": "CtfFind/job003/tilt_series_ctf.star"},
+                    "CtfFind/job003/tilt_series_ctf.star", "aretomo_runner.py"),
+        X.TOMOMASK: ("masks", {"in_tomograms": "Tomograms/job006/tomograms.star"}, "Tomograms/job006/tomograms.star",
+                     "mask_runner.py"),
+    }
+    assert set(made) == {f.name for f in X.FAMILIES} == set(forms.catalogs)
+    for family, (kind, values, main, runner) in made.items():
+        variant = forms.variant(family, kind)
+        assert variant is not None and getattr(forms, family) is forms.catalogs[family]
+        js = variant.make_jobstar({**variant.default_values(env), **values}, False, "External/job001/", None)
+        found = X.kind_of(js)
+        assert found is not None and (found[0].name, found[1]) == (family, kind) and X.family_of(js) == family
+        assert X.main_input(js) == main
+        assert forms.variant_for(js) is variant
+        title = X.program_title(js.options["fn_exe"])
+        assert title == external_program(js.options["fn_exe"]) == found[0].title(kind) and title
+        project = tmp_path / family
+        assert X.install_runner(js, project) == project / ".cryo-savanna" / runner
+        assert (project / ".cryo-savanna" / runner).is_file()
+        # its viewers: the family's own (none for a CLI tool), then the files
+        views = [v.title for v in R.views_for(R.JobContext(project, "External/job001/", "relion.external", "Succeeded",
+                                                           [], js.options))]
+        assert views[-1] == "Files"
+        own = {X.PYTOM: "Scores", X.TOMOMASK: "Masks"}.get(family)  # (AreTomo3's come with its files)
+        assert own is None or (own in views and family in R.EXTERNAL_VIEWS)
+        assert family == X.CLI or family in R.EXTERNAL_VIEWS
+    # any other job: none of this
+    other = defs.variant("relion.external").new_jobstar(env)
+    other.options["fn_exe"] = "/opt/tools/my_script.sh --fast"
+    assert X.kind_of(other) is None and X.main_input(other) is None and forms.variant_for(other) is None
+    assert X.install_runner(other, tmp_path / "none") is None and not (tmp_path / "none").exists()
+    assert X.program_title(other.options["fn_exe"]) == "my_script.sh" and X.program_title("") == ""
+    class3d = defs.variant("relion.class3d").new_jobstar(env)
+    class3d.options["fn_exe"] = "python3 .cryo-savanna/pytom_runner.py match"  # not an External job: not ours
+    assert X.kind_of(class3d) is None
+

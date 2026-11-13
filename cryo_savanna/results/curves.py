@@ -68,12 +68,12 @@ def postprocess_figures(path: Path) -> list[Figure]:
     fsc = blocks.get("fsc")
     if fsc is not None and fsc.rows and fsc.has("rlnResolution"):
         t = Table.from_block(fsc)
-        x = t.numeric("rlnResolution")
+        x = t.numbers("rlnResolution")
         fig = Figure("fsc", "Fourier shell correlation", "Resolution (Å)", "FSC", x_resolution=True,
                      hlines=[(0.143, "0.143")])
         for label, title, dashed in FSC_CURVES:
             if t.has(label):
-                fig.curves.append(Curve(title, x[1:], t.numeric(label)[1:], dashed))
+                fig.curves.append(Curve(title, x[1:], t.numbers(label)[1:], dashed))
         res = _f(gen.get("rlnFinalResolution")) if gen else None
         if res:
             fig.vlines.append((1 / res, f"{res:.2f} Å"))
@@ -85,11 +85,11 @@ def postprocess_figures(path: Path) -> list[Figure]:
     gui = blocks.get("guinier")
     if gui is not None and gui.rows and gui.has("rlnResolutionSquared"):
         t = Table.from_block(gui)
-        x = t.numeric("rlnResolutionSquared")
+        x = t.numbers("rlnResolutionSquared")
         fig = Figure("guinier", "Guinier plot", "Resolution² (1/Å²)", "ln(amplitude)")
         for label, title in GUINIER_CURVES:
             if t.has(label):
-                y = t.numeric(label)
+                y = t.numbers(label)
                 ok = np.isfinite(y) & (y > -99)  # RELION writes -99 where there is nothing
                 fig.curves.append(Curve(title, x[ok], y[ok]))
         b = _f(gen.get("rlnBfactorUsedForSharpening")) if gen else None
@@ -116,11 +116,11 @@ def model_fsc(path: Path) -> Figure | None:
         if not (name.startswith("model_class_") or name.startswith("model_body_")) or not b.has("rlnGoldStandardFsc"):
             continue
         t = Table.from_block(b)
-        y = t.numeric("rlnGoldStandardFsc")
+        y = t.numbers("rlnGoldStandardFsc")
         if not np.any(y[1:]):
             continue
         label = name.replace("model_class_", "Class ").replace("model_body_", "Body ")
-        fig.curves.append(Curve(label, t.numeric("rlnResolution")[1:], y[1:]))
+        fig.curves.append(Curve(label, t.numbers("rlnResolution")[1:], y[1:]))
     gen = blocks.get("model_general")
     res = _f(gen.get("rlnCurrentResolution")) if gen else None
     if res:
@@ -152,7 +152,11 @@ def convergence(job_dir: Path) -> list[Figure]:
     its = iterations(job_dir)
     if not its:
         return []
-    xs, res, dist, acc, changes = [], [], {}, {}, {"orient": [], "offset": [], "classes": []}
+    xs: list[int] = []
+    res: list[float] = []
+    dist: dict[int, dict[int, float]] = {}
+    acc: dict[int, dict[int, float]] = {}
+    changes: dict[str, list[float]] = {"orient": [], "offset": [], "classes": []}
     n_classes = 0
     for it, model in its:
         h = _cached_head(model, ["model_general", "model_classes"])
@@ -166,7 +170,7 @@ def convergence(job_dir: Path) -> list[Figure]:
             n_classes = max(n_classes, len(t))
             for label, store in (("rlnClassDistribution", dist), ("rlnAccuracyRotations", acc)):
                 if t.has(label):
-                    for k, v in enumerate(t.numeric(label)):
+                    for k, v in enumerate(t.numbers(label)):
                         store.setdefault(k + 1, {})[it] = v
         opt = job_dir / model.name.replace("_half1_model.star", "_optimiser.star").replace("_model.star",
                                                                                             "_optimiser.star")

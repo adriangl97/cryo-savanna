@@ -238,6 +238,8 @@ with the tomogram's size and voxel size. Draw the masks in the job's **Masks** t
   each edit goes to all of them. Switch it off to edit the tomograms one by one from there. Corners
   and planes are kept relative to each tomogram's centre, so a shared mask stays centred in
   tomograms of another size.
+- **Undo** (Ctrl+Z) takes the last edit back, for every tomogram it changed; **Redo** (Ctrl+Shift+Z)
+  makes it again. Edits can be taken back until the masks are read again (the job run again).
 - **Save masks** rewrites the masks that changed. Identical masks are written once: the others are
   symbolic links to that file. **Reset** goes back to the whole tomogram.
 

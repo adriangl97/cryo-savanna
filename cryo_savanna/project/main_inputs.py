@@ -68,8 +68,8 @@ class MainInputs:
                 return
 
             def change(data: dict) -> dict:
-                jobs = data.get("jobs") if isinstance(data.get("jobs"), dict) else {}
-                current = {str(k): str(v) for k, v in jobs.items()}
+                jobs = data.get("jobs")
+                current = {str(k): str(v) for k, v in jobs.items()} if isinstance(jobs, dict) else {}
                 if node is None:
                     current.pop(job, None)
                 else:

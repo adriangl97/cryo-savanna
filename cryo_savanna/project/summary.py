@@ -162,15 +162,15 @@ def _count(v) -> int | None:
     return int(f) if f is not None and math.isfinite(f) and f >= 1 else None
 
 
-def _fmt_num(v: str) -> str:
+def _fmt_num(v: str | None) -> str:
     f = _float(v)
-    return f"{f:g}" if f is not None else v
+    return f"{f:g}" if f is not None else str(v)
 
 
 class SummaryReader:
     def __init__(self, project_dir: str | os.PathLike):
         self.project_dir = Path(project_dir)
-        self._cache: dict[str, tuple[tuple, JobSummary]] = {}
+        self._cache: dict[str, tuple[tuple | None, JobSummary]] = {}
         self._counts: dict[str, tuple[tuple, int | None]] = {}  # file -> (stamp, rows)
 
     def cached(self, name: str) -> JobSummary | None:
@@ -191,7 +191,7 @@ class SummaryReader:
         self._cache.clear()
 
     def summarize(self, info: JobInfo, pipeline: Pipeline) -> JobSummary:
-        key = self._key(info)
+        key: tuple | None = self._key(info)
         hit = self._cache.get(info.name)
         if hit is not None and hit[0] == key:
             return hit[1]
@@ -339,7 +339,8 @@ class SummaryReader:
                     s.result.append(f"{n} classes")
 
     def _settings(self, t: str, pr: Process, opts: dict, s: JobSummary) -> None:
-        o = opts.get
+        def o(k: str) -> str:
+            return opts.get(k) or ""
         if t in ("relion.import", "relion.importtomo"):
             if o("angpix"):
                 s.settings.append(f"{_fmt_num(o('angpix'))} Å/px")
@@ -378,7 +379,8 @@ class SummaryReader:
         The final values come from the optics table of the output particles.star; before there
         is one (running jobs), from the job options.
         """
-        o = opts.get
+        def o(k: str) -> str:
+            return opts.get(k) or ""
         node = next((n for n in pr.outputs if n.endswith("particles.star")), None)
         optics = self._head(node, "optics") if node else None
 
@@ -417,7 +419,7 @@ class SummaryReader:
             if v:
                 s.quality.append(f"motion {statistics.fmean(v):.1f} Å (mean)")
         elif t == "relion.ctffind":
-            v: list[float] = []
+            v = []
             if mics:
                 v = self._column(mics, "micrographs", "rlnCtfMaxResolution")
             elif tilts:

@@ -191,7 +191,7 @@ def _optics(path: Path | None) -> StarBlock | None:
 
 
 def _rows(block: StarBlock | None) -> dict[int, dict]:
-    out = {}
+    out: dict[int, dict] = {}
     if block is None:
         return out
     for k, rec in enumerate(block.records()):

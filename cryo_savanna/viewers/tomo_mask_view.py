@@ -27,6 +27,7 @@ from pathlib import Path
 import numpy as np
 import pyqtgraph as pg
 from qtpy.QtCore import QPointF, QRectF, Qt, QTimer
+from qtpy.QtGui import QKeySequence
 from qtpy.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -34,6 +35,7 @@ from qtpy.QtWidgets import (
     QLabel,
     QMessageBox,
     QPushButton,
+    QShortcut,
     QSplitter,
     QTableWidget,
     QTableWidgetItem,
@@ -52,7 +54,9 @@ POLY_PEN = (255, 170, 0)
 PLANE_PENS = {"bottom": (0, 200, 255), "top": (255, 80, 200)}
 SHADE = (220, 60, 30, 90)  # outside the mask
 HELP = ("Drag the polygon's corners (click an edge to add one, right-click a corner to remove it). Between two "
-        "planes: drag the lines in XZ and YZ (blue: lower Z, pink: upper Z) to move a plane, their ends to tilt it.")
+        "planes: drag the lines in XZ and YZ (blue: lower Z, pink: upper Z) to move a plane, their ends to tilt it. "
+        "Ctrl+Z takes an edit back, Ctrl+Shift+Z makes it again.")
+UNDO_KEPT = 200  # edits that can be taken back
 
 
 class _Tomograms(TomogramViewer):
@@ -109,10 +113,24 @@ class TomoMaskView(QWidget):
         self.save_btn.setToolTip("Rewrite the job's masks (masks/<rlnTomoName>_mask.mrc) that changed")
         self.save_btn.clicked.connect(self.save)
         self.save_btn.setEnabled(False)
+        # every edit goes through set_geometry, which keeps what it replaced: {tomogram: geometry} per edit
+        self._undo: list[dict[str, dict]] = []
+        self._redo: list[dict[str, dict]] = []
+        self.undo_btn = QPushButton("Undo")
+        self.undo_btn.setToolTip("Take the last edit back (Ctrl+Z): of every tomogram it changed")
+        self.undo_btn.clicked.connect(self.undo)
+        self.redo_btn = QPushButton("Redo")
+        self.redo_btn.setToolTip("Make the edit taken back again (Ctrl+Shift+Z)")
+        self.redo_btn.clicked.connect(self.redo)
+        for keys, fn in ((QKeySequence.Undo, self.undo), (QKeySequence.Redo, self.redo)):
+            sc = QShortcut(QKeySequence(keys), self)
+            sc.setContext(Qt.WidgetWithChildrenShortcut)  # only while this view has the keyboard
+            sc.activated.connect(fn)
         bar = QHBoxLayout()
         bar.setContentsMargins(0, 0, 0, 0)
-        for w in (self.same, QLabel("Z:"), self.zmode, self.shade, self.reset_btn):
+        for w in (self.same, QLabel("Z:"), self.zmode, self.shade, self.reset_btn, self.undo_btn, self.redo_btn):
             bar.addWidget(w)
+        self._update_undo()
         bar.addStretch(1)
         bar.addWidget(self.save_btn)
 
@@ -189,6 +207,9 @@ class TomoMaskView(QWidget):
             self.info.setText(f"⚠ {data}")
             return
         self.data, self.dirty = data, False
+        self._undo.clear()  # other masks now (the job ran again): nothing of before to go back to
+        self._redo.clear()
+        self._update_undo()
         self.saved = {n: (data["files"].get(n) or {}).get("key", "") for n in data["tomograms"]}
         self.save_btn.setEnabled(False)
         self._fill_table()
@@ -418,14 +439,48 @@ class TomoMaskView(QWidget):
         if g is None or self.data is None or self.current is None:
             return
         g = M.clean_geometry(g)
+        tomos = self.data["tomograms"]
+        before = {n: tomos[n]["geometry"] for n in names or self._targets()
+                  if M.clean_geometry(tomos[n]["geometry"]) != g}
+        if before:  # an edit that changes something (not a shape let go where it was)
+            self._undo.append(before)
+            del self._undo[:-UNDO_KEPT]
+            self._redo.clear()
+        self._apply({n: g for n in names or self._targets()})
+
+    def _apply(self, geometries: dict[str, dict]) -> None:
+        """Give these tomograms these masks, and show it."""
         rows = {n: i for i, n in enumerate(self.names())}
-        for n in names or self._targets():
-            self.data["tomograms"][n]["geometry"] = copy.deepcopy(g)
-            self._update_row(n, rows[n])
+        for n, g in geometries.items():
+            if n in rows:
+                self.data["tomograms"][n]["geometry"] = copy.deepcopy(g)
+                self._update_row(n, rows[n])
         for c in (2, 3, 4):
             self.table.resizeColumnToContents(c)
+        self._update_undo()
         self._changed()
         self._place_shapes()
+
+    def _step(self, taken: list[dict[str, dict]], given: list[dict[str, dict]]) -> None:
+        if self.data is None or not taken:
+            return
+        self._commit_timer.stop()  # an edit not taken yet is dropped: this goes back from the last one taken
+        self._pending_lines.clear()
+        edit = taken.pop()
+        tomos = self.data["tomograms"]
+        given.append({n: tomos[n]["geometry"] for n in edit if n in tomos})
+        self._apply(edit)
+
+    def undo(self) -> None:
+        """Take the last edit back, for every tomogram it changed."""
+        self._step(self._undo, self._redo)
+
+    def redo(self) -> None:
+        self._step(self._redo, self._undo)
+
+    def _update_undo(self) -> None:
+        self.undo_btn.setEnabled(bool(self._undo))
+        self.redo_btn.setEnabled(bool(self._redo))
 
     def _changed(self) -> None:
         self.dirty = any(M.geometry_key(t["shape"], t["geometry"]) != self.saved.get(n)

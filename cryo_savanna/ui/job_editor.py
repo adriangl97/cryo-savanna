@@ -67,6 +67,7 @@ from qtpy.QtWidgets import (
 from cryo_savanna.env.relion_env import RelionEnv, RelionEnvError
 from cryo_savanna.jobdefs.flags import Flag, FlagSource, command_flags, program_for
 from cryo_savanna.jobdefs.model import JobVariant, OptionDef, Row
+from cryo_savanna.jobdefs.pytom_jobs import PytomVariant
 from cryo_savanna.project.jobstar import JobStar
 from cryo_savanna.project.pipeline import Pipeline
 from cryo_savanna.relion_consts import job_type_for_label
@@ -548,7 +549,7 @@ class JobEditor(QWidget):
         self._update_mode_widgets()
 
     def _type_name(self, variant: JobVariant) -> str:
-        if getattr(variant, "kind", None) in ("match", "extract", "align", "masks"):  # pytom, AreTomo3, masks (jobdefs/)
+        if isinstance(variant, PytomVariant):  # pytom, AreTomo3, tomogram masks (jobdefs/external_jobs.py)
             return f"{variant.program} (runs as an External job)"
         if getattr(variant, "is_cli", False):
             return f"{variant.program} (CLI tool, runs as an External job)"
@@ -831,7 +832,7 @@ class JobEditor(QWidget):
         pal = self.palette()
         dim = pal.color(QPalette.PlaceholderText).name()
         accent = pal.color(QPalette.Highlight).name()
-        for _, row, parts in self.rows:
+        for _, row, _parts in self.rows:
             active = self.variant.group_active(row.group, vals)
             for k in row.keys:
                 if k not in self.widgets:

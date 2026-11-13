@@ -333,3 +333,22 @@ def test_cli_tool_jobs_end_to_end_with_a_stand_in_pipeliner(tmp_path, monkeypatc
     assert result["parents_of_second"] == [first]
     assert result["relion_command"].startswith(f"python3 {RUNNER_IN_PROJECT} relion_image_handler --o {first} --j 1 ")
     assert result["relion_command"].endswith(f"--invert_hand --pipeline_control {first}")
+
+
+def test_wrapper_jobs_end_to_end_with_a_stand_in_pipeliner(tmp_path, monkeypatch):
+    """The validation's check of the "Additional external jobs" (tools/validate.py: AreTomo3, tomogram masks
+    and pytom with stand-in programs), against the stand-in pipeliner. On a real RELION:
+    tests/test_against_relion.py."""
+    from cryo_savanna.tools.validate import PipelinerChecks
+    from tests.fixtures.fake_pipeliner import install as install_fake_pipeliner
+    install_fake_pipeliner(tmp_path / "bin")
+    monkeypatch.setenv("PATH", f"{tmp_path / 'bin'}{os.pathsep}{os.environ['PATH']}")
+    checks = PipelinerChecks(tmp_path / "out", JobDefs.load())
+    checks.check("wrappers", checks.t_wrappers)
+    result = checks.results["wrappers"]
+    assert result["ok"], result.get("error")
+    aretomo, masks, match = result["jobs"]
+    assert result["parents_of_masks"] == [aretomo] and set(result["parents_of_match"]) == {aretomo, masks}
+    assert f"--tomogram-mask {masks}masks/TS_1_mask.mrc" in result["pytom_arguments"]
+    assert "pytom_runner.py match --o " + match in result["relion_command"]
+

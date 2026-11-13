@@ -12,7 +12,6 @@ as an outline on the sections, and a local-resolution map can colour the section
 
 from __future__ import annotations
 
-import os
 import time
 from collections.abc import Callable
 from pathlib import Path

@@ -400,7 +400,7 @@ class _Scanner:
         """The outputs with fixed file names of a job of this type, SPA or tomo, before it wrote them."""
         jt = job_type_for_label(type_label)
         out = []
-        for patterns, label, how in OUTPUTS.get(jt.label if jt else type_label, []):
+        for patterns, label, _how in OUTPUTS.get(jt.label if jt else type_label, []):
             first = patterns[0]
             if any(c in first for c in "*?["):
                 continue
@@ -429,7 +429,9 @@ class _Scanner:
     def read_job(self, job: str) -> tuple[FoundJob, list[tuple[str, str | None]]]:
         """The job without its inputs resolved: (job, [(input path, type label or None)])."""
         d = self._p(job)
-        sources, notes, candidates = [], [], []
+        sources: list[str] = []
+        notes: list[str] = []
+        candidates: list[tuple[str, str | None]] = []
         type_label, is_tomo, mini = None, False, None
         outputs: list[tuple[str, str, int]] = []
 
@@ -475,7 +477,8 @@ class _Scanner:
             sources.append("folder name")
             notes.append("job type taken from the folder name")
         elif not is_tomo:
-            is_tomo = job_type_for_label(type_label) is not None and 50 <= job_type_for_label(type_label).proc_id < 99
+            known = job_type_for_label(type_label)
+            is_tomo = known is not None and 50 <= known.proc_id < 99
 
         # a job RELION only scheduled has a job.star but no run.out yet (nor a submit script, if queued)
         started = any((d / f).exists() for f in ("run.out", "run.err", "run_submit.script")) or (mini is None and js is None)
@@ -632,7 +635,7 @@ def scan(project_dir: str | os.PathLike, pipeline: Pipeline | None = None, jobs:
                 if from_text or parts is not None or not sc._p(path).exists():
                     continue
                 node_label_of[path] = (_label_for(sc, path, hint), 1)
-            elif producer == fj.name or fj.name in ancestors(producer):
+            elif producer == fj.name or (producer is not None and fj.name in ancestors(producer)):
                 fj.notes.append(f"input {path} left out: it would make a loop")
                 continue
             fj.inputs.append(path)

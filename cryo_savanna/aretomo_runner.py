@@ -56,7 +56,6 @@ RELION_OUTPUT_NODES.star. RELION_JOB_ABORT_NOW and SIGTERM/SIGINT/SIGHUP (scance
 import array
 import json
 import os
-import shlex
 import shutil
 import statistics
 import struct
@@ -68,7 +67,7 @@ if __package__:  # imported from cryo-savanna
     from cryo_savanna import pytom_runner as B
 else:  # run in a project: the copy of pytom_runner.py beside this one
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-    import pytom_runner as B
+    import pytom_runner as B  # type: ignore[no-redef]
 
 Usage, Aborted = B.Usage, B.Aborted
 yes, text, number, words, num = B.yes, B.text, B.number, B.words, B.num

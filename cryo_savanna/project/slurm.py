@@ -165,7 +165,8 @@ def parse_squeue(text: str) -> list[QueueJob]:
         parts = line.split(SEP)
         if len(parts) < 9 or not parts[0].strip():
             continue
-        out.append(QueueJob(*(p.strip() for p in parts[:8]), workdir=SEP.join(parts[8:]).strip()))
+        out.append(QueueJob(*(p.strip() for p in parts[:8]),  # type: ignore[misc]  # (eight fields, then workdir)
+                            workdir=SEP.join(parts[8:]).strip()))
     return out
 
 
@@ -313,8 +314,8 @@ class QueueMapper:
         if not self.persist:
             return
         def merge(data: dict) -> dict:  # other sessions save it too: keep the ids they found
-            theirs = data.get("jobs") if isinstance(data.get("jobs"), dict) else {}
-            known = {str(k): str(v) for k, v in theirs.items()}
+            theirs = data.get("jobs")
+            known = {str(k): str(v) for k, v in theirs.items()} if isinstance(theirs, dict) else {}
             known.update(self.known)
             return {"jobs": dict(sorted(known.items(), key=lambda kv: _id_order(kv[0])))}
 
@@ -496,7 +497,7 @@ class QueueMapper:
                 except OSError:
                     return False
                 m = re.search(r"^\s*do_queue\s+(\S+)", text, re.M)
-                hit = (mtime, bool(m) and m.group(1).strip("\"'") == "Yes")
+                hit = (mtime, m is not None and m.group(1).strip("\"'") == "Yes")
                 self._do_queue[job] = hit
             return hit[1]
 
@@ -553,7 +554,7 @@ class SlurmMonitor:
             except SlurmError as e:
                 state.error = str(e)
                 break
-            if self._lost(last, state.checked_at) and not self._before_submission(job, last):
+            if last is not None and self._lost(last, state.checked_at) and not self._before_submission(job, last):
                 state.lost[job] = last
         return state
 

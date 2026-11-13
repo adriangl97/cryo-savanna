@@ -3,6 +3,7 @@
 """Tomogram mask jobs: the masks (raster, MRC, links between identical ones), the form, the runner, the Masks
 view, and pytom's tomogram masks folder."""
 
+import copy
 import json
 import os
 import shutil
@@ -404,6 +405,43 @@ def test_masks_view_draws_copies_and_saves(qtbot, masks_done):
     assert listed.rows[0][1] == JOB + "masks/TS_01_mask.mrc"
     v.refresh()  # its own save: not read again
     assert not v.tasks.busy()
+
+
+def test_masks_view_takes_edits_back(qtbot, masks_done):
+    from cryo_savanna.viewers.tomo_mask_view import TomoMaskView
+    v = TomoMaskView(masks_done, JOB)
+    qtbot.addWidget(v)
+    assert v.tasks.wait() and v.viewer.tasks.wait()
+    start = {n: copy.deepcopy(v.geometry(n)) for n in v.names()}
+    assert not v.undo_btn.isEnabled() and not v.redo_btn.isEnabled()
+    v.set_geometry(v.geometry())  # nothing changed: nothing to take back
+    assert not v.undo_btn.isEnabled()
+    v.zmode.setCurrentIndex(v.zmode.findData(M.Z_SLAB))  # edit 1: this tomogram
+    slab = copy.deepcopy(v.geometry())
+    v.same.setChecked(True)  # edit 2: the others get it
+    assert all(v.geometry(n) == slab for n in v.names())
+    nx, ny, _ = v.shape()
+    v.poly.setPoints([(2, 2), (nx - 2, 2), (nx / 2, ny - 2)], closed=True)  # edit 3: all of them
+    v.flush()
+    assert all(len(v.geometry(n)["polygon"]) == 3 for n in v.names()) and v.dirty
+    v.undo()
+    assert all(v.geometry(n) == slab for n in v.names()) and len(v.poly.getHandles()) == 4
+    v.undo()
+    assert v.geometry("TS_01") == slab and v.geometry("TS_03") == start["TS_03"]
+    assert v.table.item(1, 4).text() == "" and v.table.item(0, 4).text() == "edited"
+    v.undo()
+    assert {n: v.geometry(n) for n in v.names()} == start and not v.dirty and not v.save_btn.isEnabled()
+    assert not v.undo_btn.isEnabled() and v.redo_btn.isEnabled()
+    v.undo()  # nothing left: nothing happens
+    v.redo()
+    v.redo()
+    assert all(v.geometry(n) == slab for n in v.names()) and v.dirty
+    v._reset()  # the masks are as Reset makes them already: no edit, the way forward stays
+    assert v.redo_btn.isEnabled()
+    v.zmode.setCurrentIndex(v.zmode.findData(M.Z_ALL))  # a new edit: what was taken back cannot be made again
+    assert not v.redo_btn.isEnabled() and v.undo_btn.isEnabled()
+    v.load()  # read again (the job ran again): no way back to masks that are gone
+    assert v.tasks.wait() and not v.undo_btn.isEnabled()
 
 
 def test_masks_view_before_the_job_ran(qtbot, tmp_path):

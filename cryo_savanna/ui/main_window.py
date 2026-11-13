@@ -251,8 +251,7 @@ class MainWindow(QMainWindow):
 
         self.actions = JobActions(self, self.defs, self.env, self.type_names, self.tomo, self.readonly,
                                   flag_source=self.flag_source)
-        self.info.cli, self.info.pytom, self.info.aretomo = self.actions.cli, self.actions.pytom, self.actions.aretomo  # the editor's forms, also read-only
-        self.info.tomomask = self.actions.tomomask
+        self.info.forms = self.actions.forms  # the editor's forms, also read-only
         self.actions.changed.connect(self._force_refresh)
         self.actions.select.connect(self._select_soon)
         self.actions.message.connect(lambda m: self.statusBar().showMessage(m, 6000))
@@ -710,6 +709,10 @@ class MainWindow(QMainWindow):
         self.status_state.setText("   ·   ".join(state))
         tip = f"relion_pipeliner: {pipeliner or 'not on PATH'}"
         self.status_state.setToolTip(tip + (f"\n\n{self.version_warning}" if self.version_warning else ""))
+
+    def show_error(self, text: str, log: str = "") -> None:
+        """An error nothing caught (ui/errors.py): what was being done did not finish; the rest goes on."""
+        self.statusBar().showMessage(f"⚠ Unexpected error: {text}" + (f"   ·   details in {log}" if log else ""), 30000)
 
     def set_main_input(self, job: str, node: str) -> None:
         """Place ``job`` under the producer of ``node`` in the list and the tree ("": the default again)."""

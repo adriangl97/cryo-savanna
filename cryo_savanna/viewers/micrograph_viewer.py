@@ -10,7 +10,6 @@ classes to show.
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
 from qtpy.QtCore import Qt, Signal

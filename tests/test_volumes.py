@@ -206,7 +206,7 @@ def test_renders_do_not_pile_up_on_a_slow_machine(qtbot, tmp_path, settle, monke
     monkeypatch.setattr(vv, "render", slow)
     shown = []
     v.surface.rendered.connect(lambda: shown.append(v.surface.image.width()))
-    for i in range(30):  # 30 moves in about 0.3 s
+    for _ in range(30):  # 30 moves in about 0.3 s
         v.surface.rot = vv.drag_rotation(v.surface.rot, 6, 0)
         v.surface._request(fast=True)
         qtbot.wait(10)

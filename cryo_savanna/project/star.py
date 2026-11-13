@@ -364,7 +364,7 @@ def parse_star_text(text: str, blocks: Iterable[str] | None = None) -> dict[str,
     return _parse(io.StringIO(text), set(blocks) if blocks is not None else None)
 
 
-def _parse(fh: IO[str], wanted: set[str] | None) -> dict[str, StarBlock]:
+def _parse(fh: Iterable[str], wanted: set[str] | None) -> dict[str, StarBlock]:
     result: dict[str, StarBlock] = {}
     cur: StarBlock | None = None
     keep = False
@@ -508,18 +508,17 @@ class FormattedLoop:
 
 def _block_text(block: "StarBlock | FormattedLoop", version: int = CURRENT_MDT_VERSION) -> Iterator[str]:
     """The pieces of one block, exactly as MetaDataTable::write writes it (nothing for an empty block)."""
-    formatted = isinstance(block, FormattedLoop)
-    if not (block.lines if formatted else block.rows):
+    if not (block.lines if isinstance(block, FormattedLoop) else block.rows):
         return
     yield f"\n# version {version}\n\ndata_{block.name}\n"
     if block.comment:
         yield f"# {block.comment}\n"
     yield "\n"
-    if formatted or block.is_loop:
+    if isinstance(block, FormattedLoop) or block.is_loop:
         yield "loop_ \n"
         for i, label in enumerate(block.columns, start=1):
             yield f"_{label} #{i} \n"
-        if formatted:
+        if isinstance(block, FormattedLoop):
             yield from block.lines
         else:
             for row in block.rows:

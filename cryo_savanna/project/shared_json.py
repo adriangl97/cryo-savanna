@@ -21,7 +21,7 @@ from pathlib import Path
 try:
     import fcntl
 except ImportError:  # not on Windows
-    fcntl = None
+    fcntl = None  # type: ignore[assignment]
 
 
 @contextlib.contextmanager

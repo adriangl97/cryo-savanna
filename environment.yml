@@ -18,6 +18,9 @@ dependencies:
   # tests (python -m pytest in a checkout)
   - pytest>=7
   - pytest-qt>=4
+  # checks (python -m ruff check . and python -m mypy in a checkout)
+  - ruff>=0.6
+  - mypy>=1.10
   - pip
   - pip:
       - .  # cryo-savanna itself: the cryo-savanna and savanna commands

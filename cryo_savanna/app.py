@@ -82,7 +82,7 @@ def run_gui(project: Path, tomo: bool | None, readonly: bool, poll_s: float | No
               "pip install 'cryo-savanna[gui]'; --print-tree works without it.", file=sys.stderr)
         return 1
 
-    from cryo_savanna.ui import gc_guard
+    from cryo_savanna.ui import errors, gc_guard
     from cryo_savanna.ui.main_window import MainWindow
     from cryo_savanna.ui.start_project import choose_project
 
@@ -94,7 +94,9 @@ def run_gui(project: Path, tomo: bool | None, readonly: bool, poll_s: float | No
     if chosen is None:
         return 0
     project = chosen
+    reporter = errors.install(app)  # an error nothing caught: in the status bar and a log, not only the terminal
     win = MainWindow(project, tomo=tomo, readonly=readonly, poll_s=poll_s, queue_poll_s=queue_poll_s)
+    reporter.reported.connect(win.show_error)
     win.show()
     rc = app.exec()
     if win.background_busy():

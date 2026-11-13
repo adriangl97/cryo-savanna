@@ -94,7 +94,7 @@ class OptionDef:
                 continue
             if fld == "default":
                 if self.kind == "slider":
-                    changes["default"] = float_to_string(env.integer(var))
+                    changes["default"] = float_to_string(env.integer(var) or 0)  # (set: checked above)
                 elif self.kind == "boolean":
                     changes["default"] = "Yes" if env.boolean(var) else "No"
                 else:

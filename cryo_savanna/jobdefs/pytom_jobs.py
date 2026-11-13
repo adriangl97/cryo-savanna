@@ -415,6 +415,7 @@ class PytomVariant(JobVariant):
 
     def make_jobstar(self, values: dict[str, str], is_continue: bool, job_dir: str,
                      pipeline: Pipeline | None) -> JobStar:
+        assert self.external is not None and self.env is not None  # given by the catalog that makes these
         js = self.external.new_jobstar(self.env, is_continue)
         js.is_tomo = True
         o = js.options

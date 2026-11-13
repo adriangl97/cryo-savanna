@@ -41,12 +41,12 @@ def trilinear(vol: np.ndarray, x: np.ndarray, y: np.ndarray, z: np.ndarray) -> n
     z = np.clip(z, 0, nz - 1.001)
     x0, y0, z0 = x.astype(np.intp), y.astype(np.intp), z.astype(np.intp)
     fx, fy, fz = x - x0, y - y0, z - z0
-    c = 0.0
+    c: np.ndarray | float = 0.0
     for dz, wz in ((0, 1 - fz), (1, fz)):
         for dy, wy in ((0, 1 - fy), (1, fy)):
             for dx, wx in ((0, 1 - fx), (1, fx)):
                 c = c + vol[z0 + dz, y0 + dy, x0 + dx] * (wz * wy * wx)
-    return c
+    return np.asarray(c)
 
 
 @dataclass

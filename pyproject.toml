@@ -29,7 +29,7 @@ dependencies = [
 
 [project.optional-dependencies]
 gui = ["qtpy>=2.4", "PySide6>=6.5", "pyqtgraph>=0.13", "tifffile"]
-dev = ["pytest>=7", "pytest-qt>=4"]
+dev = ["pytest>=7", "pytest-qt>=4", "ruff>=0.6", "mypy>=1.10"]
 
 [project.scripts]
 cryo-savanna = "cryo_savanna.app:main"
@@ -43,3 +43,32 @@ include = ["cryo_savanna*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+extend-exclude = ["env", "build", "tools/extract_jobdefs", "tools/pipeline_ops_ref"]
+
+[tool.ruff.lint]
+# real defects, not layout: pyflakes, pycodestyle errors and warnings, bugbear
+select = ["E", "F", "W", "B"]
+ignore = [
+    "E501",  # a line a little over 120 is left as it reads best
+    "B904",  # "raise Usage(...)" in an except: the message is the whole story, no chain is shown
+    "B905",  # zip() of rows and columns of different lengths is meant to stop at the shorter
+]
+
+[tool.ruff.lint.flake8-bugbear]
+extend-immutable-calls = ["qtpy.QtCore.QModelIndex"]  # Qt's own signature: parent=QModelIndex()
+
+[tool.mypy]
+python_version = "3.11"
+files = ["cryo_savanna"]
+ignore_missing_imports = true  # mrcfile, pyqtgraph, tifffile: no type information
+
+[[tool.mypy.overrides]]
+# The windows are not checked yet: Qt's enums through qtpy and the widgets made in a later step
+# (self.viewer: X | None) are most of what mypy says there, not defects.
+module = ["cryo_savanna.ui.*", "cryo_savanna.viewers.*"]
+ignore_errors = true
+
