@@ -69,6 +69,7 @@ from cryo_savanna.jobdefs.flags import Flag, FlagSource, command_flags, program_
 from cryo_savanna.jobdefs.model import JobVariant, OptionDef, Row
 from cryo_savanna.project.jobstar import JobStar
 from cryo_savanna.project.pipeline import Pipeline
+from cryo_savanna.relion_consts import job_type_for_label
 from cryo_savanna.project.scratch import SCRATCH_KEY
 from cryo_savanna.project.scratch import base_dir as scratch_base_dir
 from cryo_savanna.project.selection import interactive_kind
@@ -710,8 +711,12 @@ class JobEditor(QWidget):
         continued or cloned, else of the newest job of this type."""
         candidates = [self.source_job] if self.source_job else []
         if self.pipeline is not None and self.variant is not None:
+            def same_type(label: str) -> bool:
+                # whatever RELION added to the label (relion.autopick.log is a relion.autopick job)
+                jt = job_type_for_label(label)
+                return label == self.variant.label or (jt is not None and jt.label == self.variant.label)
             candidates += [n for n, pr in reversed(self.pipeline.processes.items())
-                           if pr.type_label == self.variant.label and n != self.source_job]
+                           if n != self.source_job and same_type(pr.type_label)]
         for job in candidates[:20]:
             try:
                 note = (self.project_dir / job / "note.txt").read_text(errors="replace")

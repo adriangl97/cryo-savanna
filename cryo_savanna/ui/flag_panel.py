@@ -167,7 +167,7 @@ class FlagPanel(QWidget):
         dim = QBrush(self.palette().color(QPalette.PlaceholderText))
         section_item = None
         for f in self.flags.flags:
-            if section_item is None or section_item.text(COL_FLAG) != f.section:
+            if section_item is None or section_item.text(COL_FLAG) != (f.section or "Options"):
                 section_item = QTreeWidgetItem([f.section or "Options"])
                 font = QFont(self.tree.font())
                 font.setBold(True)

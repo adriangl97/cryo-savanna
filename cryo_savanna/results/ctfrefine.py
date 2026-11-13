@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import os
 import re
+import threading
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -402,12 +403,23 @@ class MicrographSummary:
     sd: dict[str, np.ndarray]
 
 
+def _unique_names(column) -> tuple[list[str], np.ndarray]:
+    """The different names of a column, sorted, and for every row which of them it has: what
+    np.unique(..., return_inverse=True) gives, without an array of a million names as wide as the longest
+    (several hundred MB) and its sort; one look-up per row instead."""
+    first: dict[str, int] = {}
+    seen = np.fromiter((first.setdefault(str(n), len(first)) for n in column), np.int64, len(column))
+    names = sorted(first)
+    rank = np.empty(len(names), np.int64)
+    rank[[first[n] for n in names]] = np.arange(len(names))
+    return names, rank[seen] if len(names) else seen
+
+
 def per_micrograph(table: Table, labels: list[str]) -> MicrographSummary | None:
     """Mean and spread of some per-particle values on each micrograph."""
     if not table.has("rlnMicrographName"):
         return None
-    names, inv = np.unique(np.asarray(table.column("rlnMicrographName"), dtype=object).astype(str),
-                           return_inverse=True)
+    names, inv = _unique_names(table.column("rlnMicrographName"))
     counts = np.bincount(inv, minlength=len(names)).astype(float)
     mean, sd = {}, {}
     for lab in labels:
@@ -527,6 +539,7 @@ def micrographs_done(job_dir: Path, limit: int = 200_000) -> int:
 # ---------------------------------------------------------------------------- shared reads
 
 _changes_cache: dict[tuple, ParticleChanges | None] = {}
+_changes_lock = threading.Lock()
 
 
 def _file_key(p: Path | None):
@@ -542,10 +555,13 @@ def _file_key(p: Path | None):
 def particle_changes(output: Path, input_star: Path | None = None) -> ParticleChanges | None:
     """read_particle_changes, kept while neither file changes: the summary and the plots of a job share it."""
     key = (_file_key(output), _file_key(input_star))
-    if key in _changes_cache:
-        return _changes_cache[key]
-    result = read_particle_changes(output, input_star)
-    if len(_changes_cache) >= 2:
-        _changes_cache.pop(next(iter(_changes_cache)))
-    _changes_cache[key] = result
-    return result
+    # one read at a time: the views ask from the viewers' thread pool, and two asking for the same job at
+    # once (its summary and its plots) would both read the particles; the second now finds the first's
+    with _changes_lock:
+        if key in _changes_cache:
+            return _changes_cache[key]
+        result = read_particle_changes(output, input_star)
+        if len(_changes_cache) >= 2:
+            _changes_cache.pop(next(iter(_changes_cache)))
+        _changes_cache[key] = result
+        return result

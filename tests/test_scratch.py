@@ -59,6 +59,9 @@ def test_numbers_of_the_projects_jobs_are_not_reused(spa_copy):
     labels = [p.processes[job].type_label]
     assert taken_numbers(spa_copy, p, labels) == {123}
     assert taken_numbers(spa_copy, p, []) == set()  # only the job types with a scratch option are read
+    # a label RELION added to (relion.class3d.tomo, relion.autopick.log) is still that job type
+    p.processes[job].type_label = labels[0] + ".tomo"
+    assert taken_numbers(spa_copy, p, labels) == {123}
     for _ in range(50):
         opts = {SCRATCH_KEY: "/scratch/me"}
         got = assign(opts, spa_copy, p, labels, exists=lambda d: False)

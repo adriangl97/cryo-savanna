@@ -179,3 +179,23 @@ def test_working_directories_of_slurm_jobs_are_resolved_once(tmp_path, monkeypat
         assert [mapper.here(q) for q in queue] == [True, True, False, True, False]
         assert found["Class2D/job001/"].id == "3"
     assert sorted(asked) == sorted(str(w) for w in (project, tmp_path / "link", other))
+
+
+
+def test_micrographs_of_particles_are_found_as_numpy_finds_them():
+    from cryo_savanna.results import ctfrefine as C
+    from cryo_savanna.results.tables import Table
+    rng = np.random.default_rng(5)
+    names = [f"Mics/m{i:03d}.mrc" for i in rng.integers(0, 40, 3000)] + ["b.mrc", "B.mrc", "a b.mrc", "é.mrc", "b.mrc"]
+    want_names, want_inv = np.unique(np.asarray(names, dtype=object).astype(str), return_inverse=True)
+    got_names, got_inv = C._unique_names(names)
+    assert got_names == [str(n) for n in want_names] and np.array_equal(got_inv, want_inv.reshape(-1))
+    assert C._unique_names([])[0] == [] and len(C._unique_names([])[1]) == 0
+    values = rng.normal(size=len(names))
+    values[::7] = np.nan
+    s = C.per_micrograph(Table("particles", ["rlnMicrographName", "v"], {"rlnMicrographName": names, "v": values}), ["v"])
+    assert s.names == got_names and s.particles.sum() == len(names)
+    k = got_names.index("b.mrc")
+    mine = values[[i for i, n in enumerate(names) if n == "b.mrc"]]
+    assert s.particles[k] == 2 and s.mean["v"][k] == pytest.approx(np.nanmean(mine))
+

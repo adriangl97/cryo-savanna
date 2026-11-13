@@ -249,7 +249,8 @@ class SurfaceView(QWidget):
             r, self.frame, self._bounds, self.render_time, self.shown = result
             h, w, _ = r.rgb.shape
             rgba = np.dstack([r.rgb, np.where(r.hit, 255, 0).astype(np.uint8)])  # see-through where no surface
-            self.image = QImage(rgba.tobytes(), w, h, 4 * w, QImage.Format_RGBA8888)
+            # a copy: QImage only points at the bytes it is given, which not every Qt binding keeps alive
+            self.image = QImage(rgba.tobytes(), w, h, 4 * w, QImage.Format_RGBA8888).copy()
             self.hit_fraction = float(r.hit.mean())
             self.message = "" if r.hit.any() else "Nothing above this level"
         self.update()

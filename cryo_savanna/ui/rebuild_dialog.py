@@ -204,7 +204,7 @@ class RebuildDialog(QDialog):
             return
         try:
             name = adopt_folder(self.project_dir, folder, jt.label)
-        except (RebuildError, OSError) as e:
+        except (RuntimeError, OSError) as e:  # also the pipeline locked by RELION, or not readable just now
             QMessageBox.warning(self, "Add folder as job", str(e))
             return
         self.result = _busy(self.rescan, parent=self)

@@ -456,13 +456,15 @@ class CliCatalog:
     def _queue_groups(tabs: list[Tab], external: JobVariant) -> list[Tab]:
         """Give the queue rows the group they have in the External job window."""
         group_of = {r.keys: r.group for t in external.tabs for r in t.rows}
+        queue = group_of.get(("qsub",))  # the RELION_QSUB_EXTRA fields: with "qsub", as in RELION's windows
+
+        def grouped(r: Row) -> Row:
+            if r.keys in group_of:
+                return replace(r, group=group_of[r.keys])
+            return replace(r, group=queue) if r.keys[0].startswith("qsub_extra") else r
         out = []
         for t in tabs:
-            if t.label != "Running":
-                out.append(t)
-                continue
-            out.append(Tab(t.label, tuple(replace(r, group=group_of.get(r.keys)) if r.keys in group_of else r
-                                          for r in t.rows)))
+            out.append(Tab(t.label, tuple(grouped(r) for r in t.rows)) if t.label == "Running" else t)
         return out
 
 
