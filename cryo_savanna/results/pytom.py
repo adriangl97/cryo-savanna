@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import json
 import os
-import threading
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -23,14 +22,8 @@ from cryo_savanna.images.mrc import MrcReader
 from cryo_savanna.project.star import loop_columns, read_star
 from cryo_savanna.results.tables import Table
 from cryo_savanna.results.tomo import rows_by_name
-
-
-def _stamp(path: Path):
-    try:
-        st = os.stat(path)
-    except OSError:
-        return None
-    return st.st_mtime_ns, st.st_size
+from cryo_savanna.stamps import Cache
+from cryo_savanna.stamps import stamp as _stamp
 
 
 def _float(v) -> float | None:
@@ -98,18 +91,16 @@ class ScoreMap:
     std: float
 
 
-_SCORES: dict[str, tuple[tuple, ScoreMap]] = {}
-_SCORES_LOCK = threading.Lock()  # read in the viewers' thread pool: two views can read maps at once
+_SCORES = Cache(8)  # (path, stamp) -> ScoreMap
 
 
 def read_score_map(path: str | os.PathLike, sample_every: int = 7) -> ScoreMap:
     """Reads the whole map (a section block at a time). Cached by the file's stamp: a map is read once."""
     key = str(path)
-    st = _stamp(Path(path))
-    with _SCORES_LOCK:
-        hit = _SCORES.get(key)
-    if hit is not None and hit[0] == st:
-        return hit[1]
+    kept = (key, _stamp(path))
+    hit = _SCORES.get(kept)
+    if hit is not None:
+        return hit
     with MrcReader(path) as r:
         nz, ny, nx = r.nz, r.ny, r.nx
         mip = np.full((ny, nx), -np.inf, np.float32)
@@ -132,10 +123,7 @@ def read_score_map(path: str | os.PathLike, sample_every: int = 7) -> ScoreMap:
     std = float(np.sqrt(max(total2 / count - mean * mean, 0.0))) if count else 0.0
     out = ScoreMap(key, (nz, ny, nx), mip, np.concatenate(samples) if samples else np.empty(0), peak, peak_at,
                    mean, std)
-    with _SCORES_LOCK:
-        _SCORES[key] = (st, out)
-        while len(_SCORES) > 8:
-            _SCORES.pop(next(iter(_SCORES)))
+    _SCORES.put(kept, out)
     return out
 
 

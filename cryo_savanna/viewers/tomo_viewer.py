@@ -21,8 +21,6 @@ session, per project).
 from __future__ import annotations
 
 import os
-import threading
-from collections import OrderedDict
 from pathlib import Path
 
 import numpy as np
@@ -65,17 +63,11 @@ from cryo_savanna.viewers.image_canvas import ImageCanvas
 from cryo_savanna.viewers.plots import FigureGrid
 from cryo_savanna.viewers.star_table import RowFilter, TableModel, make_table_view
 from cryo_savanna.viewers.tasks import TaskError, Tasks
+from cryo_savanna.stamps import Cache
+from cryo_savanna.stamps import stamp as _stamp
 
 
 _WARP_FOLDERS: dict[str, list[str]] = {}  # project -> folders chosen for Warp's tomograms, this session
-
-
-def _stamp(path: Path):
-    try:
-        st = os.stat(path)
-    except OSError:
-        return None
-    return st.st_mtime_ns, st.st_size
 
 
 class NapariButton(QPushButton):
@@ -311,27 +303,21 @@ class SideView(pg.GraphicsView):
         self.on_click(p.x(), p.y())
 
 
-_SIDES: OrderedDict[tuple, object] = OrderedDict()  # (path, stamp) -> binned Volume for the side views
-_SIDES_LOCK = threading.Lock()
 SIDES_KEPT = 4
+_SIDES = Cache(SIDES_KEPT)  # (path, stamp) -> binned Volume for the side views
 
 
 def side_volume(path: str):
     """The binned copy of a tomogram that the side views show. Making it reads the whole tomogram, so
     the last few are kept (by the file's stamp): going back to a tomogram, or switching "beside it" on,
     reads nothing again. Only the binned copy is kept, never the full map."""
-    key = (os.path.realpath(path), _stamp(Path(path)))
-    with _SIDES_LOCK:
-        hit = _SIDES.get(key)
-        if hit is not None:
-            _SIDES.move_to_end(key)
-            return hit
+    key = (os.path.realpath(path), _stamp(path))
+    hit = _SIDES.get(key)
+    if hit is not None:
+        return hit
     side = load_volume(path, max_size=256)
     side.full = None  # sections come from the file: up to 128 MB per tomogram shown otherwise
-    with _SIDES_LOCK:
-        _SIDES[key] = side
-        while len(_SIDES) > SIDES_KEPT:
-            _SIDES.popitem(last=False)
+    _SIDES.put(key, side)
     return side
 
 

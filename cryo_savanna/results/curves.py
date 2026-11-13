@@ -4,7 +4,6 @@
 
 from __future__ import annotations
 
-import os
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -14,6 +13,7 @@ from cryo_savanna.project.star import StarError, loop_columns, read_star, read_s
 from cryo_savanna.results.classes import iterations
 from cryo_savanna.results.micrographs import motion_track
 from cryo_savanna.results.tables import Table
+from cryo_savanna.stamps import Cache, stamp
 
 
 @dataclass
@@ -129,24 +129,21 @@ def model_fsc(path: Path) -> Figure | None:
     return fig if fig.curves else None
 
 
-_head_cache: dict[tuple, dict] = {}
+_head_cache = Cache(4000)  # (file, blocks, stamp) -> the blocks: one model.star per iteration of every job looked at
 
 
 def _cached_head(path: Path, blocks: list[str]):
-    try:
-        st = os.stat(path)
-    except OSError:
+    st = stamp(path)
+    if st is None:
         return {}
-    key = (str(path), tuple(blocks), st.st_mtime_ns, st.st_size)
+    key = (str(path), tuple(blocks), st)
     hit = _head_cache.get(key)
     if hit is None:
         try:
             hit = read_star_head(path, blocks)
         except (OSError, StarError, ValueError):
             return {}
-        if len(_head_cache) > 4000:
-            _head_cache.clear()
-        _head_cache[key] = hit
+        _head_cache.put(key, hit)
     return hit
 
 

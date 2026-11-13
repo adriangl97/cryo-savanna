@@ -199,3 +199,50 @@ def test_micrographs_of_particles_are_found_as_numpy_finds_them():
     mine = values[[i for i, n in enumerate(names) if n == "b.mrc"]]
     assert s.particles[k] == 2 and s.mean["v"][k] == pytest.approx(np.nanmean(mine))
 
+
+def test_cache_keeps_the_last_results_and_makes_each_once():
+    import threading
+
+    from cryo_savanna.stamps import Cache, stamp
+    c = Cache(2)
+    c.put("a", 1)
+    c.put("b", 2)
+    assert c.get("a") == 1  # used: "b" is now the oldest
+    c.put("c", 3)
+    assert "b" not in c and c.get("a") == 1 and c.get("c") == 3 and len(c) == 2
+    assert c.get("b") is None and c.get("b", 7) == 7
+    made = []
+    assert c.get_or_make("none", lambda: made.append(1)) is None  # None is a result too: kept
+    assert c.get_or_make("none", lambda: made.append(1)) is None and made == [1]
+    # two threads asking for the same slow result at once: made once
+    slow, started = Cache(2), threading.Event()
+
+    def make():
+        started.set()
+        made.append("slow")
+        threading.Event().wait(0.2)
+        return "result"
+
+    got = []
+    threads = [threading.Thread(target=lambda: got.append(slow.get_or_make("k", make, one_at_a_time=True)))
+               for _ in range(2)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert got == ["result", "result"] and made.count("slow") == 1
+    c.clear()
+    assert len(c) == 0 and stamp(None) is None and stamp("/nonexistent/x") is None
+
+
+def test_stamp_changes_with_the_file(tmp_path):
+    from cryo_savanna.project.snapshot import stamp as old_name
+    from cryo_savanna.stamps import stamp
+    f = tmp_path / "f"
+    assert stamp(f) is None
+    f.write_text("a")
+    st = stamp(f)
+    assert st == (f.stat().st_mtime_ns, 1) and old_name is stamp
+    f.write_text("ab")
+    assert stamp(f) != st and stamp(str(f)) == stamp(f)
+

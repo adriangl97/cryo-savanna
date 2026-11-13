@@ -39,19 +39,10 @@ from cryo_savanna.results import ctfrefine as C
 from cryo_savanna.results.tables import Table
 from cryo_savanna.viewers.plots import TablePlot
 from cryo_savanna.viewers.tasks import TaskError, Tasks
+from cryo_savanna.stamps import stamp as _stamp
 
 DIVERGING = "CET-D1"  # blue - white - red, for signed values
 SEQUENTIAL = "viridis"
-
-
-def _stamp(path: Path | None):
-    if path is None:
-        return None
-    try:
-        st = os.stat(path)
-    except OSError:
-        return None
-    return st.st_mtime_ns, st.st_size
 
 
 def _fmt(v: float | None, digits: int = 3) -> str:

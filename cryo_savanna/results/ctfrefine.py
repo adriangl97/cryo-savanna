@@ -21,7 +21,6 @@ from __future__ import annotations
 
 import os
 import re
-import threading
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -29,6 +28,7 @@ import numpy as np
 
 from cryo_savanna.project.star import StarBlock, StarError, loop_columns, read_star_head
 from cryo_savanna.results.tables import Table
+from cryo_savanna.stamps import Cache, stamp
 
 OUTPUT = "particles_ctf_refine.star"
 
@@ -538,18 +538,11 @@ def micrographs_done(job_dir: Path, limit: int = 200_000) -> int:
 
 # ---------------------------------------------------------------------------- shared reads
 
-_changes_cache: dict[tuple, ParticleChanges | None] = {}
-_changes_lock = threading.Lock()
+_changes_cache = Cache(2)  # (output and its stamp, input and its stamp) -> ParticleChanges | None
 
 
 def _file_key(p: Path | None):
-    if p is None:
-        return None
-    try:
-        st = os.stat(p)
-    except OSError:
-        return (str(p), None)
-    return (str(p), st.st_mtime_ns, st.st_size)
+    return None if p is None else (str(p), stamp(p))
 
 
 def particle_changes(output: Path, input_star: Path | None = None) -> ParticleChanges | None:
@@ -557,11 +550,4 @@ def particle_changes(output: Path, input_star: Path | None = None) -> ParticleCh
     key = (_file_key(output), _file_key(input_star))
     # one read at a time: the views ask from the viewers' thread pool, and two asking for the same job at
     # once (its summary and its plots) would both read the particles; the second now finds the first's
-    with _changes_lock:
-        if key in _changes_cache:
-            return _changes_cache[key]
-        result = read_particle_changes(output, input_star)
-        if len(_changes_cache) >= 2:
-            _changes_cache.pop(next(iter(_changes_cache)))
-        _changes_cache[key] = result
-        return result
+    return _changes_cache.get_or_make(key, lambda: read_particle_changes(output, input_star), one_at_a_time=True)

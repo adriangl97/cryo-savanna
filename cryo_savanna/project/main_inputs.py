@@ -17,6 +17,7 @@ import threading
 from pathlib import Path
 
 from cryo_savanna.project.shared_json import update_json
+from cryo_savanna.stamps import stamp as file_stamp
 
 GUI_DIR = ".cryo-savanna"
 FILE = "main_inputs.json"
@@ -32,11 +33,7 @@ class MainInputs:
         self._session: dict[str, str | None] = {}  # changes not written (read-only), None = back to default
 
     def _file_stamp(self) -> tuple | None:
-        try:
-            st = self.path.stat()
-        except OSError:
-            return None
-        return st.st_mtime_ns, st.st_size
+        return file_stamp(self.path)
 
     def stamp(self) -> tuple:
         """Changes when the choices change (the file, or a choice of this session)."""

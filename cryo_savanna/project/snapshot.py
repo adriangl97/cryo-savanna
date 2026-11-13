@@ -31,20 +31,12 @@ from cryo_savanna.relion_consts import (
     STATUS_SUCCEEDED,
     job_type_for_label,
 )
+from cryo_savanna.stamps import Stamp, stamp  # noqa: F401 - also imported from here
 
-Stamp = tuple[int, int] | None  # (mtime_ns, size), None when the file is missing
 
 # Checked in this order, like PipeLine::checkProcessCompletion
 EXIT_MARKERS = ((RELION_JOB_EXIT_SUCCESS, STATUS_SUCCEEDED), (RELION_JOB_EXIT_FAILURE, STATUS_FAILED),
                 (RELION_JOB_EXIT_ABORTED, STATUS_ABORTED))
-
-
-def stamp(path: str | os.PathLike) -> Stamp:
-    try:
-        st = os.stat(path)
-    except OSError:
-        return None
-    return st.st_mtime_ns, st.st_size
 
 
 @dataclass

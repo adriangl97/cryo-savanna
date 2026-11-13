@@ -52,14 +52,7 @@ from cryo_savanna.viewers.plots import AnglesPlot, FigureGrid, TablePlot
 from cryo_savanna.viewers.star_table import StarTableView
 from cryo_savanna.viewers.tasks import TaskError, Tasks
 from cryo_savanna.viewers.volume_viewer import VolumeViewer
-
-
-def _stamp(path: Path):
-    try:
-        st = os.stat(path)
-    except OSError:
-        return None
-    return st.st_mtime_ns, st.st_size
+from cryo_savanna.stamps import stamp as _stamp
 
 
 def _dir_stamp(path: Path):

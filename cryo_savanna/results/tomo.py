@@ -30,6 +30,7 @@ from cryo_savanna.project.star import loop_columns, read_star
 from cryo_savanna.results.curves import Curve, Figure
 from cryo_savanna.results.micrographs import CLASS, MIC, class_counts
 from cryo_savanna.results.tables import Table, optics_value
+from cryo_savanna.stamps import stamp as _stamp
 
 TOMO_NAME = "rlnTomoName"
 TOMOGRAM_COLUMNS = [  # (column, title)
@@ -49,14 +50,6 @@ TILT_COLUMNS = [  # per-tilt values worth a column
 ]
 SERIES_COLUMNS = [("rlnTomoSizeX", "X"), ("rlnTomoSizeY", "Y"), ("rlnTomoSizeZ", "Z"),
                   ("rlnTomoTomogramBinning", "Binning"), ("rlnTomoTiltSeriesPixelSize", "Pixel (Å)")]
-
-
-def _stamp(path: Path):
-    try:
-        st = os.stat(path)
-    except OSError:
-        return None
-    return st.st_mtime_ns, st.st_size
 
 
 def columns_of(path: str | os.PathLike, block: str) -> list[str] | None:

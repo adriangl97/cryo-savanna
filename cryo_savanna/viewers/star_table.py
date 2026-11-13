@@ -27,6 +27,7 @@ from qtpy.QtWidgets import (
 from cryo_savanna.results.tables import Table, blocks_of, read_compact
 from cryo_savanna.viewers.plots import TablePlot
 from cryo_savanna.viewers.tasks import TaskError, Tasks
+from cryo_savanna.stamps import stamp as _stamp
 
 class TableModel(QAbstractTableModel):
     """Columns of a Table (all, or a chosen list with titles); numbers sort as numbers."""
@@ -499,9 +500,3 @@ class StarTableView(QWidget):
             self.view.scrollTo(idx)
 
 
-def _stamp(path: Path):
-    try:
-        st = path.stat()
-    except OSError:
-        return None
-    return st.st_mtime_ns, st.st_size

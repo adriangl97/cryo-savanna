@@ -39,6 +39,7 @@ The Qt tests run offscreen (`QT_QPA_PLATFORM=offscreen`), so no display is neede
 | `cryo_savanna/jobdefs/aretomo_jobs.py`, `cryo_savanna/aretomo_runner.py` | "Additional external jobs": AreTomo3's form and its runner (standard library only; it imports the helpers of `pytom_runner.py`, and both are copied into the project) |
 | `cryo_savanna/jobdefs/flags.py`, `jobdefs/help/` | Flags of the program behind each job's "Additional arguments", from `--help` (bundled 5.1.1 texts as fallback) |
 | `cryo_savanna/env/relion_env.py` | Reads `RELION_*` variables the same way RELION does |
+| `cryo_savanna/stamps.py` | `stamp()`: whether a file changed (what every reader and viewer compares before reading again), and `Cache`: the last few results of a slow read, shared by the viewers' threads |
 | `cryo_savanna/tools/validate.py` | Checks cryo-savanna against a real RELION install |
 | `tools/extract_jobdefs/` | Regenerates the job definitions from a RELION source tree |
 | `tools/bundle_help.py` | Regenerates the bundled `--help` texts from the validation dumps and the RELION source |

@@ -45,6 +45,7 @@ from cryo_savanna import mask_runner as M
 from cryo_savanna import pytom_runner as P
 from cryo_savanna.viewers.tasks import TaskError, Tasks
 from cryo_savanna.viewers.tomo_viewer import TomogramViewer
+from cryo_savanna.stamps import stamp as _stamp
 
 Z_TITLES = {M.Z_ALL: "All Z", M.Z_SLAB: "Between two planes"}
 POLY_PEN = (255, 170, 0)
@@ -52,14 +53,6 @@ PLANE_PENS = {"bottom": (0, 200, 255), "top": (255, 80, 200)}
 SHADE = (220, 60, 30, 90)  # outside the mask
 HELP = ("Drag the polygon's corners (click an edge to add one, right-click a corner to remove it). Between two "
         "planes: drag the lines in XZ and YZ (blue: lower Z, pink: upper Z) to move a plane, their ends to tilt it.")
-
-
-def _stamp(path: Path):
-    try:
-        st = os.stat(path)
-    except OSError:
-        return None
-    return st.st_mtime_ns, st.st_size
 
 
 class _Tomograms(TomogramViewer):
