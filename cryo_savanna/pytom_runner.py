@@ -70,7 +70,19 @@ SUCCESS, FAILURE, ABORTED = "RELION_JOB_EXIT_SUCCESS", "RELION_JOB_EXIT_FAILURE"
 ABORT_NOW = "RELION_JOB_ABORT_NOW"
 OUTPUT_NODES = "RELION_OUTPUT_NODES.star"
 KILL_GRACE_S = 30
-POLL_S = 1.0
+
+
+def _poll_seconds(default=1.0):
+    """How often the running programs are looked at. CRYO_SAVANNA_POLL_S changes it (cryo-savanna's own
+    tests run stand-in programs that end at once: a second per look is most of their time)."""
+    try:
+        v = float(os.environ.get("CRYO_SAVANNA_POLL_S", ""))
+    except ValueError:
+        return default
+    return v if 0 < v <= 60 else default
+
+
+POLL_S = _poll_seconds()
 
 # files of the jobs
 SUMMARY = "pytom_match.star"  # match: one row per tomogram
