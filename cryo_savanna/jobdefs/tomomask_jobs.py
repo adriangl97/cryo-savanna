@@ -4,7 +4,7 @@
 
 Like the AreTomo3 job (jobdefs/aretomo_jobs.py), a RELION External job (relion.external, tomo): the executable
 is "python3 .cryo-savanna/mask_runner.py masks" (a copy of cryo_savanna/mask_runner.py in the project, with the
-pytom_runner.py whose helpers it uses), every option of the form goes to External's "Additional arguments" as
+runner_common.py whose helpers it uses), every option of the form goes to External's "Additional arguments" as
 ``--key value``, and the form reads them back from there. The job writes starting masks
 (masks/<rlnTomoName>_mask.mrc); they are drawn in the job's Masks view (viewers/tomo_mask_view.py).
 """
@@ -16,18 +16,16 @@ from dataclasses import replace
 from pathlib import Path
 
 from cryo_savanna import mask_runner as M
-from cryo_savanna import pytom_runner as PR
+from cryo_savanna import runner_common as RC
 from cryo_savanna.env.relion_env import RelionEnv
-from cryo_savanna.jobdefs.aretomo_jobs import _install
+from cryo_savanna.jobdefs import runner_files
 from cryo_savanna.jobdefs.model import Group, JobDefs, OptionDef, Row, Tab
 from cryo_savanna.jobdefs.pytom_jobs import EXTERNAL, TOMO_NAMES, PytomVariant, _o, _radio, add_running_tab, decode
 from cryo_savanna.project.jobstar import JobStar
 from cryo_savanna.project.pipeline import Pipeline
 
 RUNNER = str(Path(M.__file__).resolve())
-HELPERS = str(Path(PR.__file__).resolve())
 RUNNER_IN_PROJECT = ".cryo-savanna/mask_runner.py"
-HELPERS_IN_PROJECT = ".cryo-savanna/pytom_runner.py"
 MASKS = M.MASKS
 TITLES = {MASKS: "Tomogram masks"}
 DESCRIPTIONS = {
@@ -46,7 +44,7 @@ def mask_options() -> tuple[list[OptionDef], list[Tab], dict[int, Group]]:
            "masks/<rlnTomoName>_mask.mrc in the job: the folder to give pytom's template matching or "
            "extraction ('Tomogram masks folder'). Use the tomograms pytom searches (they need the same size).",
            kind="inputnode", node_type="TomogramGroupMetadata.star.relion", pattern="Tomogram set STAR file (*.star)"),
-        _radio("tomo_kind", "Tomograms:", tuple(PR.TOMOGRAM_KINDS), "Reconstructed",
+        _radio("tomo_kind", "Tomograms:", tuple(RC.TOMOGRAM_KINDS), "Reconstructed",
                "Which tomogram of each row the masks are drawn on and take their size from (the denoised ones "
                "are often easier to see)."),
         TOMO_NAMES,
@@ -99,11 +97,8 @@ def mask_main_input(js: JobStar) -> str | None:
 
 
 def install_runner(project_dir: str | os.PathLike) -> Path:
-    """Put this cryo-savanna's mask_runner.py and the pytom_runner.py it imports into the project."""
-    _install(HELPERS, Path(project_dir) / HELPERS_IN_PROJECT)
-    dst = Path(project_dir) / RUNNER_IN_PROJECT
-    _install(RUNNER, dst)
-    return dst
+    """Put this cryo-savanna's mask_runner.py and the runner_common.py it imports into the project."""
+    return runner_files.install_runner(project_dir, RUNNER, RUNNER_IN_PROJECT)
 
 
 class TomoMaskCatalog:

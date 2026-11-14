@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
 #
 # Part of cryo-savanna; a copy of it goes into every project that runs its AreTomo3 jobs, and travels with it
-# (with pytom_runner.py, whose helpers it uses).
+# (with runner_common.py, whose helpers it uses).
 #
 # This program is free software; you can redistribute it and/or modify it under the terms of the GNU
 # General Public License as published by the Free Software Foundation; either version 2 of the License,
@@ -19,7 +19,7 @@ cryo-savanna's "Additional external jobs" menu makes External jobs whose executa
 
     python3 .cryo-savanna/aretomo_runner.py align
 
-(a copy of this file in the project, beside a copy of pytom_runner.py, whose STAR, MRC, process and
+(a copy of this file in the project, beside a copy of runner_common.py, whose STAR, MRC, process and
 module helpers it uses). RELION runs it as
 
     ... --o <job dir> [--in_movies|--in_mics|... F]... --j <threads> --<option> <value> ...
@@ -61,17 +61,16 @@ import statistics
 import struct
 import sys
 import time
-import traceback
 
 if __package__:  # imported from cryo-savanna
-    from cryo_savanna import pytom_runner as B
-else:  # run in a project: the copy of pytom_runner.py beside this one
+    from cryo_savanna import runner_common as C
+else:  # run in a project: the copy of runner_common.py beside this one
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-    import pytom_runner as B  # type: ignore[no-redef]
+    import runner_common as C  # type: ignore[no-redef]
 
-Usage, Aborted = B.Usage, B.Aborted
-yes, text, number, words, num = B.yes, B.text, B.number, B.words, B.num
-_f, _rel, _touch = B._f, B._rel, B._touch
+Usage, Aborted = C.Usage, C.Aborted
+yes, text, number, words, num = C.yes, C.text, C.number, C.words, C.num
+_f, _rel, _touch = C._f, C._rel, C._touch
 
 ALIGN, STACK = "align", "_stack"  # _stack: internal, builds the stacks of one tilt series
 MODES = (ALIGN,)
@@ -115,8 +114,8 @@ MRC_MODES = {0: "b", 1: "h", 2: "f", 6: "H", 12: "e"}  # MRC mode -> struct/arra
 _ITEM = {"b": 1, "h": 2, "f": 4, "H": 2, "e": 2}
 
 
-def say(msg):
-    print(" ++++ AreTomo3: " + msg, flush=True)
+WHO = "AreTomo3"  # say(): " ++++ AreTomo3: ..."
+say = C.say
 
 
 # ---------------------------------------------------------------------------- tilt series from RELION
@@ -126,7 +125,7 @@ def tilt_series_rows(opts):
     star = text(opts, "in_tiltseries")
     if not star or not os.path.isfile(star):
         raise Usage("input tilt-series STAR file not found: %r" % star)
-    b = B.loop_block(star, "global")
+    b = C.loop_block(star, "global")
     for col in (TOMO_NAME, TS_STAR):
         if col not in b.columns:
             raise Usage("%s: no %s (not a RELION 5 tilt-series set)" % (star, col))
@@ -152,7 +151,7 @@ def per_tilt(row, sort_col):
     star = row[TS_STAR]
     if not os.path.isfile(star):
         raise Usage("%s: tilt-series STAR file not found: %s" % (row[TOMO_NAME], star))
-    b = B.loop_block(star, row[TOMO_NAME])
+    b = C.loop_block(star, row[TOMO_NAME])
     if "rlnMicrographName" not in b.columns:
         raise Usage("%s: no rlnMicrographName in %s (a tilt series before motion correction? Use the "
                     "output of MotionCorr, CtfFind or Exclude tilt images)" % (row[TOMO_NAME], star))
@@ -628,7 +627,7 @@ def collect(ts, opts):
     d = os.path.dirname(p["star"])
     if not os.path.isdir(d):
         os.makedirs(d)
-    B.write_star(p["star"], [(ts["name"], None, cols, [[t.get(c, "") for c in cols] for t in kept])])
+    C.write_star(p["star"], [(ts["name"], None, cols, [[t.get(c, "") for c in cols] for t in kept])])
     return info
 
 
@@ -706,7 +705,7 @@ def write_tables(job_dir, opts, columns, rows, state):
                       v(i.get("axis")), v(i.get("thickness"), "%.1f"), v(i.get("alpha")), v(i.get("beta")),
                       v(i.get("ctf_res"))])
     general = {GEN_TS_FILE: text(opts, "in_tiltseries"), GEN_ALN_MODE: text(opts, "alignment") or ALIGN_ARETOMO}
-    B.write_star(os.path.join(job_dir, SUMMARY), [("general", general, None, None), ("global", None, summary_cols, table)])
+    C.write_star(os.path.join(job_dir, SUMMARY), [("general", general, None, None), ("global", None, summary_cols, table)])
 
     done = [r for r in rows if state[r[TOMO_NAME]]["status"] == "done"]
     base = [c for c in columns if c not in TOMOGRAM_COLS and not c.startswith("savannaPytom") and c != COL_ALN]
@@ -730,13 +729,13 @@ def write_tables(job_dir, opts, columns, rows, state):
         return out
     if not use_input:
         cols = base + [COL_ALN]
-        B.write_star(os.path.join(job_dir, ALIGNED), [("global", None, cols, rows_of(cols, False))])
+        C.write_star(os.path.join(job_dir, ALIGNED), [("global", None, cols, rows_of(cols, False))])
     halves = any("rlnTomoReconstructedTomogramHalf1" in state[r[TOMO_NAME]].get("tomo", {}) for r in done)
     cols = base + [COL_ALN, "rlnTomoReconstructedTomogram", "rlnTomoSizeX", "rlnTomoSizeY", "rlnTomoSizeZ",
                    "rlnTomoTomogramBinning"]
     if halves:
         cols += ["rlnTomoReconstructedTomogramHalf1", "rlnTomoReconstructedTomogramHalf2"]
-    B.write_star(os.path.join(job_dir, TOMOGRAMS), [("global", None, cols, rows_of(cols, True))])
+    C.write_star(os.path.join(job_dir, TOMOGRAMS), [("global", None, cols, rows_of(cols, True))])
 
 
 # ---------------------------------------------------------------------------- the job
@@ -776,7 +775,7 @@ def run_align(sup, job_dir, threads, opts):
                 say("%s: done before, but %s: running it again" % (name, e))
     write_tables(job_dir, opts, columns, rows, state)
 
-    ids = B.gpu_ids(opts)
+    ids = C.gpu_ids(opts)
     per_gpu = max(1, number(opts, "per_gpu", int, what="Tilt series per GPU") or 1)
     slots = [g for g in ids for _ in range(per_gpu)]
     todo = [r[TOMO_NAME] for r in rows if state[r[TOMO_NAME]]["status"] != "done"]
@@ -793,19 +792,19 @@ def run_align(sup, job_dir, threads, opts):
                     say("%s: %s" % (name, note))
                 rc = yield [sys.executable, os.path.abspath(__file__), STACK, ts["paths"]["spec"]], s["log"]
                 if rc != 0:
-                    B._show_tail(s["log"])
+                    C._show_tail(s["log"])
                     raise Usage("%s: making the tilt-series stack failed (log: %s)" % (name, s["log"]))
                 say("%s: AreTomo3 on GPU %s" % (name, gpu))
                 rc = yield aretomo_command(opts, ts, gpu), s["log"]
                 s["seconds"] = time.time() - t0
                 if rc != 0:
-                    B._show_tail(s["log"])
+                    C._show_tail(s["log"])
                     raise Usage("%s: AreTomo3 exited with %s (log: %s)" % (name, rc, s["log"]))
                 try:
                     s["info"] = collect(ts, opts)
                     s["tomo"] = tomogram_values(ts, opts)
                 except Usage:
-                    B._show_tail(s["log"])
+                    C._show_tail(s["log"])
                     raise
                 if not yes(opts, "keep_stacks"):
                     remove_stacks(ts)
@@ -820,7 +819,7 @@ def run_align(sup, job_dir, threads, opts):
         write_tables(job_dir, opts, columns, rows, state)
 
     try:
-        B.run_parallel(sup, [task(n) for n in todo], slots, changed)
+        C.run_parallel(sup, [task(n) for n in todo], slots, changed)
     except Aborted:
         for s in state.values():
             if s["status"] == "running":
@@ -838,26 +837,26 @@ def run_align(sup, job_dir, threads, opts):
 
 
 def run(argv):
-    mode, job_dir, threads, opts = B.parse(argv, MODES)
-    B.say = say  # in this process, the helpers' messages (running: ..., module load ...) are AreTomo3's
-    for f in (B.SUCCESS, B.FAILURE, B.ABORTED):
+    mode, job_dir, threads, opts = C.parse(argv, MODES)
+    C.WHO = WHO  # the helpers' messages too (running: ..., module load ...)
+    for f in (C.SUCCESS, C.FAILURE, C.ABORTED):
         if os.path.exists(os.path.join(job_dir, f)):
             os.remove(os.path.join(job_dir, f))
-    sup = B.Supervisor(job_dir)
+    sup = C.Supervisor(job_dir, hint=" (is the AreTomo3 executable right?)")
     say("cryo-savanna AreTomo3 %s, job %s" % (mode, job_dir))
     try:
-        B.load_modules(opts)
+        C.load_modules(opts)
         nodes = run_align(sup, job_dir, threads, opts)
     except Aborted:
-        _touch(os.path.join(job_dir, B.ABORTED))
+        _touch(os.path.join(job_dir, C.ABORTED))
         return 128 + sup.stopped if sup.stopped else 1
     except Usage as e:
         print("ERROR: " + str(e), file=sys.stderr, flush=True)
-        _touch(os.path.join(job_dir, B.FAILURE))
+        _touch(os.path.join(job_dir, C.FAILURE))
         return 1
-    B.write_output_nodes(job_dir, [(_rel(p), t) for p, t in nodes])
+    C.write_output_nodes(job_dir, [(_rel(p), t) for p, t in nodes])
     say("done")
-    _touch(os.path.join(job_dir, B.SUCCESS))
+    _touch(os.path.join(job_dir, C.SUCCESS))
     return 0
 
 
@@ -869,17 +868,7 @@ def main():
         except (Usage, OSError, ValueError, KeyError, IndexError) as e:
             print("ERROR: %s" % e, file=sys.stderr, flush=True)
             sys.exit(1)
-    try:
-        sys.exit(run(argv))
-    except Usage as e:
-        print("cryo-savanna aretomo_runner: " + str(e), file=sys.stderr, flush=True)
-        B._fail(argv)
-        sys.exit(2)
-    except Exception:  # anything else: still an exit file, or RELION shows the job running for ever
-        traceback.print_exc()
-        sys.stderr.flush()
-        B._fail(argv)
-        sys.exit(1)
+    C.main(run)
 
 
 if __name__ == "__main__":

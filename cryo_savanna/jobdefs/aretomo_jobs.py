@@ -4,7 +4,7 @@
 
 Like the pytom jobs (jobdefs/pytom_jobs.py), a RELION External job (relion.external, tomo): the executable
 is "python3 .cryo-savanna/aretomo_runner.py align" (a copy of cryo_savanna/aretomo_runner.py in the project,
-with the pytom_runner.py whose helpers it uses, put there before such a job is added or run), every option
+with the runner_common.py whose helpers it uses, put there before such a job is added or run), every option
 of the form goes to External's "Additional arguments" as ``--key value``, and the form reads them back
 from there (clone, continue, overwrite). The input tilt-series set also goes in an External input field,
 so the job hangs under the job it reads from.
@@ -15,13 +15,12 @@ AreTomo3 itself is a program the runner starts (its executable, after the job's 
 from __future__ import annotations
 
 import os
-import uuid
 from dataclasses import replace
 from pathlib import Path
 
 from cryo_savanna import aretomo_runner as A
-from cryo_savanna import pytom_runner as PR
 from cryo_savanna.env.relion_env import RelionEnv
+from cryo_savanna.jobdefs import runner_files
 from cryo_savanna.jobdefs.model import Group, JobDefs, OptionDef, Row, Tab
 from cryo_savanna.jobdefs.pytom_jobs import (
     CUDA_ENV_VAR,
@@ -38,9 +37,7 @@ from cryo_savanna.project.jobstar import JobStar
 from cryo_savanna.project.pipeline import Pipeline
 
 RUNNER = str(Path(A.__file__).resolve())
-HELPERS = str(Path(PR.__file__).resolve())  # pytom_runner.py: the runner imports its helpers
 RUNNER_IN_PROJECT = ".cryo-savanna/aretomo_runner.py"
-HELPERS_IN_PROJECT = ".cryo-savanna/pytom_runner.py"
 ALIGN = A.ALIGN
 TITLES = {ALIGN: "AreTomo3 alignment and reconstruction"}
 DESCRIPTIONS = {
@@ -194,25 +191,9 @@ def aretomo_main_input(js: JobStar) -> str | None:
     return value or None
 
 
-def _install(src: str, dst: Path) -> None:
-    data = Path(src).read_bytes()
-    try:
-        if dst.read_bytes() == data:
-            return
-    except OSError:
-        pass
-    dst.parent.mkdir(parents=True, exist_ok=True)
-    tmp = dst.with_name(f"{dst.name}.{uuid.uuid4().hex}.tmp")
-    tmp.write_bytes(data)
-    os.replace(tmp, dst)
-
-
 def install_runner(project_dir: str | os.PathLike) -> Path:
-    """Put this cryo-savanna's aretomo_runner.py and the pytom_runner.py it imports into the project."""
-    _install(HELPERS, Path(project_dir) / HELPERS_IN_PROJECT)
-    dst = Path(project_dir) / RUNNER_IN_PROJECT
-    _install(RUNNER, dst)
-    return dst
+    """Put this cryo-savanna's aretomo_runner.py and the runner_common.py it imports into the project."""
+    return runner_files.install_runner(project_dir, RUNNER, RUNNER_IN_PROJECT)
 
 
 class AretomoCatalog:

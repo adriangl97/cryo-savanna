@@ -300,7 +300,8 @@ class MainWindow(QMainWindow):
 
         mb = self.menuBar()
         project = mb.addMenu("Project")
-        for a in (self.act_open, self.act_refresh, None, self.actions.act_import, self.actions.act_undelete, None,
+        for a in (self.act_open, self.act_refresh, None, self.actions.act_import, self.actions.act_undelete,
+                  self.actions.act_disk, None,
                   self.act_prefs, None, act_quit):
             project.addSeparator() if a is None else project.addAction(a)
         mb.addMenu(self.actions.job_menu)

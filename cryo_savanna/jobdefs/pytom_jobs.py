@@ -5,7 +5,8 @@
 Both are RELION External jobs (relion.external, tomo), so relion_pipeliner runs them (locally or through
 the queue, as any job), the pipeline links them to their inputs and outputs, and RELION's own GUI can
 open, continue and rerun them. The executable is "python3 .cryo-savanna/pytom_runner.py match|extract"
-(a copy of cryo_savanna/pytom_runner.py in the project, put there before such a job is added or run).
+(a copy of cryo_savanna/pytom_runner.py in the project, with the runner_common.py it imports, put there
+before such a job is added or run).
 Every option of the form is written to External's "Additional arguments" as ``--key value`` (shell
 quoted), which the runner reads after RELION's ``--j``; the form reads them back from there (clone,
 continue, overwrite). Pipeline files among the inputs also go in External's input fields, so the job
@@ -23,12 +24,12 @@ import re
 import shlex
 import subprocess
 import threading
-import uuid
 from dataclasses import dataclass, replace
 from pathlib import Path
 
 from cryo_savanna import pytom_runner as R
 from cryo_savanna.env.relion_env import RelionEnv
+from cryo_savanna.jobdefs import runner_files
 from cryo_savanna.jobdefs.cli_tools import INPUT_SLOTS, RUNNING_KEYS
 from cryo_savanna.jobdefs.model import Group, JobDefs, JobVariant, OptionDef, Row, Tab
 from cryo_savanna.project.jobstar import JobStar
@@ -525,19 +526,9 @@ def pytom_main_input(js: JobStar) -> str | None:
 
 
 def install_runner(project_dir: str | os.PathLike) -> Path:
-    """Put this cryo-savanna's pytom_runner.py into the project (RUNNER_IN_PROJECT), replaced in one step."""
-    dst = Path(project_dir) / RUNNER_IN_PROJECT
-    src = Path(RUNNER).read_bytes()
-    try:
-        if dst.read_bytes() == src:
-            return dst
-    except OSError:
-        pass
-    dst.parent.mkdir(parents=True, exist_ok=True)
-    tmp = dst.with_name(f"{dst.name}.{uuid.uuid4().hex}.tmp")
-    tmp.write_bytes(src)
-    os.replace(tmp, dst)
-    return dst
+    """Put this cryo-savanna's pytom_runner.py (and the runner_common.py it imports) into the project
+    (RUNNER_IN_PROJECT), each replaced in one step."""
+    return runner_files.install_runner(project_dir, RUNNER, RUNNER_IN_PROJECT)
 
 
 def add_running_tab(options: dict[str, OptionDef], tabs: list[Tab], groups: dict[int, Group],

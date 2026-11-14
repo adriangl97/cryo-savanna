@@ -102,6 +102,36 @@ polling interval (Preferences, or `--poll`), and views of running jobs read new 
   `#SBATCH --job-name=XXXnameXXX` (RELION fills in the job directory) makes this direct, and squeue
   readable for everyone.
 
+## Disk usage
+
+**Project → Disk usage…** measures the project in the background, as `du` does: the space files take on
+disk, links not followed (the movies an Import job links to are not counted) and hard-linked files
+counted once. On a large project on a network file system this takes a while; the window stays usable
+meanwhile, and **Refresh** measures again.
+
+- **Jobs**: each job of the pipeline with its size and number of files, and what a **gentle** or
+  **harsh** clean would move. These follow RELION's own rules (`relion_pipeliner --gentle_clean` /
+  `--harsh_clean`): only jobs that finished successfully are cleaned, and some types never are (Import,
+  ManualPick, Select, MaskCreate, JoinStar, LocalRes; "—" in the table). Class2D, Class3D, Refine3D,
+  InitialModel and MultiBody lose every iteration but the last one and those the pipeline uses;
+  MotionCorr's gentle clean takes its logs and harsh its micrographs; Extract's harsh clean takes the
+  particle stacks, so the jobs that use them cannot run again. Select jobs and **Clean (gentle)** or
+  **Clean (harsh)** cleans them, one after another, through `relion_pipeliner`. A job with a
+  `NO_HARSH_CLEAN` file is left out of harsh cleaning, as RELION's own "clean all" does. Double-click a
+  job to select it in the main window.
+- **By type**: the same, added up per job type, with Trash/ and the other files, as a share of the
+  project.
+- **Trash**: what is in Trash/, one entry per job: a deleted job (it can be undeleted), the earlier run
+  of an overwritten job, or the files cleaned from a job.
+- **Other files**: everything that is neither a job of the pipeline nor in Trash/ (job folders run
+  outside the pipeline, links, files at the top of the project).
+
+RELION does not delete what it cleans: it moves it to Trash/, where it takes as much space as before.
+The space comes free only when Trash/ is emptied: select entries on the Trash tab and **Empty
+selected…**, or **Empty Trash/…** for all of them. This deletes them for good. The confirmation lists
+what goes, and names the deleted jobs that can then no longer be undeleted. With `--readonly` the
+window only shows.
+
 ## Results
 
 Each job gets the tabs that fit what it made:

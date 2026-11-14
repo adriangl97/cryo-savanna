@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
 #
 # Part of cryo-savanna; a copy of it goes into every project that runs its tomogram mask jobs, and travels
-# with it.
+# with it (with runner_common.py, whose helpers it uses).
 #
 # This program is free software; you can redistribute it and/or modify it under the terms of the GNU
 # General Public License as published by the Free Software Foundation; either version 2 of the License,
@@ -19,12 +19,12 @@ cryo-savanna's "Additional external jobs" menu makes External jobs whose executa
 
     python3 .cryo-savanna/mask_runner.py masks
 
-(a copy of this file in the project, beside a copy of pytom_runner.py, whose STAR, MRC and job helpers it
+(a copy of this file in the project, beside a copy of runner_common.py, whose STAR, MRC and job helpers it
 uses). RELION runs it as ``... --o <job dir> [--in_* F]... --j <threads> --<option> <value> ...``. It needs
 nothing but the standard library (Python 3.6+: RELION may start it with the system python3).
 
 For each tomogram of a RELION 5 tomograms.star, the job writes masks/<rlnTomoName>_mask.mrc (the name
-pytom's wrapper looks for in a masks folder: pytom_runner.TOMO_MASK_SUFFIX), a binary mask (int8, 1 inside,
+pytom's wrapper looks for in a masks folder: runner_common.TOMO_MASK_SUFFIX), a binary mask (int8, 1 inside,
 0 outside) of the tomogram's size and voxel size. A mask is
 
 - a polygon in XY (its corners in voxels, from the tomogram's centre), extruded through Z,
@@ -46,16 +46,15 @@ import math
 import os
 import struct
 import sys
-import traceback
 
 if __package__:  # imported from cryo-savanna
-    from cryo_savanna import pytom_runner as B
-else:  # run in a project: the copy of pytom_runner.py beside this one
+    from cryo_savanna import runner_common as C
+else:  # run in a project: the copy of runner_common.py beside this one
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-    import pytom_runner as B  # type: ignore[no-redef]
+    import runner_common as C  # type: ignore[no-redef]
 
-Usage = B.Usage
-text, number, _rel, _touch = B.text, B.number, B._rel, B._touch
+Usage = C.Usage
+text, number, _rel, _touch = C.text, C.number, C._rel, C._touch
 
 MASKS = "masks"
 MODES = (MASKS,)
@@ -63,7 +62,7 @@ MASK_DIR = "masks"
 GEOMETRY = "masks.json"
 LIST = "tomogram_masks.star"
 NODE_LIST = "ProcessData.star.cryosavanna.tomogram_masks"
-SUFFIX = B.TOMO_MASK_SUFFIX
+SUFFIX = C.TOMO_MASK_SUFFIX
 COL_MASK = "savannaTomogramMask"
 
 Z_ALL, Z_SLAB = "all", "slab"
@@ -72,8 +71,8 @@ VERSION = 1
 EPS = 1e-6  # voxel centres on a plane are inside it
 
 
-def say(text_):
-    print(" ++++ tomogram masks: " + text_, flush=True)
+WHO = "tomogram masks"  # say(): " ++++ tomogram masks: ..."
+say = C.say
 
 
 def mask_path(job_dir, name):
@@ -279,7 +278,7 @@ def save_masks(job_dir, data, progress=None, project_dir=None):
             heir = mask_path(job_dir, linkers[0])
             os.replace(p, heir)
             for u in linkers[1:]:
-                B._link(heir, mask_path(job_dir, u))
+                C._link(heir, mask_path(job_dir, u))
     # real files there now, by key and by content
     by_key, by_sha = {}, {}  # by_key: geometry key -> (file, SHA-1 of its voxels)
     for n in unchanged:
@@ -295,14 +294,14 @@ def save_masks(job_dir, data, progress=None, project_dir=None):
         if progress is not None:
             progress(n)
         same = by_key.get(keys[n])
-        if same is not None and B._link(same[0], p):
+        if same is not None and C._link(same[0], p):
             files[n] = {"key": keys[n], "sha1": same[1]}
             done[n] = "linked"
             continue
         tmp = os.path.join(d, ".%s.tmp" % (n + SUFFIX))
         sha = write_mask(tmp, t["shape"], t.get("voxel") or 1.0, t["geometry"])
         same = by_sha.get((tuple(t["shape"]), sha))
-        if same is not None and B._link(same, p):
+        if same is not None and C._link(same, p):
             os.remove(tmp)
             done[n] = "linked"
         else:
@@ -333,13 +332,13 @@ def write_list(job_dir, data, project_dir=None):
             return _rel(path)
         return os.path.relpath(os.path.abspath(path), os.path.abspath(project_dir))
     rows = [[n, rel(mask_path(job_dir, n))] for n in data["tomograms"]]
-    B.write_star(os.path.join(job_dir, LIST), [("global", None, [B.TOMO_NAME, COL_MASK], rows)])
+    C.write_star(os.path.join(job_dir, LIST), [("global", None, [C.TOMO_NAME, COL_MASK], rows)])
 
 
 # ---------------------------------------------------------------------------- the job
 
 def run_masks(job_dir, opts):
-    star, _, rows = B.tomogram_rows(opts)
+    star, _, rows = C.tomogram_rows(opts)
     data = read_geometry(job_dir)
     data["version"] = VERSION
     data["in_tomograms"] = star
@@ -349,10 +348,10 @@ def run_masks(job_dir, opts):
     margin = number(opts, "start_margin", what="Margin") or 0.0
     tomos = data["tomograms"]
     for row in rows:
-        name = row[B.TOMO_NAME]
-        tomogram = B.tomogram_of(row, opts)
-        nx, ny, nz, header_voxel = B.mrc_header(tomogram)
-        px, binning = B._f(row, "rlnTomoTiltSeriesPixelSize"), B._f(row, "rlnTomoTomogramBinning")
+        name = row[C.TOMO_NAME]
+        tomogram = C.tomogram_of(row, opts)
+        nx, ny, nz, header_voxel = C.mrc_header(tomogram)
+        px, binning = C._f(row, "rlnTomoTiltSeriesPixelSize"), C._f(row, "rlnTomoTomogramBinning")
         voxel = px * binning if px and binning else header_voxel
         old = tomos.get(name)
         shape = [nx, ny, nz]
@@ -374,9 +373,9 @@ def run_masks(job_dir, opts):
 
 
 def run(argv):
-    mode, job_dir, _threads, opts = B.parse(argv, MODES)
-    B.say = say
-    for f in (B.SUCCESS, B.FAILURE, B.ABORTED):
+    mode, job_dir, _threads, opts = C.parse(argv, MODES)
+    C.WHO = WHO  # the helpers' messages too (running: ..., module load ...)
+    for f in (C.SUCCESS, C.FAILURE, C.ABORTED):
         if os.path.exists(os.path.join(job_dir, f)):
             os.remove(os.path.join(job_dir, f))
     say("cryo-savanna tomogram masks, job %s" % job_dir)
@@ -384,27 +383,16 @@ def run(argv):
         nodes = run_masks(job_dir, opts)
     except Usage as e:
         print("ERROR: " + str(e), file=sys.stderr, flush=True)
-        _touch(os.path.join(job_dir, B.FAILURE))
+        _touch(os.path.join(job_dir, C.FAILURE))
         return 1
-    B.write_output_nodes(job_dir, [(_rel(p), t) for p, t in nodes])
+    C.write_output_nodes(job_dir, [(_rel(p), t) for p, t in nodes])
     say("done: edit the masks in the job's Masks view in cryo-savanna")
-    _touch(os.path.join(job_dir, B.SUCCESS))
+    _touch(os.path.join(job_dir, C.SUCCESS))
     return 0
 
 
 def main():
-    argv = sys.argv[1:]
-    try:
-        sys.exit(run(argv))
-    except Usage as e:
-        print("cryo-savanna mask_runner: " + str(e), file=sys.stderr, flush=True)
-        B._fail(argv)
-        sys.exit(2)
-    except Exception:  # anything else: still an exit file, or RELION shows the job running for ever
-        traceback.print_exc()
-        sys.stderr.flush()
-        B._fail(argv)
-        sys.exit(1)
+    C.main(run)
 
 
 if __name__ == "__main__":

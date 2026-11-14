@@ -189,10 +189,11 @@ def test_names_and_main_input(tomo_project):
     assert CTF_SET in (o["in_mov"], o["in_mic"], o["in_part"], o["in_coords"], o["in_3dref"], o["in_mask"])
 
 
-def test_install_puts_both_runners(tmp_path):
+def test_install_puts_the_runner_and_its_helpers(tmp_path):
+    from cryo_savanna import runner_common
     install_runner(tmp_path)
     assert (tmp_path / ".cryo-savanna/aretomo_runner.py").read_bytes() == open(A.__file__, "rb").read()
-    assert (tmp_path / ".cryo-savanna/pytom_runner.py").read_bytes() == open(P.__file__, "rb").read()
+    assert (tmp_path / ".cryo-savanna/runner_common.py").read_bytes() == open(runner_common.__file__, "rb").read()
 
 
 # ---------------------------------------------------------------------------- files

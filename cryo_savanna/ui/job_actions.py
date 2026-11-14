@@ -44,6 +44,7 @@ from cryo_savanna.jobdefs.pytom_jobs import TITLES as PYTOM_TITLES
 from cryo_savanna.jobdefs.pytom_jobs import warm_defaults as warm_pytom_defaults
 from cryo_savanna.jobdefs.pytom_jobs import (DESCRIPTIONS as PYTOM_DESCRIPTIONS, EXTRACT as PYTOM_EXTRACT,
                                              MATCH as PYTOM_MATCH, PytomVariant, last_settings, quoted_values)
+from cryo_savanna.project import disk_usage
 from cryo_savanna.project.jobstar import JobStar, read_last_used
 from cryo_savanna.project.ops import OpsError, PipelineOps
 from cryo_savanna.project.pipeline import Pipeline
@@ -113,7 +114,7 @@ class _Task(QRunnable):
     def run(self) -> None:
         try:
             result = self.fn()
-        except (OpsError, PipelinerError, RebuildError) as e:
+        except (OpsError, PipelinerError, RebuildError, disk_usage.TrashError) as e:
             self.signals.error.emit(str(e))
         except Exception as e:  # anything else: report, never kill the GUI
             self.signals.error.emit(f"{type(e).__name__}: {e}")
@@ -284,6 +285,9 @@ class JobActions(QObject):
         self.act_delete = self._act("Delete…", lambda: self.delete(False), "Del", "Move the job to Trash/")
         self.act_delete_all = self._act("Delete with all downstream jobs…", lambda: self.delete(True))
         self.act_undelete = self._act("Undelete…", self.undelete, tip="Put a job back from Trash/")
+        self.act_disk = self._act("Disk usage…", self.show_disk_usage,
+                                  tip="How much space each job, job type and Trash/ take; clean jobs, empty Trash/")
+        self._disk_window = None
         self.act_import = self._act("Add jobs run outside the pipeline…", self.import_jobs,
                                     tip="Add job folders the pipeline does not have (jobs run from the command line), "
                                         "read from their job.star and logs")
@@ -430,6 +434,7 @@ class JobActions(QObject):
         self.act_harsh.setEnabled(self.act_gentle.isEnabled())
         self.act_undelete.setEnabled(writable and self._has_trash)
         self.act_import.setEnabled(writable)
+        self.act_disk.setEnabled(snap is not None)  # read-only too: only to look
         self.act_star.setEnabled(info is not None)  # read-only too: for the session only (project/stars.py)
         self.act_star.setChecked(info is not None and info.starred)
         self.editor.set_permissions(self.readonly, has_pipeliner, why)
@@ -1042,10 +1047,38 @@ class JobActions(QObject):
     def clean(self, harsh: bool) -> None:
         job = self.current
         kind = "harsh" if harsh else "gentle"
-        if QMessageBox.question(self.window, "Clean", f"Do a {kind} clean of {self._label(job)}?\n"
-                                "Deleted files cannot be recovered.") != QMessageBox.Yes:
+        if QMessageBox.question(self.window, "Clean", f"Do a {kind} clean of {self._label(job)}?\n\n"
+                                "RELION moves the files it cleans to Trash/: they take space until Trash/ is "
+                                "emptied (Project → Disk usage…).") != QMessageBox.Yes:
             return
         self._run(f"Clean {self._label(job)}", lambda: self.pipeliner.clean(job, harsh))
+
+    def clean_jobs(self, jobs: list[str], harsh: bool, done: Callable | None = None) -> None:
+        """Clean several jobs, one after another (Disk usage window; it asked already)."""
+        kind = "harsh" if harsh else "gentle"
+
+        def work() -> None:
+            for job in jobs:
+                self.pipeliner.clean(job, harsh)
+
+        what = f"Clean ({kind}) {self._label(jobs[0])}" if len(jobs) == 1 else f"Clean ({kind}) {len(jobs)} jobs"
+        self._run(what, work, done=lambda _: done() if done else None, on_error=lambda _: done() if done else None)
+
+    def empty_trash(self, entries: list[str], done: Callable | None = None) -> None:
+        """Delete entries of Trash/ for good (Disk usage window; it asked already)."""
+        project = self.project_dir
+
+        def work() -> None:
+            errors = disk_usage.empty_trash(project, entries)
+            if errors:
+                raise disk_usage.TrashError("Not everything could be removed:\n" + "\n".join(errors[:20]))
+
+        self._run("Empty Trash/", work, done=lambda _: done() if done else None,
+                  on_error=lambda _: done() if done else None)
+
+    def show_disk_usage(self) -> None:
+        from cryo_savanna.ui import disk_usage as window
+        self._disk_window = window.show(self, self.window, self._disk_window)
 
     # ------------------------------------------------------------------ pipeline operations
     def set_alias(self) -> None:
