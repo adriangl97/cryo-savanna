@@ -193,8 +193,9 @@ def write_class_selection(inp: ClassInput, job: str, selected: list[int], recent
     if regroup > 0:
         if inp.groups is None:
             raise SelectionError(f"{inp.model}: no model_groups to regroup with")
-        out = StarBlock("particles", list(columns), rows, True)
-        result.messages.append(regroup_particles(out, inp.groups, regroup))
+        table = StarBlock("particles", list(columns), rows, True)
+        result.messages.append(regroup_particles(table, inp.groups, regroup))
+        out: StarBlock | FormattedLoop = table
     else:
         out = FormattedLoop("particles", list(columns), rows)
     out_dir.mkdir(parents=True, exist_ok=True)

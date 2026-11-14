@@ -11,6 +11,8 @@ import pytest
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 # thumbnails of the test projects go to a temporary directory, not ~/.cache
 os.environ.setdefault("CRYO_SAVANNA_CACHE", tempfile.mkdtemp(prefix="cryo_savanna_cache_"))
+# the runners (pytom, AreTomo3, masks) look at their stand-in programs often: these end at once
+os.environ.setdefault("CRYO_SAVANNA_POLL_S", "0.05")
 
 from tests.fixtures.make_fixtures import make_spa_project, make_tomo_project
 

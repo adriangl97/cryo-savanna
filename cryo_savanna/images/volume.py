@@ -11,13 +11,12 @@ of bigger ones are read from the file at full resolution when they are shown, an
 from __future__ import annotations
 
 import os
-import threading
-from collections import OrderedDict
 from dataclasses import dataclass
 
 import numpy as np
 
 from cryo_savanna.images.mrc import ImageError, MrcReader
+from cryo_savanna.stamps import Cache
 
 AXES = ("z", "y", "x")  # numpy order of an MRC volume
 FULL_IN_MEMORY = 32 * 1024 * 1024  # voxels (128 MB as float32)
@@ -78,8 +77,7 @@ def load_volume(path: str | os.PathLike, max_size: int = 192) -> Volume:
 
 YZ_SLAB = 32  # columns kept per read of a YZ section: the next steps of the slider need no read
 YZ_SLAB_BYTES = 32 * 1024 * 1024  # but at most this much per slab (fewer columns for very big maps)
-_slabs: OrderedDict[tuple, np.ndarray] = OrderedDict()  # (path, stamp, first column) -> [z, y, columns]
-_slabs_lock = threading.Lock()
+_slabs = Cache(2)  # (path, stamp, first column, columns) -> [z, y, columns]
 
 
 def section(path: str | os.PathLike, axis: int, index: int) -> np.ndarray:
@@ -103,16 +101,10 @@ def section(path: str | os.PathLike, axis: int, index: int) -> np.ndarray:
         width = max(1, min(YZ_SLAB, YZ_SLAB_BYTES // (r.nz * r.ny * 4)))
         x0 = index // width * width
         key = (os.path.realpath(r.path), st.st_mtime_ns, st.st_size, x0, width)
-        with _slabs_lock:
-            slab = _slabs.get(key)
-            if slab is not None:
-                _slabs.move_to_end(key)
+        slab = _slabs.get(key)
         if slab is None:
             slab = np.stack([r.section(z)[:, x0:x0 + width] for z in range(r.nz)])
-            with _slabs_lock:
-                _slabs[key] = slab
-                while len(_slabs) > 2:
-                    _slabs.popitem(last=False)
+            _slabs.put(key, slab)
         return np.ascontiguousarray(slab[:, :, index - x0])
 
 

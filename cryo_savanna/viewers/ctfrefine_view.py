@@ -39,19 +39,10 @@ from cryo_savanna.results import ctfrefine as C
 from cryo_savanna.results.tables import Table
 from cryo_savanna.viewers.plots import TablePlot
 from cryo_savanna.viewers.tasks import TaskError, Tasks
+from cryo_savanna.stamps import stamp as _stamp
 
 DIVERGING = "CET-D1"  # blue - white - red, for signed values
 SEQUENTIAL = "viridis"
-
-
-def _stamp(path: Path | None):
-    if path is None:
-        return None
-    try:
-        st = os.stat(path)
-    except OSError:
-        return None
-    return st.st_mtime_ns, st.st_size
 
 
 def _fmt(v: float | None, digits: int = 3) -> str:
@@ -363,18 +354,25 @@ class MicrographMap(QWidget):
         self._project: Path | None = None
         self._pixel_size: float | None = None
 
-    def set_table(self, t: Table, project_dir: Path | None = None) -> None:
-        self._project = project_dir
-        keep_mic, keep_val = self.mic.currentData(), self.value.currentData()
-        self.table = t
-        self._level_cache.clear()
+    @staticmethod
+    def prepare(t: Table) -> tuple:
+        """What set_table works out from every particle (the values per micrograph, and each micrograph's
+        particles): a second per million particles, so the view does it in the thread that read them."""
         labels = [c for c, _ in MAP_VALUES if t.has(c)]
-        self.summary = C.per_micrograph(t, labels)
+        summary = C.per_micrograph(t, labels)
         names = t.column("rlnMicrographName") if t.has("rlnMicrographName") else []
         groups: dict[str, list[int]] = {}
         for i, n in enumerate(names):
             groups.setdefault(n, []).append(i)
-        self._groups = {k: np.array(v) for k, v in groups.items()}
+        return summary, {k: np.array(v) for k, v in groups.items()}
+
+    def set_table(self, t: Table, project_dir: Path | None = None, prepared: tuple | None = None) -> None:
+        """``prepared``: prepare(t), when the caller made it already (off the window's thread)."""
+        self._project = project_dir
+        keep_mic, keep_val = self.mic.currentData(), self.value.currentData()
+        self.table = t
+        self._level_cache.clear()
+        self.summary, self._groups = prepared if prepared is not None else self.prepare(t)
         for w in (self.mic, self.value):
             w.blockSignals(True)
         self.value.clear()
@@ -541,16 +539,22 @@ class CtfChangesView(QWidget):
         out, inp = self._paths()
         self._stamp = (_stamp(out), _stamp(inp))
         self.plot.info.setText("Reading…")
-        self.tasks.run(lambda: C.particle_changes(out, inp), self._on_changes, channel="changes")
 
-    def _on_changes(self, ch) -> None:
+        def read():
+            ch = C.particle_changes(out, inp)
+            return ch, (MicrographMap.prepare(ch.table) if ch is not None else None)
+
+        self.tasks.run(read, self._on_changes, channel="changes")
+
+    def _on_changes(self, result) -> None:
+        ch, prepared = (result, None) if isinstance(result, TaskError) else result
         if isinstance(ch, TaskError) or ch is None:
             self.plot.info.setText(f"⚠ {ch}" if ch is not None else "No particles in the file.")
             return
         t = ch.table
         scatter = (C.DEFOCUS, C.D_DEFOCUS) if ch.has_changes else ("rlnCoordinateX", C.DEFOCUS)
         self.plot.set_table(t, default_histograms(t), scatter)
-        self.map.set_table(t, self.project_dir)
+        self.map.set_table(t, self.project_dir, prepared)
 
 
 # ---------------------------------------------------------------------------- aberration images

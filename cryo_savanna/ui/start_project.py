@@ -95,7 +95,7 @@ def choose_project(
             QApplication.setOverrideCursor(QCursor(Qt.CursorShape.WaitCursor))  # relion takes a few seconds
             try:
                 # in a thread: the dialogs are painted meanwhile (ui/busy.py)
-                how, error = run_busy(lambda: create(folder), f"Starting a RELION project in {folder}…"), None
+                how, error = run_busy(lambda folder=folder: create(folder), f"Starting a RELION project in {folder}…"), None
             except NewProjectError as e:
                 how, error = None, str(e)
             finally:

@@ -44,6 +44,7 @@ ABERRATIONS = "aberrations"  # CtfRefine: phase images of beam tilt / trefoil / 
 PYTOM_SCORES = "pytom_scores"  # pytom template matching: progress and score statistics per tomogram
 PYTOM_THRESHOLDS = "pytom_thresholds"  # pytom extraction: thresholds per tomogram, chosen interactively
 SVG_PLOTS = "svg_plots"  # the plots a program wrote as SVG files (pytom)
+TOMO_MASKS = "tomo_masks"  # tomogram masks: drawn interactively on the tomograms
 FILES = "files"  # every file of the job: STAR tables, images, stacks
 
 
@@ -159,14 +160,11 @@ def class_job_particles(ctx: JobContext, its: list | None = None) -> str | None:
     return data
 
 
-def _pytom_views(ctx: JobContext, add, add_maps) -> None:
+def _pytom_views(ctx: JobContext, kind: str, add, add_maps) -> None:
     """pytom jobs (jobdefs/pytom_jobs.py): their views come from the files in the job directory, so that
     they show while the job runs (an External job has its outputs only at the end)."""
     from cryo_savanna import pytom_runner as P
-    from cryo_savanna.jobdefs.pytom_jobs import decode, pytom_kind
-    kind = pytom_kind(ctx.options.get("fn_exe", ""))
-    if kind is None:
-        return
+    from cryo_savanna.jobdefs.pytom_jobs import decode
     own = decode(ctx.options.get("other_args", ""))[0]
     if kind == P.MATCH:
         summary = ctx.name + P.SUMMARY
@@ -187,13 +185,10 @@ def _pytom_views(ctx: JobContext, add, add_maps) -> None:
             columns=[P.LCC, "rlnCenteredCoordinateZAngst"])
 
 
-def _aretomo_views(ctx: JobContext, add) -> bool:
+def _aretomo_views(ctx: JobContext, kind: str, add, add_maps) -> None:
     """AreTomo3 jobs (jobdefs/aretomo_jobs.py): the tilt series and tomograms done so far, from the files
     the job rewrites as tilt series finish (so they show while it runs), and its summary table."""
     from cryo_savanna import aretomo_runner as A
-    from cryo_savanna.jobdefs.aretomo_jobs import aretomo_kind
-    if aretomo_kind(ctx.options.get("fn_exe", "")) is None:
-        return False
     tomograms, aligned, summary = (ctx.name + f for f in (A.TOMOGRAMS, A.ALIGNED, A.SUMMARY))
     if ctx.exists(tomograms) and has_tomograms(ctx.project_dir / tomograms):
         add(TOMOGRAMS, "Tomograms", star=tomograms)
@@ -202,7 +197,16 @@ def _aretomo_views(ctx: JobContext, add) -> bool:
     if ctx.exists(summary):
         add(TABLE_PLOT, "AreTomo3", star=summary, block="global",
             columns=[A.COL_THICKNESS, A.COL_AXIS, A.COL_DARK, A.COL_CTF_RES])
-    return True
+
+
+def _tomomask_views(ctx: JobContext, kind: str, add, add_maps) -> None:
+    """Tomogram mask jobs (jobdefs/tomomask_jobs.py): the mask editor, once the job wrote masks.json."""
+    add(TOMO_MASKS, "Masks", job=ctx.name)
+
+
+# The viewers of the External jobs made from cryo-savanna's own forms, by family (jobdefs/external_jobs.py):
+# (ctx, kind, add, add_maps). A CLI tool has none of its own: its output files get the usual ones.
+EXTERNAL_VIEWS = {"pytom": _pytom_views, "aretomo": _aretomo_views, "tomomask": _tomomask_views}
 
 
 def views_for(ctx: JobContext) -> list[ViewSpec]:
@@ -344,8 +348,10 @@ def views_for(ctx: JobContext) -> list[ViewSpec]:
     elif t == "relion.excludetilts" and interactive_kind(ctx.type_label, ctx.options) == "tilts":
         add(SELECTION, "Selection", job=ctx.name, what="tilts")
     elif t == "relion.external":
-        if not _aretomo_views(ctx, add):
-            _pytom_views(ctx, add, add_maps)
+        from cryo_savanna.jobdefs.external_jobs import kind_of_exe
+        found = kind_of_exe(ctx.options.get("fn_exe", ""))
+        if found is not None and found[0].name in EXTERNAL_VIEWS:
+            EXTERNAL_VIEWS[found[0].name](ctx, found[1], add, add_maps)
 
     # anything else a viewer can show; of several tomogram particle files (a continued job lists its
     # earlier ones too), the newest gets the Picks tab

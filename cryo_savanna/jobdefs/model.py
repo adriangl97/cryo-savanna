@@ -49,7 +49,7 @@ LINEAGE_INPUTS = {
 @dataclass(frozen=True)
 class OptionDef:
     key: str
-    kind: str  # any | filename | inputnode | radio | boolean | slider
+    kind: str  # any | filename | folder | inputnode | radio | boolean | slider
     label: str
     default: str
     help: str = ""
@@ -94,7 +94,7 @@ class OptionDef:
                 continue
             if fld == "default":
                 if self.kind == "slider":
-                    changes["default"] = float_to_string(env.integer(var))
+                    changes["default"] = float_to_string(env.integer(var) or 0)  # (set: checked above)
                 elif self.kind == "boolean":
                     changes["default"] = "Yes" if env.boolean(var) else "No"
                 else:

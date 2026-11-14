@@ -30,6 +30,7 @@ from cryo_savanna.project.star import loop_columns, read_star
 from cryo_savanna.results.curves import Curve, Figure
 from cryo_savanna.results.micrographs import CLASS, MIC, class_counts
 from cryo_savanna.results.tables import Table, optics_value
+from cryo_savanna.stamps import stamp as _stamp
 
 TOMO_NAME = "rlnTomoName"
 TOMOGRAM_COLUMNS = [  # (column, title)
@@ -49,14 +50,6 @@ TILT_COLUMNS = [  # per-tilt values worth a column
 ]
 SERIES_COLUMNS = [("rlnTomoSizeX", "X"), ("rlnTomoSizeY", "Y"), ("rlnTomoSizeZ", "Z"),
                   ("rlnTomoTomogramBinning", "Binning"), ("rlnTomoTiltSeriesPixelSize", "Pixel (Å)")]
-
-
-def _stamp(path: Path):
-    try:
-        st = os.stat(path)
-    except OSError:
-        return None
-    return st.st_mtime_ns, st.st_size
 
 
 def columns_of(path: str | os.PathLike, block: str) -> list[str] | None:
@@ -87,7 +80,7 @@ class TiltSeriesSet:
     project_dir: Path
     source: str  # the set's STAR file, relative to the project
     table: Table  # data_global
-    _tilts: dict[str, tuple[tuple, Table]] = field(default_factory=dict, repr=False)
+    _tilts: dict[str, tuple[tuple | None, Table]] = field(default_factory=dict, repr=False)
 
     def __len__(self) -> int:
         return len(self.table)
@@ -170,7 +163,7 @@ def tilt_figures(tilts: Table, name: str = "") -> list[Figure]:
     """Per-tilt values against the tilt angle."""
     if not tilts.has("rlnTomoNominalStageTiltAngle"):
         return []
-    x = tilts.numeric("rlnTomoNominalStageTiltAngle")
+    x = tilts.numbers("rlnTomoNominalStageTiltAngle")
     order = np.argsort(x)
     x = x[order]
     figs = []
@@ -198,12 +191,12 @@ def tilt_figures(tilts: Table, name: str = "") -> list[Figure]:
 def series_summary(tilts: Table) -> dict[str, str]:
     out = {"Tilts": str(len(tilts))}
     if tilts.has("rlnTomoNominalStageTiltAngle"):
-        a = tilts.numeric("rlnTomoNominalStageTiltAngle")
+        a = tilts.numbers("rlnTomoNominalStageTiltAngle")
         out["Range (°)"] = f"{np.nanmin(a):.0f} … {np.nanmax(a):.0f}"
     if tilts.has("rlnCtfMaxResolution"):
-        out["Max. res. (Å)"] = f"{np.nanmedian(tilts.numeric('rlnCtfMaxResolution')):.1f}"
+        out["Max. res. (Å)"] = f"{np.nanmedian(tilts.numbers('rlnCtfMaxResolution')):.1f}"
     if tilts.has("rlnDefocusU"):
-        out["Defocus (µm)"] = f"{np.nanmedian(tilts.numeric('rlnDefocusU')) / 1e4:.2f}"
+        out["Defocus (µm)"] = f"{np.nanmedian(tilts.numbers('rlnDefocusU')) / 1e4:.2f}"
     return out
 
 
@@ -265,7 +258,7 @@ def is_tomo_particles(path: str | os.PathLike) -> bool:
         cols = columns_of(path, "particles")
     except OSError:
         return False
-    return bool(cols) and TOMO_NAME in cols
+    return cols is not None and TOMO_NAME in cols
 
 
 def _particle_block(path: str | os.PathLike) -> tuple[str, list[str]] | None:
@@ -331,10 +324,10 @@ def read_tomo_picks(project_dir: str | os.PathLike, star_rel: str) -> TomoPicks:
     cols = centred if all(t.has(c) for c in centred) else corner if all(t.has(c) for c in corner) else None
     if cols is None:
         raise ValueError(f"{star_rel}: no particle coordinates")
-    xyz = np.stack([t.numeric(c) for c in cols], axis=1)
+    xyz = np.stack([t.numbers(c) for c in cols], axis=1)
     rows = rows_by_name(t.column(TOMO_NAME))
     by = {n: xyz[i] for n, i in rows.items()}
-    cls = t.numeric(CLASS).astype(int) if t.has(CLASS) else None
+    cls = t.numbers(CLASS).astype(int) if t.has(CLASS) else None
     cls_by = {n: cls[i] for n, i in rows.items()} if cls is not None else None
     return TomoPicks(star_rel, by, cols is centred, cls_by, class_counts(cls))
 
@@ -378,10 +371,10 @@ def read_warp_picks(project_dir: str | os.PathLike, star_rel: str) -> TomoPicks:
     if px is None:
         raise ValueError(f"{star_rel}: no pixel size for the coordinates (rlnPixelSize, rlnImagePixelSize)")
     t = Table(block, list(r[1]), r[1])
-    xyz = np.stack([t.numeric(c) for c in corner], axis=1)
+    xyz = np.stack([t.numbers(c) for c in corner], axis=1)
     rows = rows_by_name(t.column(MIC))
     by = {n: xyz[i] for n, i in rows.items()}
-    cls = t.numeric(CLASS).astype(int) if t.has(CLASS) else None
+    cls = t.numbers(CLASS).astype(int) if t.has(CLASS) else None
     cls_by = {n: cls[i] for n, i in rows.items()} if cls is not None else None
     return TomoPicks(star_rel, by, False, cls_by, class_counts(cls), pixel_size=px)
 

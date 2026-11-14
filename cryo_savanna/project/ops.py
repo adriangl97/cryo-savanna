@@ -116,10 +116,11 @@ class PipelineOps:
                  lock_wait_s: float = 3.0, lock_tries: int = 20):
         self.project_dir = Path(project_dir)
         self.pipeline_name = pipeline_name
-        self._lock_args = dict(wait_s=lock_wait_s, max_tries=lock_tries)
+        self._lock_wait_s, self._lock_tries = lock_wait_s, lock_tries
 
     def _lock(self, message: str) -> PipelineLock:
-        return PipelineLock(self.project_dir, self.pipeline_name, message=f"cryo-savanna: {message}", **self._lock_args)
+        return PipelineLock(self.project_dir, self.pipeline_name, message=f"cryo-savanna: {message}",
+                            wait_s=self._lock_wait_s, max_tries=self._lock_tries)
 
     def _read(self) -> Pipeline:
         return Pipeline.read(self.project_dir, self.pipeline_name)
@@ -232,7 +233,7 @@ class PipelineOps:
                 break
         node = p.nodes.get(name)
         is_new = node is None
-        if is_new:
+        if node is None:
             node = Node(name, label, depth, producer=pr.name)
             p.nodes[name] = node
         self._touch_node_file(p, node, pr.status == STATUS_SCHEDULED)

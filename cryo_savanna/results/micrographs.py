@@ -13,6 +13,7 @@ import numpy as np
 from cryo_savanna.images.mrc import ImageRef
 from cryo_savanna.project.star import loop_columns, loop_rows, read_star
 from cryo_savanna.results.tables import Table, optics_value
+from cryo_savanna.stamps import Cache, stamp
 
 CLASS = "rlnClassNumber"
 
@@ -96,8 +97,8 @@ def motion_track(path: Path) -> tuple[np.ndarray, np.ndarray, np.ndarray] | None
     if b is None or not b.rows or not b.has("rlnMicrographShiftX"):
         return None
     t = Table.from_block(b)
-    frames = t.numeric("rlnMicrographFrameNumber") if t.has("rlnMicrographFrameNumber") else np.arange(1, len(t) + 1)
-    return frames, t.numeric("rlnMicrographShiftX"), t.numeric("rlnMicrographShiftY")
+    frames = t.numbers("rlnMicrographFrameNumber") if t.has("rlnMicrographFrameNumber") else np.arange(1, len(t) + 1)
+    return frames, t.numbers("rlnMicrographShiftX"), t.numbers("rlnMicrographShiftY")
 
 
 # ---------------------------------------------------------------------------- picks
@@ -117,6 +118,9 @@ class Picks:
         if classes is None or self.cls is None:
             return np.ones(len(self), bool)
         return np.isin(self.cls, list(classes))
+
+
+_COUNTS = Cache(200_000)  # (coordinate file, its stamp) -> picks in it
 
 
 @dataclass
@@ -158,16 +162,25 @@ class PickSet:
         if not rel:
             return 0
         path = self.project_dir / rel
-        if not path.is_file():
+        st = stamp(path)
+        if st is None or path.is_dir():
             return 0
-        try:
-            for block in ("", "coordinates"):
-                r = loop_rows(path, block)
-                if r is not None:
-                    return r[0]
-        except OSError:
-            return None
-        return 0
+        # kept by the file's stamp: the list is counted again whenever it is read again (a job adding
+        # micrographs, another class chosen), and then only the new coordinate files are opened
+        key = (str(path), st)
+        n = _COUNTS.get(key)
+        if n is None:
+            n = 0
+            try:
+                for block in ("", "coordinates"):
+                    r = loop_rows(path, block)
+                    if r is not None:
+                        n = r[0]
+                        break
+            except OSError:
+                return None
+            _COUNTS.put(key, n)
+        return n
 
 
 def _read_coords(path: Path) -> Picks:
@@ -177,7 +190,7 @@ def _read_coords(path: Path) -> Picks:
         if r is not None and "rlnCoordinateX" in r[1]:
             t = Table(block, list(r[1]), r[1])
             fom = t.numeric("rlnAutopickFigureOfMerit") if t.has("rlnAutopickFigureOfMerit") else None
-            return Picks(t.numeric("rlnCoordinateX"), t.numeric("rlnCoordinateY"), fom)
+            return Picks(t.numbers("rlnCoordinateX"), t.numbers("rlnCoordinateY"), fom)
     return Picks(np.empty(0), np.empty(0))
 
 
@@ -195,9 +208,9 @@ def read_picks(project_dir: str | os.PathLike, star_rel: str) -> PickSet:
     if r is None or MIC not in r[1] or "rlnCoordinateX" not in r[1]:
         raise ValueError(f"{star_rel}: no coordinates")
     t = Table("particles", list(r[1]), r[1])
-    x, y = t.numeric("rlnCoordinateX"), t.numeric("rlnCoordinateY")
+    x, y = t.numbers("rlnCoordinateX"), t.numbers("rlnCoordinateY")
     fom = t.numeric("rlnAutopickFigureOfMerit") if t.has("rlnAutopickFigureOfMerit") else None
-    cls = t.numeric(CLASS).astype(int) if t.has(CLASS) else None
+    cls = t.numbers(CLASS).astype(int) if t.has(CLASS) else None
     order: dict[str, list[int]] = {}
     for i, m in enumerate(t.column(MIC)):
         order.setdefault(m, []).append(i)

@@ -52,14 +52,7 @@ from cryo_savanna.viewers.plots import AnglesPlot, FigureGrid, TablePlot
 from cryo_savanna.viewers.star_table import StarTableView
 from cryo_savanna.viewers.tasks import TaskError, Tasks
 from cryo_savanna.viewers.volume_viewer import VolumeViewer
-
-
-def _stamp(path: Path):
-    try:
-        st = os.stat(path)
-    except OSError:
-        return None
-    return st.st_mtime_ns, st.st_size
+from cryo_savanna.stamps import stamp as _stamp
 
 
 def _dir_stamp(path: Path):
@@ -690,6 +683,9 @@ def build_view(spec: R.ViewSpec, ctx: R.JobContext, cache: ThumbCache | None, re
         if spec.kind == R.PYTOM_THRESHOLDS:
             return V.PytomThresholdView(project, a["job"], a.get("summary", ""), a.get("diameter"), cache)
         return V.SvgPlotsView(project, a["job"], a.get("folder", "plots"))
+    if spec.kind == R.TOMO_MASKS:
+        from cryo_savanna.viewers.tomo_mask_view import TomoMaskView
+        return TomoMaskView(project, a["job"], cache)
     if spec.kind == R.FILES:
         return FilesView(project, a["job"], cache)
     return _message(f"No viewer for {spec.kind}")

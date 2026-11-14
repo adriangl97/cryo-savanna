@@ -77,12 +77,13 @@ def angdist_pairs(project_dir: str | os.PathLike, job: str) -> list[AngdistPair]
         names = os.listdir(project_dir / job)
     except OSError:
         return []
+    listed = set(names)  # the maps are in the same listing: no look at each file (this runs in the window's thread)
     for name in names:
         m = _NAME.match(name)
         if m is None:
             continue
         map_name = name[: -len("_angdist.bild")] + ".mrc"
-        if not (project_dir / job / map_name).is_file():
+        if map_name not in listed:
             continue
         it = int(m["it"]) if m["it"] else None
         label = "Final" if it is None else f"Iteration {it}"

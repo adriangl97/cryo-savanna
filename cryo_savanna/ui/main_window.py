@@ -251,7 +251,7 @@ class MainWindow(QMainWindow):
 
         self.actions = JobActions(self, self.defs, self.env, self.type_names, self.tomo, self.readonly,
                                   flag_source=self.flag_source)
-        self.info.cli, self.info.pytom, self.info.aretomo = self.actions.cli, self.actions.pytom, self.actions.aretomo  # the editor's forms, also read-only
+        self.info.forms = self.actions.forms  # the editor's forms, also read-only
         self.actions.changed.connect(self._force_refresh)
         self.actions.select.connect(self._select_soon)
         self.actions.message.connect(lambda m: self.statusBar().showMessage(m, 6000))
@@ -383,7 +383,7 @@ class MainWindow(QMainWindow):
         exe = self.env.which("relion_pipeliner")
         # never asked here: --version can take long on a busy node (the background check fills it in)
         version = self.relion_version or ("still asking" if self._version_call is not None else "?")
-        rows = [("cryo-savanna", __version__), ("Job definitions", f"RELION {self.defs.version}"),
+        rows = [("cryo-savanna", f"v{__version__}"), ("Job definitions", f"RELION {self.defs.version}"),
                 ("relion_pipeliner", f"{exe} ({version})" if exe else "not on PATH"),
                 ("Qt", f"{qtpy.API_NAME} {qtpy.QT_VERSION}"), ("Project", str(self.loader.project_dir))]
         notice = html_escape(LICENSE_NOTICE).replace("\n", "<br>")
@@ -399,7 +399,7 @@ class MainWindow(QMainWindow):
 
     def _update_title(self) -> None:
         d = self.loader.project_dir if getattr(self, "loader", None) else ""
-        self.setWindowTitle(f"cryo-savanna {__version__} — {d}" + (" [tomo]" if self.tomo else "")
+        self.setWindowTitle(f"cryo-savanna v{__version__} — {d}" + (" [tomo]" if self.tomo else "")
                             + (" [read-only]" if self.readonly else ""))
 
     def _fit_graph(self) -> None:
@@ -709,6 +709,10 @@ class MainWindow(QMainWindow):
         self.status_state.setText("   ·   ".join(state))
         tip = f"relion_pipeliner: {pipeliner or 'not on PATH'}"
         self.status_state.setToolTip(tip + (f"\n\n{self.version_warning}" if self.version_warning else ""))
+
+    def show_error(self, text: str, log: str = "") -> None:
+        """An error nothing caught (ui/errors.py): what was being done did not finish; the rest goes on."""
+        self.statusBar().showMessage(f"⚠ Unexpected error: {text}" + (f"   ·   details in {log}" if log else ""), 30000)
 
     def set_main_input(self, job: str, node: str) -> None:
         """Place ``job`` under the producer of ``node`` in the list and the tree ("": the default again)."""

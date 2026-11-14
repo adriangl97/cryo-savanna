@@ -67,8 +67,10 @@ from qtpy.QtWidgets import (
 from cryo_savanna.env.relion_env import RelionEnv, RelionEnvError
 from cryo_savanna.jobdefs.flags import Flag, FlagSource, command_flags, program_for
 from cryo_savanna.jobdefs.model import JobVariant, OptionDef, Row
+from cryo_savanna.jobdefs.pytom_jobs import PytomVariant
 from cryo_savanna.project.jobstar import JobStar
 from cryo_savanna.project.pipeline import Pipeline
+from cryo_savanna.relion_consts import job_type_for_label
 from cryo_savanna.project.scratch import SCRATCH_KEY
 from cryo_savanna.project.scratch import base_dir as scratch_base_dir
 from cryo_savanna.project.selection import interactive_kind
@@ -272,6 +274,26 @@ class FileWidget(TextWidget):
             self.set_value(self.editor.relative(path))
 
 
+class FolderWidget(FileWidget):
+    """A folder, chosen with the system's folder dialog (or typed)."""
+
+    def __init__(self, opt: OptionDef, editor: "JobEditor"):
+        super().__init__(opt, editor)
+        self.browse.setToolTip("Choose a folder")
+
+    def _start_dir(self) -> Path:
+        proj = self.editor.project_dir
+        current = self.value()
+        if current and "{" not in current and (proj / current).is_dir():
+            return proj / current
+        return super()._start_dir()
+
+    def _browse(self) -> None:
+        path = QFileDialog.getExistingDirectory(self, self.opt.label.rstrip(": "), str(self._start_dir()))
+        if path:
+            self.set_value(self.editor.relative(path))
+
+
 class NodeWidget(FileWidget):
     """Input node: outputs of earlier jobs with the right node type (newest first), or any file."""
 
@@ -337,6 +359,8 @@ def make_widget(opt: OptionDef, editor: "JobEditor") -> OptionWidget:
         return NodeWidget(opt, editor)
     if opt.kind == "filename":
         return FileWidget(opt, editor)
+    if opt.kind == "folder":
+        return FolderWidget(opt, editor)
     return TextWidget(opt, editor)
 
 
@@ -525,7 +549,7 @@ class JobEditor(QWidget):
         self._update_mode_widgets()
 
     def _type_name(self, variant: JobVariant) -> str:
-        if getattr(variant, "kind", None) in ("match", "extract", "align"):  # pytom, AreTomo3 (jobdefs/)
+        if isinstance(variant, PytomVariant):  # pytom, AreTomo3, tomogram masks (jobdefs/external_jobs.py)
             return f"{variant.program} (runs as an External job)"
         if getattr(variant, "is_cli", False):
             return f"{variant.program} (CLI tool, runs as an External job)"
@@ -688,8 +712,12 @@ class JobEditor(QWidget):
         continued or cloned, else of the newest job of this type."""
         candidates = [self.source_job] if self.source_job else []
         if self.pipeline is not None and self.variant is not None:
+            def same_type(label: str) -> bool:
+                # whatever RELION added to the label (relion.autopick.log is a relion.autopick job)
+                jt = job_type_for_label(label)
+                return label == self.variant.label or (jt is not None and jt.label == self.variant.label)
             candidates += [n for n, pr in reversed(self.pipeline.processes.items())
-                           if pr.type_label == self.variant.label and n != self.source_job]
+                           if n != self.source_job and same_type(pr.type_label)]
         for job in candidates[:20]:
             try:
                 note = (self.project_dir / job / "note.txt").read_text(errors="replace")
@@ -804,7 +832,7 @@ class JobEditor(QWidget):
         pal = self.palette()
         dim = pal.color(QPalette.PlaceholderText).name()
         accent = pal.color(QPalette.Highlight).name()
-        for _, row, parts in self.rows:
+        for _, row, _parts in self.rows:
             active = self.variant.group_active(row.group, vals)
             for k in row.keys:
                 if k not in self.widgets:

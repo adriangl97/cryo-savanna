@@ -50,6 +50,7 @@ from cryo_savanna.ui.busy import run_busy
 from cryo_savanna.viewers.gallery import GalleryItem, GalleryView
 from cryo_savanna.viewers.tasks import TaskError, Tasks
 from cryo_savanna.viewers.tomo_viewer import TiltSeriesViewer
+from cryo_savanna.stamps import stamp as _stamp
 
 
 class _ToolWindow(QMainWindow):
@@ -419,14 +420,6 @@ class TiltExcluder(_ToolWindow):
 
 
 # ---------------------------------------------------------------------------- a job's saved choice
-
-def _stamp(path: Path):
-    try:
-        st = path.stat()
-    except OSError:
-        return None
-    return st.st_mtime_ns, st.st_size
-
 
 class SelectionView(QWidget):
     """What an interactive Select or Exclude tilt images job chose, in the selection window's panel but

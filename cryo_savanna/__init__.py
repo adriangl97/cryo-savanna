@@ -1,6 +1,7 @@
 # Copyright (C) 2026 Adrián González-López
 # SPDX-License-Identifier: GPL-2.0-or-later
-__version__ = "0.9"
+from cryo_savanna._version import __version__ as __version__  # the date of the commit: tools/hooks
+
 COPYRIGHT = "Copyright (C) 2026 Adrián González-López"
 # shown by --version and Help → About (GPL "how to apply": interactive programs show a short notice)
 LICENSE_NOTICE = (

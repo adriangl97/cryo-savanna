@@ -14,7 +14,7 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from cryo_savanna.jobdefs.cli_tools import EXTERNAL, external_program
+from cryo_savanna.jobdefs.external_jobs import EXTERNAL, program_title
 from cryo_savanna.jobdefs.model import JobDefs
 from cryo_savanna.project.jobstar import JobStar
 from cryo_savanna.project.lineage import primary_parents
@@ -31,20 +31,12 @@ from cryo_savanna.relion_consts import (
     STATUS_SUCCEEDED,
     job_type_for_label,
 )
+from cryo_savanna.stamps import Stamp, stamp  # noqa: F401 - also imported from here
 
-Stamp = tuple[int, int] | None  # (mtime_ns, size), None when the file is missing
 
 # Checked in this order, like PipeLine::checkProcessCompletion
 EXIT_MARKERS = ((RELION_JOB_EXIT_SUCCESS, STATUS_SUCCEEDED), (RELION_JOB_EXIT_FAILURE, STATUS_FAILED),
                 (RELION_JOB_EXIT_ABORTED, STATUS_ABORTED))
-
-
-def stamp(path: str | os.PathLike) -> Stamp:
-    try:
-        st = os.stat(path)
-    except OSError:
-        return None
-    return st.st_mtime_ns, st.st_size
 
 
 @dataclass
@@ -95,9 +87,9 @@ class ProjectLoader:
         jobs (project/stars.py), also picked up by the next refresh."""
         self.project_dir = Path(project_dir).resolve()
         self.main_inputs = main_inputs
-        self._main_stamp = None
+        self._main_stamp: tuple | None = None
         self.stars = stars
-        self._stars_stamp = None
+        self._stars_stamp: tuple | None = None
         self.defs = defs or JobDefs.load()
         self.pipeline_path = self.project_dir / f"{pipeline_name}_pipeline.star"
         self.pipeline_name = pipeline_name
@@ -181,7 +173,7 @@ class ProjectLoader:
         if jt is None or jt.label != EXTERNAL:
             return ""
         try:  # cached by the file's stamp: cheap on every refresh, and follows continue / overwrite
-            return external_program(self.read_jobstar(self.project_dir / pr.name / "job.star").options.get("fn_exe", ""))
+            return program_title(self.read_jobstar(self.project_dir / pr.name / "job.star").options.get("fn_exe", ""))
         except (OSError, ValueError, KeyError):
             return ""
 

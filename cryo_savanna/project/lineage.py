@@ -31,8 +31,7 @@ from collections.abc import Callable, Mapping
 from pathlib import Path
 
 from cryo_savanna.jobdefs.model import JobDefs
-from cryo_savanna.jobdefs.aretomo_jobs import aretomo_main_input
-from cryo_savanna.jobdefs.pytom_jobs import pytom_main_input
+from cryo_savanna.jobdefs.external_jobs import main_input as own_form_main_input
 from cryo_savanna.project.jobstar import JobStar
 from cryo_savanna.project.pipeline import Pipeline
 
@@ -51,12 +50,14 @@ def input_order(
     pr = pipeline.processes[process_name]
     inputs = set(pr.inputs)
     ordered: list[str] = []
+    js: JobStar | None = None
+    variant = None
     try:
         js = read_jobstar(Path(project_dir) / process_name / "job.star")
         variant = defs.variant_for_jobstar(js)
     except (OSError, ValueError, KeyError):
         js = variant = None
-    if variant is not None:
+    if variant is not None and js is not None:
         for key in variant.lineage_inputs():
             value = js.options.get(key, "")
             if value in inputs and value not in ordered:
@@ -77,10 +78,10 @@ def default_input(pipeline: Pipeline, ordered: list[str]) -> str | None:
 def _own_main_input(
     process_name: str, project_dir: str | os.PathLike, read_jobstar: Callable[[Path], JobStar]
 ) -> str | None:
-    """The main input a job's own form names (pytom and AreTomo3 jobs), else None."""
+    """The main input a job's own form names (pytom, AreTomo3 and tomogram mask jobs), else None."""
     try:
         js = read_jobstar(Path(project_dir) / process_name / "job.star")
-        return pytom_main_input(js) or aretomo_main_input(js)
+        return own_form_main_input(js)
     except (OSError, ValueError, KeyError):
         return None
 
@@ -133,8 +134,8 @@ def primary_parent(
             job = node.producer if node is not None and node.producer else _job_holding(pipeline, own)
             if job is not None:
                 return job
-    node = primary_input(pipeline, process_name, project_dir, defs, read_jobstar, main_inputs)
-    return pipeline.nodes[node].producer if node is not None else None
+    main = primary_input(pipeline, process_name, project_dir, defs, read_jobstar, main_inputs)
+    return pipeline.nodes[main].producer if main is not None else None
 
 
 def primary_parents(
@@ -165,9 +166,10 @@ def _read_once(read_jobstar: Callable[[Path], JobStar]) -> Callable[[Path], JobS
             except (OSError, ValueError, KeyError) as e:  # what the callers take for "no job.star"
                 hit = (None, e)
             seen[path] = hit
-        if hit[1] is not None:
-            raise hit[1]
-        return hit[0]
+        js, error = hit
+        if error is not None or js is None:
+            raise error if error is not None else OSError(f"{path}: not read")
+        return js
 
     return read
 

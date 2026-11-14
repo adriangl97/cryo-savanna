@@ -16,6 +16,7 @@ from pathlib import Path
 
 from cryo_savanna.project.main_inputs import GUI_DIR
 from cryo_savanna.project.shared_json import read_json, update_json
+from cryo_savanna.stamps import stamp as file_stamp
 
 FILE = "stars.json"
 
@@ -35,11 +36,7 @@ class Stars:
         self._session: dict[str, bool] = {}  # changes not written (read-only)
 
     def _file_stamp(self) -> tuple | None:
-        try:
-            st = self.path.stat()
-        except OSError:
-            return None
-        return st.st_mtime_ns, st.st_size
+        return file_stamp(self.path)
 
     def stamp(self) -> tuple:
         """Changes when the stars change (the file, or a star of this session)."""

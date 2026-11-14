@@ -20,6 +20,7 @@ from pathlib import Path
 
 from cryo_savanna.project.jobstar import JobStar
 from cryo_savanna.project.pipeline import Pipeline
+from cryo_savanna.relion_consts import job_type_for_label
 
 SCRATCH_KEY = "scratch_dir"
 ENV_VAR = "RELION_SCRATCH_DIR"  # its default (RELION's), or cryo-savanna's Preferences when the shell leaves it unset
@@ -46,13 +47,15 @@ def wants_scratch(path: str) -> bool:
 
 
 def taken_numbers(project_dir: str | os.PathLike, pipeline: Pipeline | None, type_labels: Iterable[str]) -> set[int]:
-    """The numbers the project's jobs (of the types with a scratch option) already have."""
+    """The numbers the project's jobs (of the types with a scratch option) already have. A job's type
+    counts whatever RELION added to its label (relion.refine3d.tomo is a relion.refine3d job)."""
     labels = set(type_labels)
     out: set[int] = set()
     if pipeline is None:
         return out
     for name, pr in pipeline.processes.items():
-        if pr.type_label not in labels:
+        jt = job_type_for_label(pr.type_label)
+        if pr.type_label not in labels and (jt is None or jt.label not in labels):
             continue
         try:
             js = JobStar.read(Path(project_dir) / name / "job.star")

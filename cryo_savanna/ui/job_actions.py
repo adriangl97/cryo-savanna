@@ -37,15 +37,13 @@ from qtpy.QtWidgets import (
 
 from cryo_savanna.env.relion_env import RelionEnv, RelionEnvError
 from cryo_savanna.jobdefs.cli_catalog import CATEGORIES, describe
-from cryo_savanna.jobdefs.cli_tools import CliCatalog, CliVariant, cli_program_of
-from cryo_savanna.jobdefs import aretomo_jobs
-from cryo_savanna.jobdefs.aretomo_jobs import AretomoCatalog, aretomo_kind_of
+from cryo_savanna.jobdefs.cli_tools import CliVariant
+from cryo_savanna.jobdefs import aretomo_jobs, external_jobs, tomomask_jobs
 from cryo_savanna.jobdefs.model import JobDefs, JobVariant
 from cryo_savanna.jobdefs.pytom_jobs import TITLES as PYTOM_TITLES
 from cryo_savanna.jobdefs.pytom_jobs import warm_defaults as warm_pytom_defaults
 from cryo_savanna.jobdefs.pytom_jobs import (DESCRIPTIONS as PYTOM_DESCRIPTIONS, EXTRACT as PYTOM_EXTRACT,
-                                             MATCH as PYTOM_MATCH, PytomCatalog, PytomVariant, last_settings,
-                                             pytom_kind_of, quoted_values)
+                                             MATCH as PYTOM_MATCH, PytomVariant, last_settings, quoted_values)
 from cryo_savanna.project.jobstar import JobStar, read_last_used
 from cryo_savanna.project.ops import OpsError, PipelineOps
 from cryo_savanna.project.pipeline import Pipeline
@@ -209,9 +207,10 @@ class JobActions(QObject):
         self.queue = None  # slurm.QueueState, from the main window's monitor
 
         self.editor = JobEditor(env, type_names, flag_source=flag_source)
-        self.cli = CliCatalog(defs, env, self.editor.flag_source)
-        self.pytom = PytomCatalog(defs, env)
-        self.aretomo = AretomoCatalog(defs, env)
+        # the forms of the External jobs made here (CLI tools, pytom, AreTomo3, tomogram masks), built once
+        self.forms = external_jobs.Forms(defs, env, self.editor.flag_source)
+        self.cli, self.pytom = self.forms.cli, self.forms.pytom
+        self.aretomo, self.tomomask = self.forms.aretomo, self.forms.tomomask
         warm_pytom_defaults()  # "module avail cuda", in the background: not when the first form opens
         self.editor.submit.connect(self._on_submit)
         # the editor goes in its own window or in the dock (Preferences → Job editor: set_editor_place)
@@ -310,6 +309,11 @@ class JobActions(QObject):
             a.setToolTip(PYTOM_DESCRIPTIONS[kind])
             a.setStatusTip(PYTOM_DESCRIPTIONS[kind])
             a.triggered.connect(lambda _=False, k=kind: self.new_pytom_job(k))
+        for kind, text in tomomask_jobs.MENU_TEXT.items():  # pytom's tomogram masks
+            a = self.external_menu.addAction(text)
+            a.setToolTip(tomomask_jobs.DESCRIPTIONS[kind])
+            a.setStatusTip(tomomask_jobs.DESCRIPTIONS[kind])
+            a.triggered.connect(lambda _=False, k=kind: self.new_tomomask_job(k))
         self.external_menu.addSeparator()
         for kind, text in aretomo_jobs.MENU_TEXT.items():
             a = self.external_menu.addAction(text)
@@ -536,7 +540,7 @@ class JobActions(QObject):
     def new_job(self, variant_key: str) -> None:
         variant = self.defs.variants[variant_key]
         last = read_last_used(self.project_dir, variant.label, variant.is_tomo) if self.project_dir else None
-        if last is not None and (cli_program_of(last) or pytom_kind_of(last) or aretomo_kind_of(last)):  # a CLI tool's, ...
+        if last is not None and external_jobs.kind_of(last) is not None:  # a CLI tool's, a wrapper's: not External's
             last = None
         note = ("Settings of the last job of this type (from RELION's .gui files); 'Defaults' resets them."
                 if last is not None else "")
@@ -598,21 +602,26 @@ class JobActions(QObject):
         self._edit(variant.program, self.editor.new_job, variant, values,
                    f"{variant.description}. Runs as a RELION External job (AreTomo3 from its executable).")
 
+    def new_tomomask_job(self, kind: str = tomomask_jobs.MASKS) -> None:
+        """A tomogram mask job: the form, with the newest tomogram set."""
+        try:
+            variant = self.tomomask.variant(kind)
+        except RelionEnvError as e:
+            self._env_error("Tomogram masks", e)
+            return
+        values = variant.default_values(self.env)
+        pipeline = self.snapshot.pipeline if self.snapshot is not None else None
+        if pipeline is not None:
+            values.update(tomomask_jobs.newest_input(pipeline))
+        self._edit(variant.program, self.editor.new_job, variant, values,
+                   f"{variant.description}. Runs as a RELION External job; the masks are then drawn in its "
+                   "Masks view.")
+
     def _variant_for(self, js: JobStar) -> JobVariant:
         """The form for a job: its job type's, or a CLI tool's, pytom's or AreTomo3's for External jobs made
         from those menus."""
-        kind = pytom_kind_of(js)
-        if kind is not None:
-            return self.pytom.variant(kind)
-        kind = aretomo_kind_of(js)
-        if kind is not None:
-            return self.aretomo.variant(kind)
-        program = cli_program_of(js)
-        if program is not None:
-            v = self.cli.variant(program, js.is_tomo)
-            if v is not None:
-                return v
-        return self.defs.variant_for_jobstar(js)
+        v = self.forms.variant_for(js)  # (None also for a CLI tool whose --help cannot be read)
+        return v if v is not None else self.defs.variant_for_jobstar(js)
 
     def clone_job(self) -> None:
         job = self.current

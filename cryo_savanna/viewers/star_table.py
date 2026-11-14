@@ -27,6 +27,7 @@ from qtpy.QtWidgets import (
 from cryo_savanna.results.tables import Table, blocks_of, read_compact
 from cryo_savanna.viewers.plots import TablePlot
 from cryo_savanna.viewers.tasks import TaskError, Tasks
+from cryo_savanna.stamps import stamp as _stamp
 
 class TableModel(QAbstractTableModel):
     """Columns of a Table (all, or a chosen list with titles); numbers sort as numbers."""
@@ -56,7 +57,7 @@ class TableModel(QAbstractTableModel):
             self.endInsertColumns()
         else:
             self.extra[label] = values
-            c = 1 + [l for l, _ in self.columns].index(label)
+            c = 1 + [lab for lab, _ in self.columns].index(label)
             self.dataChanged.emit(self.index(0, c), self.index(self.rowCount() - 1, c))
 
     def rowCount(self, parent=QModelIndex()) -> int:
@@ -122,7 +123,11 @@ class TableModel(QAbstractTableModel):
         num = self.table.numeric(label)
         if num is not None:
             return np.asarray(num, dtype=np.float64)
-        return np.array([str(v) for v in self.table.data[label]], dtype=str)
+        texts = [str(v) for v in self.table.data[label]]
+        try:  # names that are all numbers (shown as written: "001") still sort as numbers: 2 before 10
+            return np.array(texts, dtype=np.float64)
+        except ValueError:
+            return np.array(texts, dtype=str)
 
     def only_numbers(self, col: int) -> bool:
         """Whether column ``col`` shows nothing but numbers (the row numbers, and the columns
@@ -499,9 +504,3 @@ class StarTableView(QWidget):
             self.view.scrollTo(idx)
 
 
-def _stamp(path: Path):
-    try:
-        st = path.stat()
-    except OSError:
-        return None
-    return st.st_mtime_ns, st.st_size

@@ -165,7 +165,8 @@ def parse_squeue(text: str) -> list[QueueJob]:
         parts = line.split(SEP)
         if len(parts) < 9 or not parts[0].strip():
             continue
-        out.append(QueueJob(*(p.strip() for p in parts[:8]), workdir=SEP.join(parts[8:]).strip()))
+        out.append(QueueJob(*(p.strip() for p in parts[:8]),  # type: ignore[misc]  # (eight fields, then workdir)
+                            workdir=SEP.join(parts[8:]).strip()))
     return out
 
 
@@ -289,6 +290,7 @@ class QueueMapper:
         self.project_dir = Path(project_dir)
         self.persist = persist  # False (--readonly): the ids are only remembered for this session
         self._real = os.path.realpath(self.project_dir)
+        self._reals: dict[str, str] = {}  # working directory -> its real path (see _realpath)
         self.known: dict[str, str] = {}  # SLURM id -> RELION job
         self._logs: dict[Path, tuple[tuple, list[str]]] = {}
         self._records: dict[str, dict | None] = {}  # run record file -> its record (None: unreadable)
@@ -312,8 +314,8 @@ class QueueMapper:
         if not self.persist:
             return
         def merge(data: dict) -> dict:  # other sessions save it too: keep the ids they found
-            theirs = data.get("jobs") if isinstance(data.get("jobs"), dict) else {}
-            known = {str(k): str(v) for k, v in theirs.items()}
+            theirs = data.get("jobs")
+            known = {str(k): str(v) for k, v in theirs.items()} if isinstance(theirs, dict) else {}
             known.update(self.known)
             return {"jobs": dict(sorted(known.items(), key=lambda kv: _id_order(kv[0])))}
 
@@ -333,9 +335,20 @@ class QueueMapper:
         ids |= {i for i, j in submitted.items() if j == job}
         return sorted(ids, key=_id_order)
 
+    def _realpath(self, workdir: str) -> str:
+        """os.path.realpath of a SLURM job's working directory, worked out once: every look at the queue
+        asks it for each of the user's jobs (twice), and it looks at every folder on the way there, over
+        the network. The user's jobs share a few working directories."""
+        real = self._reals.get(workdir)
+        if real is None:
+            if len(self._reals) > 4096:
+                self._reals.clear()
+            real = self._reals[workdir] = os.path.realpath(workdir)
+        return real
+
     def remember(self, accounting: list[AcctJob], job: str) -> list[AcctJob]:
         """Keep the sacct records of this project's ``job`` (by working directory), remembering their ids."""
-        mine = [a for a in accounting if not a.workdir or os.path.realpath(a.workdir) == self._real]
+        mine = [a for a in accounting if not a.workdir or self._realpath(a.workdir) == self._real]
         with self._lock:
             new = {a.id: job for a in mine if self.known.get(a.id) != job}
             if new:
@@ -362,7 +375,7 @@ class QueueMapper:
     # -- mapping --------------------------------------------------------------------------------
     def here(self, q: QueueJob) -> bool:
         """Whether a SLURM job was submitted from this project (working directory)."""
-        return not q.workdir or os.path.realpath(q.workdir) == self._real
+        return not q.workdir or self._realpath(q.workdir) == self._real
 
     def map(self, jobs: set[str], queue: list[QueueJob],
             stdout_paths: Callable[[list[str]], dict[str, str]] | None = None) -> dict[str, QueueJob]:
@@ -484,7 +497,7 @@ class QueueMapper:
                 except OSError:
                     return False
                 m = re.search(r"^\s*do_queue\s+(\S+)", text, re.M)
-                hit = (mtime, bool(m) and m.group(1).strip("\"'") == "Yes")
+                hit = (mtime, m is not None and m.group(1).strip("\"'") == "Yes")
                 self._do_queue[job] = hit
             return hit[1]
 
@@ -541,7 +554,7 @@ class SlurmMonitor:
             except SlurmError as e:
                 state.error = str(e)
                 break
-            if self._lost(last, state.checked_at) and not self._before_submission(job, last):
+            if last is not None and self._lost(last, state.checked_at) and not self._before_submission(job, last):
                 state.lost[job] = last
         return state
 

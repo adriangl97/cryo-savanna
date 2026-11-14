@@ -142,11 +142,12 @@ def read_model_classes(project_dir: str | os.PathLike, model_rel: str, data_star
     counts = class_counts(data_star) if data_star is not None and data_star.is_file() else {}
     classes = []
     for i, ref in enumerate(t.column("rlnReferenceImage")):
-        def val(label: str) -> float | None:
+        def val(label: str, i: int = i) -> float | None:  # this row's (called in this turn of the loop)
             return _f(t.column(label)[i]) if t.has(label) else None
         # the class's number, as the particles name it: rlnClassNumber where the table has it (as
         # project/selection.py reads it, so a selection saves the classes shown), else its row
-        number = int(val("rlnClassNumber")) if val("rlnClassNumber") is not None else i + 1
+        own = val("rlnClassNumber")
+        number = int(own) if own is not None else i + 1
         classes.append(ClassInfo(number, ImageRef.parse(ref).resolve(project_dir), val("rlnClassDistribution"),
                                  val("rlnEstimatedResolution"), val("rlnAccuracyRotations"),
                                  val("rlnAccuracyTranslationsAngst"),
@@ -181,7 +182,7 @@ def read_class_averages(project_dir: str | os.PathLike, star_rel: str) -> ClassS
     classes = []
     for i, ref in enumerate(t.column("rlnReferenceImage")):
         r = ImageRef.parse(ref)
-        def val(label: str) -> float | None:
+        def val(label: str, i: int = i) -> float | None:  # this row's (called in this turn of the loop)
             return _f(t.column(label)[i]) if t.has(label) else None
         num = int(val("rlnClassNumber") or (r.index + 1 if r.index is not None else i + 1))
         classes.append(ClassInfo(num, r.resolve(project_dir), val("rlnClassDistribution"),

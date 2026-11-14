@@ -46,7 +46,7 @@ def print_tree(p: Pipeline, project: Path, defs: JobDefs) -> None:
 def print_info(project: Path, tomo: bool) -> int:
     env = RelionEnv()
     defs = JobDefs.load()
-    print(f"cryo-savanna {__version__} (job definitions from RELION {defs.version})")
+    print(f"cryo-savanna v{__version__} (job definitions from RELION {defs.version})")
     exe = env.which("relion_pipeliner")
     version = relion_version(exe)
     print(f"relion_pipeliner: {exe or 'NOT FOUND (load RELION 5.1)'}" + (f" (RELION {version})" if version else ""))
@@ -82,7 +82,7 @@ def run_gui(project: Path, tomo: bool | None, readonly: bool, poll_s: float | No
               "pip install 'cryo-savanna[gui]'; --print-tree works without it.", file=sys.stderr)
         return 1
 
-    from cryo_savanna.ui import gc_guard
+    from cryo_savanna.ui import errors, gc_guard
     from cryo_savanna.ui.main_window import MainWindow
     from cryo_savanna.ui.start_project import choose_project
 
@@ -94,7 +94,9 @@ def run_gui(project: Path, tomo: bool | None, readonly: bool, poll_s: float | No
     if chosen is None:
         return 0
     project = chosen
+    reporter = errors.install(app)  # an error nothing caught: in the status bar and a log, not only the terminal
     win = MainWindow(project, tomo=tomo, readonly=readonly, poll_s=poll_s, queue_poll_s=queue_poll_s)
+    reporter.reported.connect(win.show_error)
     win.show()
     rc = app.exec()
     if win.background_busy():
@@ -121,7 +123,7 @@ def main(argv: list[str] | None = None) -> int:
                     help="seconds between looks at the SLURM queue (squeue); 0 turns it off "
                          "(default: Preferences, 20)")
     ap.add_argument("--print-tree", action="store_true", help="print the environment and job tree, no window")
-    ap.add_argument("--version", action="version", version=f"cryo-savanna {__version__}\n{COPYRIGHT}\n{LICENSE_NOTICE}")
+    ap.add_argument("--version", action="version", version=f"cryo-savanna v{__version__}\n{COPYRIGHT}\n{LICENSE_NOTICE}")
     args = ap.parse_args(argv)
     project = args.project.resolve()
     if args.print_tree:

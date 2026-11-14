@@ -14,6 +14,12 @@ import numpy as np
 from cryo_savanna.project.star import StarBlock, loop_columns, read_star
 
 
+def is_text_label(label: str) -> bool:
+    """A column of names or files (rlnTomoName, rlnMicrographName, rlnImageName, rlnOpticsGroupName, ...
+    StarFile): text, also when every value in it looks like a number (tomograms named 001, 002)."""
+    return label.endswith(("Name", "File"))
+
+
 @dataclass
 class Table:
     name: str
@@ -56,7 +62,9 @@ class Table:
         if label not in self._numeric:
             vals = self.data.get(label)
             arr = None
-            if isinstance(vals, np.ndarray) and vals.dtype == np.float64:  # read_compact: already numbers
+            if is_text_label(label):
+                pass  # names are text, whatever they look like
+            elif isinstance(vals, np.ndarray) and vals.dtype == np.float64:  # read_compact: already numbers
                 arr = vals
             elif vals is not None:
                 try:
@@ -66,6 +74,14 @@ class Table:
                     arr = conv if np.isfinite(conv).sum() >= max(1, len(vals) // 2) else None
             self._numeric[label] = arr
         return self._numeric[label]
+
+    def numbers(self, label: str) -> np.ndarray:
+        """The column as floats, for a column that has to be numbers (coordinates, angles): NaN where a
+        value is not one, also when most are not (numeric() says None then)."""
+        arr = self.numeric(label)
+        if arr is None:
+            arr = np.array([_num(v) for v in self.data[label]], dtype=np.float64)
+        return arr
 
     def numeric_columns(self) -> list[str]:
         return [c for c in self.columns if self.numeric(c) is not None]
@@ -82,9 +98,9 @@ COMPACT_CHUNK = 65536
 class _Column:
     """One column of read_compact: float arrays while every value is a number, else text."""
 
-    def __init__(self):
+    def __init__(self, text: bool = False):
         self.chunks: list = []
-        self.text = False
+        self.text = text  # from the start: a column of names (is_text_label)
 
     def add(self, values) -> None:
         if not self.text:
@@ -124,7 +140,7 @@ def read_compact(path: str | os.PathLike, block: str) -> Table | None:
         is_loop = False
 
         def flush() -> None:
-            if rows:
+            if rows and columns is not None:
                 for col, values in zip(columns, zip(*rows)):
                     col.add(values)
                 rows.clear()
@@ -144,7 +160,7 @@ def read_compact(path: str | os.PathLike, block: str) -> Table | None:
                 labels.append(line[1:].split()[0])
                 continue
             if columns is None:
-                columns = [_Column() for _ in labels]
+                columns = [_Column(is_text_label(lab)) for lab in labels]
             toks = tokenize_line(line) if ('"' in line or "'" in line or "#" in line) else line.split()
             if not toks:
                 continue
@@ -157,7 +173,7 @@ def read_compact(path: str | os.PathLike, block: str) -> Table | None:
             if len(rows) >= COMPACT_CHUNK:
                 flush()
         if columns is None:
-            columns = [_Column() for _ in labels]
+            columns = [_Column(is_text_label(lab)) for lab in labels]
         flush()
     return Table(block, labels, {lab: col.result() for lab, col in zip(labels, columns)}, str(path))
 

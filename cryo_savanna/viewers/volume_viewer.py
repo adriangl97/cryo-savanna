@@ -12,7 +12,6 @@ as an outline on the sections, and a local-resolution map can colour the section
 
 from __future__ import annotations
 
-import os
 import time
 from collections.abc import Callable
 from pathlib import Path
@@ -39,17 +38,10 @@ from cryo_savanna.images.render import framing, occupied, render, rotation
 from cryo_savanna.images.volume import Volume, colormap, load_volume, outline, projection, resolution_range, section
 from cryo_savanna.viewers.external import chimerax_script, find_chimerax, launch_chimerax
 from cryo_savanna.viewers.tasks import TaskError, Tasks
+from cryo_savanna.stamps import stamp as _stamp
 
 PLANES = [("XY", 0), ("XZ", 1), ("YZ", 2)]  # (title, axis it cuts)
 MASK_EDGE = (230, 40, 40, 255)
-
-
-def _stamp(path: Path):
-    try:
-        st = os.stat(path)
-    except OSError:
-        return None
-    return st.st_mtime_ns, st.st_size
 
 
 def plane_axes(axis: int) -> tuple[int, int]:
@@ -249,7 +241,8 @@ class SurfaceView(QWidget):
             r, self.frame, self._bounds, self.render_time, self.shown = result
             h, w, _ = r.rgb.shape
             rgba = np.dstack([r.rgb, np.where(r.hit, 255, 0).astype(np.uint8)])  # see-through where no surface
-            self.image = QImage(rgba.tobytes(), w, h, 4 * w, QImage.Format_RGBA8888)
+            # a copy: QImage only points at the bytes it is given, which not every Qt binding keeps alive
+            self.image = QImage(rgba.tobytes(), w, h, 4 * w, QImage.Format_RGBA8888).copy()
             self.hit_fraction = float(r.hit.mean())
             self.message = "" if r.hit.any() else "Nothing above this level"
         self.update()
