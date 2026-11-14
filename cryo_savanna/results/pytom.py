@@ -182,6 +182,68 @@ def save_thresholds(project_dir: Path, job: str, thresholds: dict[str, float | N
     return P.write_selection(str(Path(project_dir) / job), thresholds)
 
 
+@dataclass
+class ExtractSettings:
+    """The maximum number of particles (-n) of each tomogram of an extraction job: ``n_particles`` and
+    ``per_tomogram`` are the job's options (job.star: what a continue uses), ``used`` what each tomogram was
+    extracted with (thresholds.star; None: not known, a job of an older cryo-savanna)."""
+    n_particles: int
+    per_tomogram: dict[str, int]
+    used: dict[str, int | None] = field(default_factory=dict)
+
+    def max_particles(self, name: str) -> int:
+        return self.per_tomogram.get(name, self.n_particles)
+
+    def to_extract(self, names) -> list[str]:
+        """The tomograms a continue of the job extracts again for these settings (all those whose used
+        settings are not known: the job extracts them again anyway)."""
+        return [n for n in names if self.used.get(n) is None or self.used[n] != self.max_particles(n)]
+
+
+def _job_options(project_dir: Path, job: str):
+    from cryo_savanna.jobdefs.pytom_jobs import decode
+    from cryo_savanna.project.jobstar import JobStar
+    js = JobStar.read(Path(project_dir) / job / "job.star")
+    own, _ = decode(js.options.get("other_args", ""))
+    return js, own
+
+
+def read_extract_settings(project_dir: Path, job: str) -> ExtractSettings:
+    """From the job's job.star and thresholds.star. Raises OSError / ValueError / P.Usage."""
+    _, own = _job_options(project_dir, job)
+    try:
+        n = int(own.get("n_particles", "") or 1000)
+    except ValueError:
+        n = 1000
+    out = ExtractSettings(n, P.per_tomogram(own, "tomo_n_particles"))
+    t = loop_columns(Path(project_dir) / job / P.THRESHOLDS, "thresholds", [P.TOMO_NAME, P.COL_MAX])
+    if t is not None and P.TOMO_NAME in t[1]:
+        cols = t[1]
+        for i, name in enumerate(cols[P.TOMO_NAME]):
+            un = _float(cols[P.COL_MAX][i]) if P.COL_MAX in cols else None
+            out.used[name] = int(un) if un is not None else None
+    return out
+
+
+def save_extract_settings(project_dir: Path, job: str, per_tomogram: dict[str, int]) -> None:
+    """Writes the maximum number of particles of some tomograms into the job's job.star (its option
+    tomo_n_particles), for the next continue of the job: it extracts again only the tomograms whose maximum
+    changed. Maxima equal to the job's own are left out."""
+    js, own = _job_options(project_dir, job)
+    try:
+        n = int(own.get("n_particles", "") or 1000)
+    except ValueError:
+        n = 1000
+    from cryo_savanna.jobdefs.pytom_jobs import decode, encode
+    _, other = decode(js.options.get("other_args", ""))
+    own["tomo_n_particles"] = " ".join(f"{k}={v}" for k, v in per_tomogram.items() if v and v != n)
+    text = encode(own, list(own))
+    if other:
+        text += " " + " ".join(other)
+    js.options["other_args"] = text
+    js.write(Path(project_dir) / job / "job.star")
+
+
 def plot_files(project_dir: Path, job: str, folder: str = P.PLOTS_DIR) -> list[str]:
     d = Path(project_dir) / job / folder
     try:

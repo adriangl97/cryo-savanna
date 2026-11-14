@@ -124,7 +124,7 @@ Each job gets the tabs that fit what it made:
 | Tomograms / Picks | ReconstructTomograms, Denoise, Pick, Extract, Class3D | Z slab with side views, denoised and raw side by side, particles where the slab cuts them (of the classes chosen) |
 | Scores | pytom template matching | Every tomogram's status (pending, running, done, failed), run time and pytom's search statistics, updated as the job goes; the score histogram of the tomogram chosen (with the score Gaussian noise passes once) and the maximum projection of its score map along z |
 | Tomograms | pytom template matching | The tomograms and their score maps, Z slab and side views, one beside the other |
-| Thresholds | pytom extraction | The threshold of each tomogram (or one for all), as a line to drag on the histogram of its candidates' scores, with the particles above it on the tomogram; Save rewrites particles.star |
+| Thresholds | pytom extraction | The threshold of each tomogram (or one for all, or for all the same fraction of each one's automatic cut-off), as a line to drag on the histogram of its candidates' scores, with the particles above it on the tomogram; also the maximum number of particles of each tomogram, for a continue of the job; Save rewrites particles.star (and the job's options) |
 | pytom plots | pytom extraction | pytom's own SVG plots (extraction histograms, tophat filter, ROC) |
 | Masks | Tomogram masks | The mask of each tomogram drawn on it: a polygon on the XY slab, through all Z or between two (tilted) planes dragged in the side views; one mask for all tomograms, or each its own; Save rewrites the masks |
 | Tomograms, Tilt series, AreTomo3 | AreTomo3 | The tomograms and the aligned tilt series done so far, updated as the job goes; the AreTomo3 tab plots each tilt series' thickness, tilt axis, dark tilts and CTF resolution, with its status |
@@ -207,8 +207,14 @@ the status) as tomograms finish, so its Scores and Tomograms tabs show the resul
 automatic cut-off (from the number of false positives allowed) or a fixed one, optionally with the
 tophat filter, other tomogram masks, and `pytom_estimate_roc.py`. With "Keep candidates below the
 cut-off", the peaks down to a fraction of each tomogram's cut-off are kept as candidates, and the
-**Thresholds** tab sets the threshold of each tomogram (or one for all) on the histogram of their
-scores, showing the particles above it on the tomogram; **Save thresholds** rewrites particles.star.
+**Thresholds** tab sets the threshold of each tomogram (or one for all, or for all tomograms the
+same fraction of each one's automatic cut-off, e.g. 0.8 ×) on the histogram of their scores, showing
+the particles above it on the tomogram; **Save** rewrites particles.star. There too, the maximum
+number of particles of the tomogram shown can be raised or lowered: Save writes it into the job's
+options ("Max. particles of some tomograms"), and **Continue** extracts again only the tomograms whose
+maximum changed; the others keep their candidates, and every tomogram keeps the threshold chosen for
+it. Changing another setting of the job (e.g. "Candidates down to") extracts every tomogram again,
+with its new cut-off as threshold.
 pytom writes into the extraction job's own directory (the matching job's score maps are linked
 there). The output is RELION 5's: `particles.star` (rlnTomoName, rlnCenteredCoordinate[XYZ]Angst,
 the angles as rlnAngleRot/Tilt/Psi or rlnTomoSubtomogramRot/Tilt/Psi, rlnLCCmax and

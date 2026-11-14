@@ -403,6 +403,59 @@ def test_match_and_extract(project, fake_pytom):
     assert len(read_star(e / P.PARTICLES)["particles"].rows) == 3 + 0 + 3 * 11
 
 
+def _extracted(log):
+    """{tomogram: [-n of each extraction call]} from the fake pytom's log."""
+    out = {}
+    for c in (log.read_text().splitlines() if log.exists() else []):
+        if c.startswith("extract"):
+            w = c.split()
+            name = Path(w[w.index("-j") + 1]).name[:-len("_job.json")]
+            out.setdefault(name, []).append(int(w[w.index("-n") + 1]))
+    return out
+
+
+def test_continue_extracts_only_changed_tomograms(done_jobs, fake_pytom):
+    ex = "External/job016/"
+    e = done_jobs / ex
+    RP.save_thresholds(done_jobs, ex, {"TS_03": 0.45})  # a threshold chosen by hand
+    # again with the same settings: nothing is extracted, the threshold stays
+    res = run_runner(done_jobs, "extract", ex, extract_values())
+    assert res.returncode == 0, res.stderr + res.stdout
+    assert _extracted(fake_pytom) == {} and "kept" in res.stdout
+    assert RP.read_selection(done_jobs, ex).threshold["TS_03"] == pytest.approx(0.45)
+
+    # more particles for one tomogram, as the threshold viewer saves it: only that one again
+    RP.save_extract_settings(done_jobs, ex, {"TS_01": 30, "TS_03": 20})  # 20: the job's, left out
+    own = decode(JobStar.read(e / "job.star").options["other_args"])[0]
+    assert own["tomo_n_particles"] == "TS_01=30" and own["n_particles"] == "20"
+    settings = RP.read_extract_settings(done_jobs, ex)
+    assert settings.max_particles("TS_01") == 30 and settings.to_extract(NAMES) == ["TS_01"]
+    res = run_runner(done_jobs, "extract", ex, own)
+    assert res.returncode == 0, res.stderr + res.stdout
+    assert _extracted(fake_pytom) == {"TS_01": [30, 30]}
+    sel = RP.read_selection(done_jobs, ex)
+    assert sel.counts("TS_01") == (15, 11) and sel.counts("TS_43") == (15, 11)  # the fake has no more above 0.21
+    assert sel.threshold["TS_03"] == pytest.approx(0.45) and sel.counts("TS_03") == (15, 3)
+    assert RP.read_extract_settings(done_jobs, ex).to_extract(NAMES) == []
+
+    # another setting of the job (the candidate fraction): every tomogram again, with the new cut-off as
+    # threshold; each keeps its own maximum
+    fake_pytom.unlink()
+    res = run_runner(done_jobs, "extract", ex, dict(own, candidate_factor="0.5"))
+    assert res.returncode == 0, res.stderr + res.stdout
+    calls = _extracted(fake_pytom)
+    assert sorted(calls) == NAMES and calls["TS_01"] == [30, 30] and calls["TS_43"] == [20, 20]
+    sel = RP.read_selection(done_jobs, ex)
+    assert sel.counts("TS_43") == (18, 11) and sel.threshold["TS_03"] == pytest.approx(0.3)
+
+
+def test_per_tomogram_option_errors():
+    assert P.per_tomogram({"tomo_n_particles": "TS_01=30 TS_02=5"}, "tomo_n_particles") == {"TS_01": 30, "TS_02": 5}
+    for bad in ("TS_01", "TS_01=", "=3", "TS_01=x", "TS_01=0"):
+        with pytest.raises(P.Usage):
+            P.per_tomogram({"tomo_n_particles": bad}, "tomo_n_particles")
+
+
 def test_failed_tomogram_and_continue(project, fake_pytom):
     job = "External/job015/"
     res = run_runner(project, "match", job, match_values(gpu_ids="0"), env={"FAKE_FAIL": "TS_43"})
@@ -573,6 +626,27 @@ def test_threshold_view(qtbot, done_jobs, monkeypatch):
     assert len(read_star(done_jobs / "External/job016/particles.star")["particles"].rows) == 5 + 4 * 11
     v.refresh()  # its own save: not read again
     assert not v.tasks.busy()
+
+    # every tomogram's threshold as a fraction of its own automatic cut-off (0.3 in the fake)
+    v.frac_spin.setValue(0.8)
+    assert all(v.sel.threshold[n] == pytest.approx(0.24) for n in NAMES) and v.dirty
+    assert all(v.table.item(i, 4).text() == "14" for i in range(5))  # 0.5 down to 0.24
+    assert v.viewer.picks.count("TS_01") == 14
+    v._reset()
+    assert v.frac_spin.value() == pytest.approx(1.0) and v.table.item(0, 4).text() == "11"
+    assert v.save(ask=False)
+
+    # the maximum number of particles of a tomogram, for a continue of the job
+    assert v.settings is not None and v.max_spin.value() == 20
+    assert v.table.item(0, 5).text() == "20" and not v.redo_label.text()
+    v.max_spin.setValue(50)  # TS_01, the tomogram shown
+    assert v.table.item(0, 5).text() == "20 → 50" and v.table.item(1, 5).text() == "20"
+    assert "TS_01" in v.redo_label.text() and "TS_03" not in v.redo_label.text() and v.save_btn.isEnabled()
+    v.table.selectRow(1)
+    assert v.max_spin.value() == 20
+    assert v.save(ask=False) and not v.save_btn.isEnabled()
+    own = decode(JobStar.read(done_jobs / "External/job016/job.star").options["other_args"])[0]
+    assert own["tomo_n_particles"] == "TS_01=50" and own["n_particles"] == "20"  # the rest as it was
 
 
 def test_svg_view(qtbot, done_jobs):

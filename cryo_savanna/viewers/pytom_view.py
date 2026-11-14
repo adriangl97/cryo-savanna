@@ -9,8 +9,11 @@ extraction starts from) and the maximum projection of the map along z, where par
 
 Thresholds (extraction): every tomogram's automatic cut-off and the threshold used, the histogram of its
 candidates' scores with the threshold as a line to drag (or typed; one threshold for all tomograms, or
-one each), and the tomogram (or its score map) with the particles above the threshold. "Save" rewrites
-particles.star and thresholds.star in the job (as the job wrote them at its end).
+one each, or for all of them the same fraction of each one's automatic cut-off), and the tomogram (or its score map) with the particles above the threshold. "Save" rewrites
+particles.star and thresholds.star in the job (as the job wrote them at its end). Below, the maximum number
+of particles of the tomogram shown can be changed too: "Save" writes it into the job's options (job.star),
+and continuing the job extracts again only the tomograms whose maximum changed (the others keep their
+candidates and thresholds).
 
 pytom plots: the SVG plots pytom wrote (extraction histograms, tophat filter, ROC).
 """
@@ -33,6 +36,7 @@ from qtpy.QtWidgets import (
     QListWidget,
     QMessageBox,
     QPushButton,
+    QSpinBox,
     QSplitter,
     QTableWidget,
     QTableWidgetItem,
@@ -253,7 +257,7 @@ class PytomScoresView(QWidget):
 # ---------------------------------------------------------------------------- extraction
 
 class PytomThresholdView(QWidget):
-    COLUMNS = ["Tomogram", "Automatic cut-off", "Threshold", "Candidates", "Selected"]
+    COLUMNS = ["Tomogram", "Automatic cut-off", "Threshold", "Candidates", "Selected", "Max. particles"]
 
     def __init__(self, project_dir: Path, job: str, summary: str = "", diameter: float | None = None,
                  cache=None, parent=None):
@@ -262,8 +266,10 @@ class PytomThresholdView(QWidget):
         self.cache, self.diameter = cache, diameter
         self.tasks = Tasks(self)
         self.sel: R.Selection | None = None
+        self.settings: R.ExtractSettings | None = None  # the job's -n per tomogram (for a continue)
         self.current: str | None = None
-        self.dirty = False
+        self.dirty = False  # thresholds not saved
+        self.settings_dirty = False  # extraction settings not saved
         self._stamp = None
         self._syncing = False
         self.viewer = None
@@ -279,16 +285,44 @@ class PytomThresholdView(QWidget):
         self.reset_btn = QPushButton("Automatic")
         self.reset_btn.setToolTip("Back to pytom's automatic cut-off (of each tomogram)")
         self.reset_btn.clicked.connect(self._reset)
-        self.save_btn = QPushButton("Save thresholds")
-        self.save_btn.setToolTip("Rewrite particles.star (and thresholds.star) of this job with these thresholds")
+        self.frac_spin = QDoubleSpinBox()
+        self.frac_spin.setDecimals(2)
+        self.frac_spin.setRange(0.01, 5.0)
+        self.frac_spin.setSingleStep(0.05)
+        self.frac_spin.setValue(1.0)
+        self.frac_spin.setPrefix("All: ")
+        self.frac_spin.setSuffix(" × automatic cut-off")
+        self.frac_spin.setToolTip("The threshold of every tomogram: this fraction of its own automatic cut-off "
+                                  "(below 1: more particles; the candidates go down to the job's \"Candidates "
+                                  "down to\" fraction)")
+        self.frac_spin.valueChanged.connect(self._on_frac)
+        self.save_btn = QPushButton("Save")
+        self.save_btn.setToolTip("Rewrite particles.star (and thresholds.star) of this job with these thresholds, "
+                                 "and write the maximum numbers of particles into its options (job.star), for "
+                                 "when the job is continued")
         self.save_btn.clicked.connect(self.save)
         self.save_btn.setEnabled(False)
         bar = QHBoxLayout()
         bar.setContentsMargins(0, 0, 0, 0)
-        for w in (self.same, self.spin, self.reset_btn):
+        for w in (self.same, self.spin, self.reset_btn, self.frac_spin):
             bar.addWidget(w)
         bar.addStretch(1)
         bar.addWidget(self.save_btn)
+
+        self.max_spin = QSpinBox()
+        self.max_spin.setRange(1, 1_000_000)
+        self.max_spin.setSingleStep(100)
+        self.max_spin.setPrefix("Max. particles ")
+        self.max_spin.setToolTip("At most this many peaks of the tomogram shown (pytom's -n), as candidates and "
+                                 "particles. Saved, continuing the job extracts this tomogram again.")
+        self.max_spin.valueChanged.connect(self._on_max)
+        self.redo_label = QLabel()
+        bar2 = QHBoxLayout()
+        bar2.setContentsMargins(0, 0, 0, 0)
+        bar2.addWidget(QLabel("Extraction (on continue):"))
+        bar2.addWidget(self.max_spin)
+        bar2.addWidget(self.redo_label, 1)
+        self._set_settings_enabled(False)
 
         self.table = _table(self.COLUMNS)
         self.table.itemSelectionChanged.connect(self._on_row)
@@ -323,6 +357,7 @@ class PytomThresholdView(QWidget):
         lay = QVBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
         lay.addLayout(bar)
+        lay.addLayout(bar2)
         lay.addWidget(self.split, 1)
         lay.addWidget(self.info)
         self.load()
@@ -333,7 +368,7 @@ class PytomThresholdView(QWidget):
         return _stamp(d / P.CANDIDATES), _stamp(d / P.THRESHOLDS)
 
     def refresh(self) -> None:
-        if self._files() != self._stamp and not self.dirty:
+        if self._files() != self._stamp and not self.dirty and not self.settings_dirty:
             self.load()
 
     def load(self) -> None:
@@ -353,7 +388,11 @@ class PytomThresholdView(QWidget):
                         if s.value(i, P.COL_JOB) else None
                     if d:
                         break
-            return sel, d
+            try:
+                settings = R.read_extract_settings(project, job)
+            except (OSError, ValueError, P.Usage):  # no job.star (or not readable): nothing to change
+                settings = None
+            return sel, d, settings
 
         self.tasks.run(read, self._on_loaded, channel="load")
 
@@ -361,9 +400,10 @@ class PytomThresholdView(QWidget):
         if isinstance(result, TaskError):
             self.info.setText(f"⚠ {result}")
             return
-        (self.sel, diameter), self.dirty = result, False
+        (self.sel, diameter, self.settings), self.dirty, self.settings_dirty = result, False, False
         self.diameter = self.diameter or diameter
         self.save_btn.setEnabled(False)
+        self._set_settings_enabled(self.settings is not None)
         all_lcc = np.concatenate([v for v in self.sel.lcc.values()]) if self.sel.lcc else np.empty(0)
         if len(all_lcc):
             hi = float(np.nanmax(all_lcc))
@@ -392,9 +432,41 @@ class PytomThresholdView(QWidget):
             cand, chosen = sel.counts(n)
             a, t = sel.auto.get(n), sel.threshold.get(n)
             for c, it in enumerate([_item(n), _item(_fmt(a), a), _item(_fmt(t), t), _item(cand, cand),
-                                    _item(chosen, chosen)]):
+                                    _item(chosen, chosen), _item("")]):
                 self.table.setItem(i, c, it)
+            self._update_max_cell(n, i)
         self.table.blockSignals(False)
+        self._update_redo()
+
+    def _update_max_cell(self, name: str, row: int | None = None) -> None:
+        st = self.settings
+        if st is None:
+            return
+        i = self.sel.names.index(name) if row is None else row
+        used, want = st.used.get(name), st.max_particles(name)
+        text = str(want) if used in (None, want) else f"{used} → {want}"
+        self.table.item(i, 5).setText(text)
+        self.table.item(i, 5).setData(Qt.UserRole, want)
+        self.table.item(i, 5).setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
+
+    def _update_redo(self) -> None:
+        st = self.settings
+        if st is None or self.sel is None:
+            self.redo_label.setText("")
+            return
+        redo = st.to_extract(self.sel.names)
+        if not redo:
+            self.redo_label.setText("")
+        elif len(redo) == len(self.sel.names):
+            self.redo_label.setText("   continuing the job extracts every tomogram again"
+                                    + ("   ·   not saved" if self.settings_dirty else ""))
+        else:
+            shown = ", ".join(redo[:6]) + (f" and {len(redo) - 6} more" if len(redo) > 6 else "")
+            self.redo_label.setText(f"   continuing the job extracts again: {shown}"
+                                    + ("   ·   not saved" if self.settings_dirty else ""))
+
+    def _set_settings_enabled(self, on: bool) -> None:
+        self.max_spin.setEnabled(on)
 
     def _update_row(self, name: str, row: int | None = None) -> None:
         i = self.sel.names.index(name) if row is None else row
@@ -408,7 +480,7 @@ class PytomThresholdView(QWidget):
             return
         total = sum(self.sel.counts(n)[1] for n in self.sel.names)
         cands = sum(self.sel.counts(n)[0] for n in self.sel.names)
-        state = "   ·   not saved" if self.dirty else ""
+        state = "   ·   not saved" if self.dirty or self.settings_dirty else ""
         self.info.setText(f"{total} particles selected of {cands} candidates in {len(self.sel.names)} tomograms"
                           f"{state}   ·   {self.job}{P.PARTICLES}")
 
@@ -443,6 +515,8 @@ class PytomThresholdView(QWidget):
         if thr is not None:
             self.spin.setValue(thr)
             self.line.setValue(thr)
+        if self.settings is not None and self.current is not None:
+            self.max_spin.setValue(self.settings.max_particles(self.current))
         self.auto_line.setVisible(auto is not None and not self.same.isChecked())
         if auto is not None:
             self.auto_line.setValue(auto)
@@ -493,14 +567,54 @@ class PytomThresholdView(QWidget):
             self._apply_keep(self.viewer.picks)
             self.viewer._on_classes()  # recount and redraw with the new selection
 
+    # -- extraction settings (for a continue of the job) -----------------------------------------
+    def _on_max(self, v: int) -> None:
+        if not self._syncing:
+            self.set_max_particles(int(v))
+
+    def _on_frac(self, v: float) -> None:
+        if not self._syncing:
+            self.set_fraction(float(v))
+
+    def set_max_particles(self, value: int, name: str | None = None) -> None:
+        """The maximum number of particles of one tomogram (the one shown), for when the job is continued."""
+        name = name or self.current
+        if self.settings is None or name is None:
+            return
+        self.settings.per_tomogram[name] = int(value)
+        if self.current == name:
+            self._syncing = True
+            self.max_spin.setValue(int(value))
+            self._syncing = False
+        self._settings_changed()
+        self._update_max_cell(name)
+
+
+    def _settings_changed(self) -> None:
+        self.settings_dirty = True
+        self.save_btn.setEnabled(self._writable())
+        self._update_redo()
+        self._update_info()
+
     def _reset(self) -> None:
+        """Back to the automatic cut-offs (none: nothing selected)."""
+        self.set_fraction(1.0, keep_missing=False)
+
+    def set_fraction(self, fraction: float, keep_missing: bool = True) -> None:
+        """The threshold of every tomogram: this fraction of its own automatic cut-off (tomograms without
+        one keep theirs, unless not ``keep_missing``)."""
         if self.sel is None:
             return
         self.same.blockSignals(True)
         self.same.setChecked(False)
         self.same.blockSignals(False)
+        self._syncing = True
+        self.frac_spin.setValue(fraction)
+        self._syncing = False
         for i, n in enumerate(self.sel.names):
-            self.sel.threshold[n] = self.sel.auto.get(n)
+            a = self.sel.auto.get(n)
+            if a is not None or not keep_missing:
+                self.sel.threshold[n] = None if a is None else fraction * a
             self._update_row(n, i)
         self.dirty = True
         self.save_btn.setEnabled(self._writable())
@@ -529,23 +643,38 @@ class PytomThresholdView(QWidget):
             return []
 
     def save(self, ask: bool = True) -> bool:
+        """The thresholds into particles.star / thresholds.star, the extraction settings into job.star."""
         if self.sel is None or not self._writable():
             return False
-        users = self.users()
-        if ask and users:
-            text = ("These jobs already used this job's particles, which will change:\n  " + "\n  ".join(
-                u.rstrip("/") for u in users) + "\n\nSave the new thresholds anyway?")
-            if QMessageBox.question(self, "Save thresholds", text) != QMessageBox.Yes:
+        said = []
+        if self.dirty:
+            users = self.users()
+            if ask and users:
+                text = ("These jobs already used this job's particles, which will change:\n  " + "\n  ".join(
+                    u.rstrip("/") for u in users) + "\n\nSave the new thresholds anyway?")
+                if QMessageBox.question(self, "Save thresholds", text) != QMessageBox.Yes:
+                    return False
+            try:
+                counts = R.save_thresholds(self.project_dir, self.job, dict(self.sel.threshold))
+            except (OSError, ValueError, P.Usage) as e:
+                QMessageBox.warning(self, "Save thresholds", f"Could not write the particles: {e}")
                 return False
-        try:
-            counts = R.save_thresholds(self.project_dir, self.job, dict(self.sel.threshold))
-        except (OSError, ValueError, P.Usage) as e:
-            QMessageBox.warning(self, "Save thresholds", f"Could not write the particles: {e}")
-            return False
-        self.dirty = False
+            self.dirty = False
+            self._stamp = self._files()
+            said.append(f"{sum(c[1] for c in counts.values())} particles in {self.job}{P.PARTICLES}")
+        if self.settings_dirty and self.settings is not None:
+            try:
+                R.save_extract_settings(self.project_dir, self.job, dict(self.settings.per_tomogram))
+            except (OSError, ValueError, P.Usage) as e:
+                QMessageBox.warning(self, "Save", f"Could not write the job's options ({self.job}job.star): {e}")
+                return False
+            self.settings_dirty = False
+            redo = self.settings.to_extract(self.sel.names)
+            said.append(f"continue the job to extract again: {', '.join(redo)}" if redo else
+                        "the job's extraction settings")
         self.save_btn.setEnabled(False)
-        self._stamp = self._files()
-        self.info.setText(f"Saved: {sum(c[1] for c in counts.values())} particles in {self.job}{P.PARTICLES}")
+        self._update_redo()
+        self.info.setText("Saved: " + "; ".join(said) if said else "Nothing to save")
         return True
 
 

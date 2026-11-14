@@ -294,6 +294,9 @@ def extract_options() -> tuple[list[OptionDef], list[Tab], dict[int, Group]]:
            node_type="ProcessData.star", pattern="pytom match (*pytom_match.star)"),
         TOMO_NAMES,
         _o("n_particles", "Max. particles per tomogram:", "1000", "-n: at most this many peaks per tomogram."),
+        _o("tomo_n_particles", "Max. particles of some tomograms:", "", "Another maximum for some tomograms, "
+           "as <rlnTomoName>=<number> separated by spaces (e.g. TS_01=3000); the Thresholds view sets it. When "
+           "the job is continued, only the tomograms whose settings changed are extracted again."),
         _o("particle_diameter", "Particle diameter (Å):", "", "Peaks closer than half of it to a higher one are "
            "left out. Empty: the matching job's."),
         _radio("cut_off_mode", "Cut-off:", (R.CUT_AUTO, R.CUT_FIXED), R.CUT_AUTO,
@@ -332,7 +335,7 @@ def extract_options() -> tuple[list[OptionDef], list[Tab], dict[int, Group]]:
     tabs = [
         Tab("Input", (Row(("in_match",)), Row(("tomo_names",)))),
         Tab("Extraction", (
-            Row(("n_particles",)), Row(("particle_diameter",)), Row(("cut_off_mode",)),
+            Row(("n_particles",)), Row(("tomo_n_particles",)), Row(("particle_diameter",)), Row(("cut_off_mode",)),
             Row(("n_false_positives",), group=1), Row(("cut_off",), group=2), Row(("do_candidates",)),
             Row(("candidate_factor",), group=3), Row(("tophat",)), Row(("tophat_connectivity",), group=4),
             Row(("tophat_bins",), group=4), Row(("plot_bins",)), Row(("tomogram_mask_mode",)),
