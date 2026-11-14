@@ -8,7 +8,7 @@ jobs through RELION's own `relion_pipeliner`, and takes its queue settings from 
 environment of the loaded RELION module, as RELION's GUI does. The two GUIs are fully compatible
 and can be used interchangeably, even at the same time, on the same project.
 
-**Status:** version 0.9. Early but working. Made for and checked against RELION 5.1.1. See the
+**Status:** Fully functional and in active development adding new features and wrappers. Made for and checked against RELION 5.1.1. See the
 [user guide](docs/user_guide.md).
 
 > **Disclaimer:** this project uses AI-assisted coding. Please report any issues you find.
