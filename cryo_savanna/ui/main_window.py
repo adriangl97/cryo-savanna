@@ -383,7 +383,7 @@ class MainWindow(QMainWindow):
         exe = self.env.which("relion_pipeliner")
         # never asked here: --version can take long on a busy node (the background check fills it in)
         version = self.relion_version or ("still asking" if self._version_call is not None else "?")
-        rows = [("cryo-savanna", __version__), ("Job definitions", f"RELION {self.defs.version}"),
+        rows = [("cryo-savanna", f"v{__version__}"), ("Job definitions", f"RELION {self.defs.version}"),
                 ("relion_pipeliner", f"{exe} ({version})" if exe else "not on PATH"),
                 ("Qt", f"{qtpy.API_NAME} {qtpy.QT_VERSION}"), ("Project", str(self.loader.project_dir))]
         notice = html_escape(LICENSE_NOTICE).replace("\n", "<br>")
@@ -399,7 +399,7 @@ class MainWindow(QMainWindow):
 
     def _update_title(self) -> None:
         d = self.loader.project_dir if getattr(self, "loader", None) else ""
-        self.setWindowTitle(f"cryo-savanna {__version__} — {d}" + (" [tomo]" if self.tomo else "")
+        self.setWindowTitle(f"cryo-savanna v{__version__} — {d}" + (" [tomo]" if self.tomo else "")
                             + (" [read-only]" if self.readonly else ""))
 
     def _fit_graph(self) -> None:

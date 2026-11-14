@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# Copyright (C) 2026 Adrián González-López
+# SPDX-License-Identifier: GPL-2.0-or-later
+exec "$(git rev-parse --show-toplevel)/tools/hooks/set_version.sh"

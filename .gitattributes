@@ -1,0 +1,2 @@
+# the version of each commit is written by its hook (tools/hooks/set_version.sh): a merge gets its own
+cryo_savanna/_version.py merge=version

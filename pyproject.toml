@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "cryo-savanna"
-version = "0.9"
+dynamic = ["version"]  # cryo_savanna/_version.py, written at each commit by tools/hooks/set_version.sh
 description = "An alternative GUI for RELION 5.1 projects (SPA and tomography), not made by the RELION developers"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -34,6 +34,9 @@ dev = ["pytest>=7", "pytest-qt>=4", "ruff>=0.6", "mypy>=1.10"]
 [project.scripts]
 cryo-savanna = "cryo_savanna.app:main"
 savanna = "cryo_savanna.app:main"
+
+[tool.setuptools.dynamic]
+version = { attr = "cryo_savanna._version.__version__" }
 
 [tool.setuptools.packages.find]
 include = ["cryo_savanna*"]

@@ -8,7 +8,10 @@ Commands below are run from the root of a clone of this repository.
 mamba env create -f environment.yml -p ./env
 ./env/bin/python -m pip install --no-deps -e .   # edits in the checkout take effect without reinstalling
 ./env/bin/python -m pytest
+tools/install_hooks.sh   # once per clone: each commit writes its version (below)
 ```
+
+The version is the date of the commit, `2026.11.14`, and `2026.11.14.2`, `.3`, ... for the 2nd, 3rd, ... commit of that day in the clone (all branches); the app shows it as `v2026.11.14`. The pre-commit hook writes it into `cryo_savanna/_version.py` (`pyproject.toml` reads it from there), and a merge commit gets its own through a merge driver of that file, so it is in the source and needs no git at runtime. Leading zeros are dropped (`2026.1.5`), as pip does. `git commit --amend` counts the commit it replaces, and `--no-verify` skips the hook.
 
 Make the synthetic projects to look at:
 
@@ -58,6 +61,7 @@ most of what it says there is about Qt's enums through qtpy and about widgets ma
 | `tools/pipeline_ops_ref/` | RELION's own alias/mark/delete/undelete code as a small program, to test `project/ops.py` against |
 | `cryo_savanna/project/rebuild.py`, `cryo_savanna/ui/rebuild_dialog.py` | A pipeline rebuilt from job folders (lost `default_pipeline.star`, jobs run from the command line), and its review |
 | `cryo_savanna/project/selection.py`, `cryo_savanna/viewers/selectors.py` | Class selection and tilt-image exclusion done in cryo-savanna, writing RELION's files |
+| `tools/hooks/`, `tools/install_hooks.sh` | The version of each commit (the date), written by the pre-commit hook |
 | `environment.yml`, `environment.lock.yml`, `environment-pyqt5.yml` | conda/mamba environments that install cryo-savanna |
 | `bin/cryo-savanna`, `bin/savanna` (a link to it) | Run cryo-savanna from a checkout without installing it (development) |
 | `docs/user_guide.md` | The user guide |
