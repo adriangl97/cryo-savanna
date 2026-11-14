@@ -91,6 +91,7 @@ COL_STATUS, COL_SECONDS, COL_LOG = P + "Status", P + "Seconds", P + "Log"
 COL_ALN, COL_TOMOGRAM, COL_TILTS, COL_DARK = P + "Alignment", P + "Tomogram", P + "Tilts", P + "DarkTilts"
 COL_AXIS, COL_THICKNESS, COL_ALPHA, COL_BETA = P + "TiltAxis", P + "ThicknessAngst", P + "AlphaOffset", P + "BetaOffset"
 COL_CTF_RES = P + "CtfMaxResolution"
+GEN_TS_FILE, GEN_ALN_MODE = P + "TiltSeriesFile", P + "AlignmentMode"  # data_general of aretomo3.star
 TOMO_NAME, TS_STAR = "rlnTomoName", "rlnTomoTiltSeriesStarFile"
 ALIGN_COLS = ("rlnTomoXTilt", "rlnTomoYTilt", "rlnTomoZRot", "rlnTomoXShiftAngst", "rlnTomoYShiftAngst")
 CTF_COLS = ("rlnDefocusU", "rlnDefocusV", "rlnDefocusAngle", "rlnCtfMaxResolution", "rlnCtfFigureOfMerit")
@@ -704,7 +705,7 @@ def write_tables(job_dir, opts, columns, rows, state):
                       s.get("tomo", {}).get("rlnTomoReconstructedTomogram", ""), i.get("tilts", ""), i.get("dark", ""),
                       v(i.get("axis")), v(i.get("thickness"), "%.1f"), v(i.get("alpha")), v(i.get("beta")),
                       v(i.get("ctf_res"))])
-    general = {P + "TiltSeriesFile": text(opts, "in_tiltseries"), P + "Alignment": text(opts, "alignment") or ALIGN_ARETOMO}
+    general = {GEN_TS_FILE: text(opts, "in_tiltseries"), GEN_ALN_MODE: text(opts, "alignment") or ALIGN_ARETOMO}
     B.write_star(os.path.join(job_dir, SUMMARY), [("general", general, None, None), ("global", None, summary_cols, table)])
 
     done = [r for r in rows if state[r[TOMO_NAME]]["status"] == "done"]

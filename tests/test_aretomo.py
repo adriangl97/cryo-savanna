@@ -295,7 +295,9 @@ def test_align_and_reconstruct(project, fake_aretomo):
     assert [x[A.COL_STATUS] for x in s] == ["done"] * 5
     assert s[0][A.COL_DARK] == "1" and s[0][A.COL_TILTS] == "40" and float(s[0][A.COL_THICKNESS]) == pytest.approx(1620)
     assert float(s[0][A.COL_AXIS]) == pytest.approx(85.3) and float(s[0][A.COL_ALPHA]) == 0.5
-    nodes = (d / P.OUTPUT_NODES).read_text()
+    gen = read_star(d / A.SUMMARY)["general"].as_dict()
+    assert gen[A.GEN_ALN_MODE] == A.ALIGN_ARETOMO and A.COL_ALN not in gen
+    nodes =(d / P.OUTPUT_NODES).read_text()
     assert A.NODE_ALIGNED in nodes and A.NODE_TOMOGRAMS in nodes and A.NODE_SUMMARY in nodes
     # run again (continue): everything was done
     fake_aretomo.unlink()
