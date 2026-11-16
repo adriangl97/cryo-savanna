@@ -463,6 +463,7 @@ class MainWindow(QMainWindow):
     def load_summaries_now(self) -> None:
         """Read all job summaries synchronously (tests and screenshots)."""
         reader = SummaryReader(self.loader.project_dir)
+        assert self.snapshot is not None, "no project read yet"
         self._on_summaries(self.loader.project_dir,
                            {n: reader.summarize(i, self.snapshot.pipeline) for n, i in self.snapshot.jobs.items()})
 
@@ -557,6 +558,7 @@ class MainWindow(QMainWindow):
 
     def queue_now(self) -> QueueState:
         """Look at the queue synchronously (tests)."""
+        assert self.slurm_monitor is not None and self.snapshot is not None, "no project read yet"
         state = self.slurm_monitor.poll({n: j.status for n, j in self.snapshot.jobs.items()})
         self._show_queue(state)
         return state
@@ -575,6 +577,7 @@ class MainWindow(QMainWindow):
         self._start(_Call(("history", monitor, job), history))
 
     def history_now(self, job: str) -> None:
+        assert self.slurm_monitor is not None, "no project read yet"
         self.info.set_history(job, self.slurm_monitor.history(job))
 
     def _start(self, call: _Call) -> None:
@@ -718,6 +721,8 @@ class MainWindow(QMainWindow):
     def set_main_input(self, job: str, node: str) -> None:
         """Place ``job`` under the producer of ``node`` in the list and the tree ("": the default again)."""
         try:
+            if self.loader.main_inputs is None:  # not kept for this project
+                return
             self.loader.main_inputs.set(job, node or None)
         except OSError as e:
             QMessageBox.warning(self, "Main input", f"Cannot save the choice: {e}")
@@ -727,6 +732,8 @@ class MainWindow(QMainWindow):
 
     def set_star(self, job: str, on: bool) -> None:
         try:
+            if self.loader.stars is None:
+                return
             self.loader.stars.set(job, on)
         except OSError as e:
             QMessageBox.warning(self, "Star", f"Cannot save the star: {e}")

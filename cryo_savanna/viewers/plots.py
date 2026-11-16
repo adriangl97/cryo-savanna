@@ -155,8 +155,8 @@ class TablePlot(QWidget):
                 p = self.grid.addPlot(row=k // ncol, col=k % ncol, title=c.removeprefix("rln"))
                 p.setLabel("left", "Count")
                 if len(v):
-                    y, x = np.histogram(v, bins=min(80, max(10, int(np.sqrt(len(v))))))
-                    p.plot(x, y, stepMode="center", fillLevel=0, brush=(0, 114, 178, 120), pen=series_pen(0))
+                    counts, edges = np.histogram(v, bins=min(80, max(10, int(np.sqrt(len(v))))))
+                    p.plot(edges, counts, stepMode="center", fillLevel=0, brush=(0, 114, 178, 120), pen=series_pen(0))
                     p.setTitle(f"{c.removeprefix('rln')}<br><span style='font-size:9pt;color:gray'>"
                                f"median {np.median(v):.4g} · mean {v.mean():.4g} · n={len(v)}</span>")
             self.info.setText(f"{len(t)} rows")
@@ -166,6 +166,8 @@ class TablePlot(QWidget):
         if y is None:
             return
         x = np.arange(1, len(y) + 1, dtype=float) if self.xcol.currentIndex() <= 0 else t.numeric(self.xcol.currentText())
+        if x is None:
+            return
         p = self.grid.addPlot()
         p.setLabel("bottom", self.xcol.currentText().removeprefix("rln"))
         p.setLabel("left", ycol.removeprefix("rln"))

@@ -212,6 +212,8 @@ class MicrographViewer(QWidget):
         self.circle.setValue(d or 100)
 
     def _count_picks(self) -> None:
+        if self.mics is None or self.pickset is None:
+            return
         ps, names, classes = self.pickset, list(self.mics.names), self.classes.selected()
         which = self.classes.describe()
 

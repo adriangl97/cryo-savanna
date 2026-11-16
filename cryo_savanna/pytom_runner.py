@@ -210,7 +210,7 @@ def tilt_table(row, opts):
 
 def ctf_values(row, star):
     """(voltage kV, Cs mm, amplitude contrast) from the tomogram set (else the tilt table's first row)."""
-    first = {}
+    first = {}  # type: dict[str, str]
     vals = []
     for label in ("rlnVoltage", "rlnSphericalAberration", "rlnAmplitudeContrast"):
         v = _f(row, label)
@@ -781,7 +781,7 @@ def previous_extraction(job_dir):
         cand = loop_block(ca, "particles")
     except (Usage, OSError):
         return {}, {}, []
-    by = {}
+    by = {}  # type: dict[str, list[dict[str, str]]]
     for r in cand.dicts():
         by.setdefault(r.get(TOMO_NAME, ""), []).append(r)
     return dict((r[TOMO_NAME], r) for r in trows), by, cand.columns

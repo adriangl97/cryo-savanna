@@ -65,6 +65,7 @@ from qtpy.QtWidgets import (
 )
 
 from cryo_savanna.env.relion_env import RelionEnv, RelionEnvError
+from cryo_savanna.jobdefs.cli_tools import CliVariant
 from cryo_savanna.jobdefs.flags import Flag, FlagSource, command_flags, program_for
 from cryo_savanna.jobdefs.model import JobVariant, OptionDef, Row
 from cryo_savanna.jobdefs.pytom_jobs import PytomVariant
@@ -204,8 +205,10 @@ class SliderWidget(TextWidget):
         self.edit.setMaximumWidth(110)
         self.slider = None
         self._syncing = False
+        self.range: tuple[float, float] | None = None  # (min, max) of the slider; None: no slider
         lo, hi = opt.min, opt.max
         if lo is not None and hi is not None and hi > lo:
+            self.range = (lo, hi)
             step = opt.step if opt.step and opt.step > 0 else (hi - lo) / 100
             self.n = max(1, min(self.STEPS_MAX, round((hi - lo) / step)))
             self.slider = QSlider(Qt.Horizontal)
@@ -217,11 +220,12 @@ class SliderWidget(TextWidget):
             self.layout_.addStretch(1)
 
     def _from_slider(self, i: int) -> None:
-        if self._syncing:
+        if self._syncing or self.range is None:
             return
-        v = self.opt.min + (self.opt.max - self.opt.min) * i / self.n
+        lo, hi = self.range
+        v = lo + (hi - lo) * i / self.n
         step = self.opt.step or 0
-        if step >= 1 and float(step).is_integer() and float(self.opt.min).is_integer():
+        if step >= 1 and float(step).is_integer() and float(lo).is_integer():
             text = str(int(round(v)))
         else:
             text = f"{v:.6g}"
@@ -230,15 +234,15 @@ class SliderWidget(TextWidget):
         self._syncing = False
 
     def _to_slider(self, text: str) -> None:
-        if self._syncing or self.slider is None:
+        if self._syncing or self.slider is None or self.range is None:
             return
         try:
             v = float(text)
         except ValueError:
             return
+        lo, hi = self.range
         self._syncing = True
-        self.slider.setValue(round((min(max(v, self.opt.min), self.opt.max) - self.opt.min)
-                                   / (self.opt.max - self.opt.min) * self.n))
+        self.slider.setValue(round((min(max(v, lo), hi) - lo) / (hi - lo) * self.n))
         self._syncing = False
 
     def set_value(self, v: str) -> None:
@@ -324,7 +328,7 @@ class NodeWidget(FileWidget):
                 n.type_label, n.type_depth, self.opt.node_type, self.opt.node_type_depth)
                 and _name_matches(n.name, self.opt.pattern)]
             for n in reversed(nodes):  # newest jobs first
-                pr = pipeline.processes.get(n.producer)
+                pr = pipeline.processes.get(n.producer) if n.producer else None
                 alias = f"   ({pr.alias.rstrip('/')})" if pr is not None and pr.has_alias else ""
                 self.combo.addItem(n.name + alias, n.name)
         self.combo.setCurrentIndex(-1)
@@ -551,7 +555,7 @@ class JobEditor(QWidget):
     def _type_name(self, variant: JobVariant) -> str:
         if isinstance(variant, PytomVariant):  # pytom, AreTomo3, tomogram masks (jobdefs/external_jobs.py)
             return f"{variant.program} (runs as an External job)"
-        if getattr(variant, "is_cli", False):
+        if isinstance(variant, CliVariant):
             return f"{variant.program} (CLI tool, runs as an External job)"
         return self.type_names.get(variant.label, variant.dirname)
 
@@ -712,10 +716,12 @@ class JobEditor(QWidget):
         continued or cloned, else of the newest job of this type."""
         candidates = [self.source_job] if self.source_job else []
         if self.pipeline is not None and self.variant is not None:
+            own = self.variant.label
+
             def same_type(label: str) -> bool:
                 # whatever RELION added to the label (relion.autopick.log is a relion.autopick job)
                 jt = job_type_for_label(label)
-                return label == self.variant.label or (jt is not None and jt.label == self.variant.label)
+                return label == own or (jt is not None and jt.label == own)
             candidates += [n for n, pr in reversed(self.pipeline.processes.items())
                            if n != self.source_job and same_type(pr.type_label)]
         for job in candidates[:20]:
@@ -781,11 +787,18 @@ class JobEditor(QWidget):
     def jobstar(self, job_dir: str | None = None) -> JobStar:
         """The job.star to submit. A CLI tool job needs its directory (outputs go there): the job
         being continued or overwritten, else the one the next new job will get."""
-        v = self.variant
+        v = self._variant
         if self.is_cli:
+            assert isinstance(v, (CliVariant, PytomVariant))  # the forms of their own (is_cli)
             return v.make_jobstar(self.values(), self.mode == MODE_CONTINUE, job_dir or self.job_dir(), self.pipeline)
         return JobStar(type_label=v.label, is_continue=self.mode == MODE_CONTINUE, is_tomo=v.is_tomo,
                        options=self.values())
+
+    @property
+    def _variant(self) -> JobVariant:
+        """The form's job type (asked only once one is chosen)."""
+        assert self.variant is not None, "no job type chosen yet"
+        return self.variant
 
     @property
     def is_cli(self) -> bool:
@@ -798,7 +811,7 @@ class JobEditor(QWidget):
         if self.job and self.mode != MODE_NEW:
             return self.job
         counter = self.pipeline.job_counter if self.pipeline is not None else 1
-        return f"{self.variant.dirname}/job{counter:03d}/"
+        return f"{self._variant.dirname}/job{counter:03d}/"
 
     def changed_options(self) -> dict[str, tuple[str, str]]:
         """key -> (default, value) for every option that differs from RELION's default."""
@@ -823,7 +836,7 @@ class JobEditor(QWidget):
         self._set_values(vals)
 
     def _editable(self, key: str, values: dict[str, str]) -> bool:
-        return self.variant.enabled_for_mode(self.options[key], self.mode == MODE_CONTINUE)
+        return self._variant.enabled_for_mode(self.options[key], self.mode == MODE_CONTINUE)
 
     def _update_states(self) -> None:
         if self.variant is None:
@@ -911,7 +924,7 @@ class JobEditor(QWidget):
         note = ""
         if job_value is not None:
             note = (f"<p style='color:gray'>The job's options set this ({html.escape(job_value or 'on')} in "
-                    f"{html.escape(self.flag_panel.job_flags_from)}). A value here overrides it: RELION uses the "
+                    f"{html.escape(self.flag_panel.job_flags_from if self.flag_panel else '')}). A value here overrides it: RELION uses the "
                     "last one given.</p>")
         self.help.setHtml(f"<b>{html.escape(flag.name)}</b> <span style='color:gray'>"
                           f"{html.escape(' · '.join(b for b in bits if b))}</span>"

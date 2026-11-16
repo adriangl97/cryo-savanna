@@ -371,7 +371,7 @@ class Supervisor(object):
             fh.write("cannot start %s: %s\n" % (cmd[0], e))
             fh.close()
             raise Usage("cannot start %s: %s%s" % (cmd[0], e, self.hint))
-        proc.log = fh
+        proc.log = fh  # type: ignore[attr-defined]  # the log file, closed when the program has ended
         self.running[proc.pid] = proc
         return proc
 

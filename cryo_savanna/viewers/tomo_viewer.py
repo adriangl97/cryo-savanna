@@ -21,6 +21,9 @@ session, per project).
 from __future__ import annotations
 
 import os
+import subprocess
+import time
+from collections.abc import Callable
 from pathlib import Path
 
 import numpy as np
@@ -71,16 +74,23 @@ _WARP_FOLDERS: dict[str, list[str]] = {}  # project -> folders chosen for Warp's
 
 
 class NapariButton(QPushButton):
-    """Starts relion_python_tomo_view; reports it if it stops with an error within a few seconds."""
+    """Starts relion_python_tomo_view; reports it if it stops with an error within WATCH_S seconds.
+
+    The process is looked at every second until it stops or WATCH_S has passed: napari's Python can take
+    a while to start (and to fail) on a busy node or a network file system, so a single look after a fixed
+    time could miss it."""
+
+    WATCH_S = 30.0
 
     def __init__(self, project_dir: Path, report, parent=None):
         super().__init__("Open in napari", parent)
         self.project_dir, self.report = project_dir, report
         self.command: list[str] | None = None
-        self.proc = None
+        self.proc: subprocess.Popen | None = None
+        self.log: Path | None = None
+        self._started = 0.0
         self._watch = QTimer(self)
-        self._watch.setSingleShot(True)
-        self._watch.setInterval(4000)
+        self._watch.setInterval(1000)
         self._watch.timeout.connect(self._check)
         self.clicked.connect(self.launch)
         self.set_command(None)
@@ -101,13 +111,23 @@ class NapariButton(QPushButton):
             return
         self.report("Starting napari… (" + " ".join(Path(c).name if i == 0 else c
                                                    for i, c in enumerate(self.command)) + ")")
+        self._started = time.monotonic()
         self._watch.start()
 
     def _check(self) -> None:
-        if self.proc is None or self.proc.poll() in (None, 0):
+        if self.proc is None:
+            self._watch.stop()
+            return
+        code = self.proc.poll()
+        if code is None:  # still running: look again, until WATCH_S has passed
+            if time.monotonic() - self._started > self.WATCH_S:
+                self._watch.stop()
+            return
+        self._watch.stop()
+        if code == 0:
             return
         try:
-            tail = self.log.read_text(errors="replace").strip().splitlines()[-3:]
+            tail = self.log.read_text(errors="replace").strip().splitlines()[-3:] if self.log else []
         except OSError:
             tail = []
         self.report(f"⚠ napari stopped (exit {self.proc.returncode}): " + " | ".join(tail))
@@ -124,7 +144,7 @@ class TiltSeriesViewer(QWidget):
         self.set: TiltSeriesSet | None = None
         self.tilts: Table | None = None
         self.series = -1
-        self._stamp = None
+        self._stamp: object = None
 
         self.series_model = TableModel(self)
         self.series_proxy = RowFilter(self)
@@ -335,9 +355,9 @@ class TomogramViewer(QWidget):
         self.z = 0
         self.side_data = None  # binned copy for the side views
         self.levels = (0.0, 1.0)
-        self._stamp = None
-        self.picks_loaded = None  # called with the TomoPicks when they were (re)read
-        self._side_dots = None  # what the side views' dots were drawn from (they do not move with the slab)
+        self._stamp: object = None
+        self.picks_loaded: Callable[[TomoPicks], None] | None = None  # called with the TomoPicks when they were (re)read
+        self._side_dots: object = None  # what the side views' dots were drawn from (they do not move with the slab)
 
         self.model = TableModel(self)
         self.proxy = RowFilter(self)
@@ -611,7 +631,8 @@ class TomogramViewer(QWidget):
         new = self.shape != shape
         self.shape, self.side_data = shape, side
         i = self.current
-        self.voxel = voxel or ((self.set.pixel_size(i) or 0) * (self.set.binning(i) or 1))
+        ts = self.set
+        self.voxel = voxel or ((ts.pixel_size(i) or 0) * (ts.binning(i) or 1) if ts is not None else 0)
         self.levels = (side.mean - self.sigma.value() * side.std, side.mean + self.sigma.value() * side.std)
         nz, ny, nx = shape
         self.zslider.blockSignals(True)
@@ -638,9 +659,10 @@ class TomogramViewer(QWidget):
         self._slab_timer.start()
 
     def _read_slab(self, refit: bool = False) -> None:
-        if self.shape is None:
+        first = self._ref()
+        if self.shape is None or first is None:
             return
-        refs = [self._ref()]
+        refs = [first]
         beside = self._beside()
         if not self.raw.isHidden() and beside is not None:
             ref = self._ref(beside)
@@ -676,6 +698,8 @@ class TomogramViewer(QWidget):
     def _count_picks(self) -> None:
         """The Picks column and the totals, for the classes shown."""
         ts, picks, classes = self.set, self.picks, self.classes.selected()
+        if ts is None or picks is None:
+            return
         self.model.set_extra("_picks", "Picks", [picks.count(n, classes) for n in ts.names], position=1)
         unknown = sum(picks.count(k, classes) for k in picks.by_tomo if k not in ts.names)
         note = f"   ·   {unknown} particles in tomograms not in this set" if unknown else ""

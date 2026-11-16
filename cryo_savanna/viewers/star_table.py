@@ -77,6 +77,7 @@ class TableModel(QAbstractTableModel):
         label = self.columns[col - 1][0]
         if label in self.extra:
             return self.extra[label][row]
+        assert self.table is not None  # data() asks only while there is a table
         return self.table.data[label][row]
 
     def data(self, index, role=Qt.DisplayRole):
@@ -440,7 +441,7 @@ class StarTableView(QWidget):
         lay.setContentsMargins(0, 0, 0, 0)
         lay.addLayout(bar)
         lay.addWidget(split, 1)
-        self._stamp = None
+        self._stamp: object = None
 
     def set_file(self, path: Path) -> None:
         """Show a STAR file. Its block names are found in the background too: that reads the whole

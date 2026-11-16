@@ -102,9 +102,12 @@ class JobNodeItem(QGraphicsItem):
         self.update()
 
     def _update_tooltip(self) -> None:
-        pr = self.info.process
-        tip = [pr.name, pr.type_label, style.status_text(self.info.status, self.info.pending_update)]
-        if self.info.starred:
+        info = self.info
+        if info is None:  # not given its job yet
+            return
+        pr = info.process
+        tip = [pr.name, pr.type_label, style.status_text(info.status, info.pending_update)]
+        if info.starred:
             tip.append("starred")
         if self.summary is not None:
             tip += self.summary.lines()
@@ -114,6 +117,8 @@ class JobNodeItem(QGraphicsItem):
 
     def job_line(self) -> str:
         info = self.info
+        if info is None:
+            return ""
         number = info.process.name.rstrip("/").split("/")[-1]
         text = f"{number} · {info.status}" + ("*" if info.pending_update else "")
         if info.status == "Running" and self.summary is not None and self.summary.progress():

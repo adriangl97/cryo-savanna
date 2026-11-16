@@ -132,7 +132,7 @@ def summary_html(options: dict[str, str], groups: list[C.OpticsGroup], changes: 
             out.append("<h3>Particles</h3><table cellspacing=0 cellpadding=3 border=0>"
                        "<tr><th align=left></th><th>Mean</th><th>SD</th><th>Median</th><th>Median |Δ|</th>"
                        "<th>1–99 %</th></tr>" + "".join(rows) + "</table>")
-        if not changes.has_changes and t.has(C.DEFOCUS):
+        if changes is not None and not changes.has_changes and t.has(C.DEFOCUS):
             out.append("<p>The input particles were not found, so the changes are not shown.</p>")
 
     for g in groups:
@@ -232,10 +232,10 @@ class CtfRefineSummary(QWidget):
         lay.setContentsMargins(0, 0, 0, 0)
         lay.addLayout(bar)
         lay.addWidget(self.text, 1)
-        self._stamp = None
+        self._stamp: object = None
         self._load()
 
-    def _paths(self) -> tuple[Path | None, Path | None]:
+    def _paths(self) -> tuple[Path, Path | None]:
         out = self.project_dir / self.star if self.star else self.project_dir / self.job / C.OUTPUT
         inp = self.project_dir / self.input if self.input else None
         return out, inp
@@ -350,7 +350,7 @@ class MicrographMap(QWidget):
         lay.addWidget(self.info)
         self._groups: dict[str, np.ndarray] = {}
         self._level_cache: dict[str, tuple[float, float, bool]] = {}
-        self._sizes: dict[str, tuple[int, int]] = {}
+        self._sizes: dict[str, tuple[int, int] | None] = {}
         self._project: Path | None = None
         self._pixel_size: float | None = None
 
@@ -405,7 +405,7 @@ class MicrographMap(QWidget):
         return self._level_cache[col]
 
     def _find_levels(self, col: str) -> tuple[float, float, bool]:
-        v = self.table.numeric(col)
+        v = self.table.numeric(col) if self.table is not None else None
         v = v[np.isfinite(v)] if v is not None else np.empty(0)
         if not len(v):
             return 0.0, 1.0, False
@@ -524,7 +524,7 @@ class CtfChangesView(QWidget):
         lay = QVBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
         lay.addWidget(split)
-        self._stamp = None
+        self._stamp: object = None
         self._load()
 
     def _paths(self) -> tuple[Path, Path | None]:
@@ -597,7 +597,7 @@ class AberrationsView(QWidget):
         self.sets: list[C.AberrationSet] = []
         self.images: list[tuple[C.AberrationRow, np.ndarray | None, np.ndarray | None]] = []
         self.pixel_sizes: dict[int, float] = {}
-        self._stamp = None
+        self._stamp: object = None
         self._scan()
 
     def _watch(self):
@@ -671,7 +671,10 @@ class AberrationsView(QWidget):
         inner = self.zoom.currentIndex() == 1
         cmap = pg.colormap.get(DIVERGING)
         for r, (row, obs, fit) in enumerate(self.images):
-            kind = (row.observed or row.fit).kind
+            image = row.observed or row.fit
+            if image is None:  # neither was written for this row
+                continue
+            kind = image.kind
             lim = phase_range if kind == "phase" else 1.0
             label = pg.LabelItem(f"<b>{html.escape(row.title)}</b>", justify="left")
             self.grid.addItem(label, row=2 * r, col=0, colspan=4)

@@ -29,11 +29,14 @@ Before a commit, also:
 
 ```bash
 ./env/bin/python -m ruff check .   # unused names, loop variables caught by mistake, ...
-./env/bin/python -m mypy           # types, of everything but the windows (ui/, viewers/)
+./env/bin/python -m mypy           # types, of everything (the windows too)
 ```
 
-Both are set up in `pyproject.toml` and should say nothing. mypy does not look at `ui/` and `viewers/` yet:
-most of what it says there is about Qt's enums through qtpy and about widgets made in a later step.
+Both are set up in `pyproject.toml` and should say nothing. mypy takes Qt (through qtpy) and pyqtgraph as
+untyped: conda-forge's PySide6 has no `py.typed`, so its stubs cannot be read. What the windows do with their
+own state is checked: an attribute that is `None` until something is read (`self.sel: Selection | None`)
+has to be checked before it is used. The runners (`*_runner.py`, `runner_common.py`) run with the system
+`python3` (3.6+) and have no annotations: their types are given as `# type:` comments.
 
 ## Layout
 
@@ -41,6 +44,7 @@ most of what it says there is about Qt's enums through qtpy and about widgets ma
 |---|---|
 | `cryo_savanna/project/` | STAR reader/writer, `default_pipeline.star` model, `job.star`, RELION's lock protocol, job lineage, read-only project snapshots |
 | `cryo_savanna/ui/` | Qt windows: job tree, job graph (+ Qt-free layout), job info, logs, main window |
+| `cryo_savanna/ui/job_actions.py`, `cryo_savanna/ui/actions/` | What changes a project: `JobActions` (the job menus, and what is enabled) and its groups of actions: `forms.py` (new, clone, continue, overwrite, submit), `selection.py` (cryo-savanna's selection windows), `running.py` (run scheduled, abort, SLURM, clean, disk usage), `pipeline_ops.py` (alias, mark, delete, undelete, import), with what they share in `base.py` |
 | `cryo_savanna/images/` | MRC reads (headers, slices, regions; TIFF movies with `tifffile`), downsampling, thumbnail cache |
 | `cryo_savanna/results/` | What jobs produced, read for the viewers (no Qt), and which viewers a job gets (`registry.py`) |
 | `cryo_savanna/viewers/` | The viewer widgets: image canvas, micrographs, galleries, plots, STAR tables, files |

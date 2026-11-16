@@ -29,12 +29,14 @@ from qtpy.QtWidgets import (
 )
 
 from cryo_savanna.env.relion_env import RelionEnv, RelionEnvError
+from cryo_savanna.images.cache import ThumbCache
 from cryo_savanna.jobdefs.cli_catalog import POSITIONAL
 from cryo_savanna.jobdefs import external_jobs
 from cryo_savanna.jobdefs.cli_tools import CliCatalog
 from cryo_savanna.jobdefs.model import JobDefs, JobVariant
 from cryo_savanna.jobdefs.pytom_jobs import PytomVariant, decode
 from cryo_savanna.project.jobstar import JobStar
+from cryo_savanna.project.main_inputs import MainInputs
 from cryo_savanna.project.snapshot import ProjectSnapshot, stamp
 from cryo_savanna.results.registry import MICROGRAPHS, TABLE_PLOT, JobContext, ViewSpec, context_for, views_for
 from cryo_savanna.ui import style
@@ -77,7 +79,7 @@ class JobInfoPanel(QTabWidget):
         self._job: str | None = None
         self._jobstar: JobStar | None = None
         self._jobstar_error = ""
-        self._jobstar_stamp = None  # job.star's (mtime, size) when read: a Continue writes it again
+        self._jobstar_stamp: object = None  # job.star's (mtime, size) when read: a Continue writes it again
         # the forms of External jobs made from the "Additional external jobs" menu, as in the editor
         # (the main window gives the ones of its JobActions, so a --help is read once)
         self.forms = external_jobs.Forms(defs, env)
@@ -86,13 +88,13 @@ class JobInfoPanel(QTabWidget):
         self._flag_tasks: set[FlagsTask] = set()
         self.queue = None  # slurm.QueueState
         self.history: dict[str, list | str] = {}  # job -> its SLURM jobs (slurm.AcctJob), or an error
-        self.main_inputs = None  # project.main_inputs.MainInputs: the main inputs chosen in cryo-savanna
+        self.main_inputs: MainInputs | None = None  # the main inputs chosen in cryo-savanna
         self.overview.setHtml("<p>Select a job.</p>")
 
-        self.cache = None  # images.cache.ThumbCache of the project, set by the main window
+        self.cache: ThumbCache | None = None  # the project's thumbnails, set by the main window
         self._ctx: JobContext | None = None
         self._specs: list[ViewSpec] = []
-        self._job_dir_stamp = None  # of a running job: its viewers are looked for again when it changes
+        self._job_dir_stamp: object = None  # of a running job: its viewers are looked for again when it changes
         self.windows: list[ViewerWindow] = []
         self.popout = QToolButton()
         self.popout.setText("⧉")
@@ -133,7 +135,7 @@ class JobInfoPanel(QTabWidget):
         self._snap = snap
 
     def show_job(self, snap: ProjectSnapshot, name: str | None) -> None:
-        reload_options = name != self._job or snap.jobs.get(name) is None
+        reload_options = name != self._job or name is None or snap.jobs.get(name) is None
         self._snap, self._job = snap, name
         if name is None or name not in snap.jobs:
             self.overview.setHtml("<p>Select a job.</p>")
@@ -258,6 +260,8 @@ class JobInfoPanel(QTabWidget):
 
     def _overview_html(self) -> str:
         snap, name = self._snap, self._job
+        if snap is None or name is None or name not in snap.jobs:  # no job shown
+            return ""
         info = snap.jobs[name]
         pr = info.process
         pipe = snap.pipeline

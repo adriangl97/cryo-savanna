@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import os
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -156,7 +157,7 @@ def read_image(ref: ImageRef) -> np.ndarray:
         return r.section(r.index(ref.index))
 
 
-def read_images(path: str, indices: list[int | None]) -> dict[int | None, np.ndarray]:
+def read_images(path: str, indices: Sequence[int | None]) -> dict[int | None, np.ndarray]:
     """Several images of one stack with a single open (class averages, particles); missing ones are left out."""
     out: dict = {}
     with MrcReader(path) as r:

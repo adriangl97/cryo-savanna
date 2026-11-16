@@ -95,7 +95,7 @@ def clean_geometry(g):
     """A geometry with only what makes the mask (rounded, so that equal masks have equal keys)."""
     poly = [[round(float(x), 3), round(float(y), 3)] for x, y in g.get("polygon", [])]
     mode = Z_SLAB if g.get("z_mode") == Z_SLAB else Z_ALL
-    out = {"polygon": poly, "z_mode": mode}
+    out = {"polygon": poly, "z_mode": mode}  # type: dict[str, object]
     for k in ("bottom", "top"):
         p = list(g.get(k, [0.0, 0.0, 0.0])) + [0.0, 0.0, 0.0]
         out[k] = [round(float(p[0]), 3), round(float(p[1]), 6), round(float(p[2]), 6)]
@@ -181,7 +181,7 @@ class Raster(object):
                     i1 = min(i1, int(math.floor(hi - 0.5 + EPS)) + 1)
                 if i1 > i0:
                     out[off + i0:off + i1] = self.ones[:i1 - i0]
-        out = bytes(out)
+        out = bytes(out)  # type: ignore[assignment]  # immutable from here on
         if self.g["z_mode"] == Z_ALL:
             self._all = out
         return out
@@ -280,7 +280,8 @@ def save_masks(job_dir, data, progress=None, project_dir=None):
             for u in linkers[1:]:
                 C._link(heir, mask_path(job_dir, u))
     # real files there now, by key and by content
-    by_key, by_sha = {}, {}  # by_key: geometry key -> (file, SHA-1 of its voxels)
+    # by_key: geometry key -> (file, SHA-1 of its voxels); by_sha: (shape, SHA-1) -> file
+    by_key, by_sha = {}, {}  # type: dict[str, tuple[str, str]], dict[tuple[tuple[int, ...], str], str]
     for n in unchanged:
         p = mask_path(job_dir, n)
         if not os.path.islink(p):
@@ -300,8 +301,8 @@ def save_masks(job_dir, data, progress=None, project_dir=None):
             continue
         tmp = os.path.join(d, ".%s.tmp" % (n + SUFFIX))
         sha = write_mask(tmp, t["shape"], t.get("voxel") or 1.0, t["geometry"])
-        same = by_sha.get((tuple(t["shape"]), sha))
-        if same is not None and C._link(same, p):
+        twin = by_sha.get((tuple(t["shape"]), sha))  # a file with the same voxels
+        if twin is not None and C._link(twin, p):
             os.remove(tmp)
             done[n] = "linked"
         else:

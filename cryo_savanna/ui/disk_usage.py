@@ -311,7 +311,8 @@ class DiskUsageWindow(QDialog):
                                                        "cleaned harshly.")
             return
         kind = "harsh" if harsh else "gentle"
-        moves = sum((j.harsh if harsh else j.gentle).bytes for j in jobs)  # type: ignore[union-attr]
+        # _jobs() keeps only the jobs that this clean applies to (a plan that is not None)
+        moves = sum(u.bytes for j in jobs if (u := j.harsh if harsh else j.gentle) is not None)
         text = (f"Do a {kind} clean of {len(jobs)} job{'s' if len(jobs) > 1 else ''}?\n\n"
                 + _listing([style.job_label(j.name, j.alias) for j in jobs])
                 + f"\n\nRELION moves {D.human(moves)} to Trash/. They take as much space there until Trash/ is "

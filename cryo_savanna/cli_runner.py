@@ -104,7 +104,7 @@ def parse(argv):
 
 def _star_blocks(path, limit=200):
     """Names of the data blocks and labels in the first lines of a STAR file."""
-    blocks, labels = [], set()
+    blocks, labels = [], set()  # type: list[str], set[str]
     try:
         with open(path, "r", errors="replace") as fh:
             for n, line in enumerate(fh):
@@ -312,8 +312,8 @@ def run(argv):
         return 1
 
     aborted_at = None
-    sent = []
-    stopped = []  # (signal, time) once the runner was told to stop
+    sent = []  # type: list[int]
+    stopped = []  # type: list[tuple[int, float]]  # (signal, time) once the runner was told to stop
     killed = False
 
     def stop_now(signum):
