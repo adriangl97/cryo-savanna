@@ -67,8 +67,10 @@ from qtpy.QtWidgets import (
     QWidget,
 )
 
+from cryo_savanna.env.machine import Specs, SpecsCache
 from cryo_savanna.env.relion_env import RelionEnv, RelionEnvError
 from cryo_savanna.jobdefs import box_sizes
+from cryo_savanna.jobdefs import compute_advice as advice_rules
 from cryo_savanna.jobdefs.cli_tools import CliVariant
 from cryo_savanna.jobdefs.flags import Flag, FlagSource, command_flags, program_for
 from cryo_savanna.jobdefs.model import JobVariant, OptionDef, Row
@@ -87,6 +89,11 @@ MODE_NEW, MODE_CONTINUE, MODE_OVERWRITE = "new", "continue", "overwrite"
 EXTRA_ARGS = "other_args"
 # job types whose interactive step cryo-savanna can do itself, and RELION's own tool for it
 RELION_SELECTORS = {"relion.select": "relion_display", "relion.excludetilts": "napari"}
+# the rows the compute suggestion is shown under (the last of them on each tab)
+HINT_KEYS = (advice_rules.MPI, advice_rules.THREADS, advice_rules.CLI_THREADS, advice_rules.POOL,
+             advice_rules.GPU_IDS)
+PARTICLES_TTL_S = 60.0
+SPECS = SpecsCache()  # one for the whole session: this machine is looked at once in a while
 
 
 def qt_file_filter(pattern: str) -> str:
@@ -402,6 +409,7 @@ class JobEditor(QWidget):
     submit = Signal(object, str, bool)  # JobStar, alias, schedule_only
     submit_many = Signal(object, bool)  # [(JobStar, alias, values)] of Variations…, schedule_only
     closed = Signal()
+    _specs_ready = Signal()  # emitted from a lookup thread: the machine, a queue node or particles are known
 
     def __init__(self, env: RelionEnv, type_names: dict[str, str], parent=None, flag_source: FlagSource | None = None,
                  presets: PresetStore | None = None, relion_version: str = ""):
@@ -429,6 +437,11 @@ class JobEditor(QWidget):
         self.markers: dict[str, QLabel] = {}
         # rows with box sizes: (row, its box-size keys, the warning under it, the row's label)
         self.box_warnings: list[tuple[Row, list[str], QLabel, QLabel]] = []
+        # the compute suggestion (jobdefs/compute_advice.py): (the line under a row, that row's label)
+        self.compute_hints: list[tuple[QLabel, QLabel]] = []
+        self.advice: advice_rules.Advice | None = None
+        self.specs_cache = SPECS
+        self._specs_ready.connect(lambda: self._update_compute_hints())
         self.rows: list[tuple[int, Row, list[QWidget]]] = []  # (tab index, row, widgets to show/hide)
         self.selector: QComboBox | None = None  # "Selection window" of jobs cryo-savanna can do itself
         self.mode = MODE_NEW
@@ -625,7 +638,10 @@ class JobEditor(QWidget):
         self.markers.clear()
         self.rows.clear()
         self.box_warnings.clear()
+        self.compute_hints.clear()
+        self.advice = None
         box_keys = box_sizes.box_options(variant.key)
+        advised = advice_rules.covered(variant.key, options)
         self.flag_panel = self.flags_toggle = None
         self.flags_program = None
         self.selector = None
@@ -640,11 +656,13 @@ class JobEditor(QWidget):
             grid.setVerticalSpacing(4)
             r = 0
             panel_row = None
+            hint_rows = [i for i, rw in enumerate(tab.rows) if advised and any(k in HINT_KEYS and k in options
+                                                                                for k in rw.keys)]
             if tab.label == "Running" and variant.label in RELION_SELECTORS:
                 grid.addWidget(QLabel("Selection window:"), r, 0, Qt.AlignRight | Qt.AlignVCenter)
                 grid.addWidget(self._make_selector(RELION_SELECTORS[variant.label]), r, 1)
                 r += 1
-            for row in tab.rows:
+            for ri, row in enumerate(tab.rows):
                 keys = [k for k in row.keys if k in self.options]
                 if not keys:
                     continue
@@ -683,6 +701,14 @@ class JobEditor(QWidget):
                     warn.hide()
                     grid.addWidget(warn, r, 1, 1, 2)
                     self.box_warnings.append((row, boxes, warn, label))
+                    r += 1
+                if hint_rows and ri == hint_rows[-1]:  # the suggested MPI, threads, pool and GPUs
+                    hint = QLabel()
+                    hint.setWordWrap(True)
+                    hint.setTextFormat(Qt.RichText)
+                    hint.linkActivated.connect(self._on_hint_link)
+                    grid.addWidget(hint, r, 1, 1, 2)
+                    self.compute_hints.append((hint, label))
                     r += 1
                 if keys == [EXTRA_ARGS] and not getattr(variant, "is_cli", False):
                     panel_row = r
@@ -1016,6 +1042,106 @@ class JobEditor(QWidget):
         if self.selector is not None:
             self.selector.setEnabled(not self.readonly and interactive_kind(self.variant.label, vals) is not None)
         self._update_box_warnings(vals)
+        self._update_compute_hints(vals)
+
+    # ------------------------------------------------------------------ compute suggestion
+    def _job_specs(self, vals: dict[str, str]) -> Specs | str | None:
+        """What the job runs on: this machine, or a node of the queue (SLURM) it is submitted to; a text
+        when that cannot be told; None while it is being looked up."""
+        ready = self._specs_ready.emit
+        if vals.get("do_queue") == "Yes":
+            template = (vals.get("qsubscript") or "").strip()
+            if not template:
+                return "no submission script is given"
+            path = Path(template) if os.path.isabs(template) else self.project_dir / template
+            return self.specs_cache.for_queue(str(path), vals, ready)
+        return self.specs_cache.local(ready)
+
+    def _job_particles(self, vals: dict[str, str]) -> advice_rules.Particles | None:
+        """Box size and number of the input particles of a refinement (None: none given, or not read yet)."""
+        if self.variant is None or advice_rules.base_key(self.variant.key) not in advice_rules.REFINE:
+            return None
+        star = advice_rules.input_star(self.variant.key, vals)
+        if not star:
+            return None
+        project = self.project_dir
+        found = self.specs_cache.get(("particles", str(project.resolve()), star), PARTICLES_TTL_S,
+                                     lambda: advice_rules.read_particles(project, star) or "",
+                                     self._specs_ready.emit)
+        return found if isinstance(found, advice_rules.Particles) else None
+
+    def _update_compute_hints(self, vals: dict[str, str] | None = None) -> None:
+        """Under the compute options: the suggested values for what the job runs on, with Apply, and what is
+        wrong with the values in the form."""
+        if self.variant is None or not self.compute_hints:
+            return
+        vals = vals if vals is not None else self.values()
+        specs = self._job_specs(vals)
+        self.advice = None
+        if specs is None:
+            text = "<span style='color:gray'>Looking at what the job will run on…</span>"
+        elif isinstance(specs, str):
+            text = f"<span style='color:gray'>No suggestion for MPI and threads: {html.escape(specs)}.</span>"
+        else:
+            try:
+                limit: int | None = self.env.error_local_mpi
+            except RelionEnvError:
+                limit = None
+            self.advice = advice_rules.advise(self.variant.key, self.options, vals, specs,
+                                              self._job_particles(vals), limit)
+            text = self._hint_html(self.advice, vals) if self.advice is not None else ""
+        for hint, row_label in self.compute_hints:
+            hint.setText(text)
+            hint.setToolTip(self._hint_tooltip())
+            hint.setVisible(bool(text) and not row_label.isHidden())
+
+    def _hint_html(self, a: advice_rules.Advice, vals: dict[str, str]) -> str:
+        dim = self.palette().color(QPalette.PlaceholderText).name()
+        basis = html.escape(a.basis)
+        settable = [k for k in a.values if k in self.widgets and self.widgets[k].isEnabled()]
+        if not a.values:
+            out = ""
+        elif not a.differs(vals):
+            out = f"<span style='color:{dim}'>✓ As suggested for {basis}.</span>"
+        else:
+            apply = " <a href='apply'>Apply</a>" if settable and not self.readonly else ""
+            out = (f"Suggested: <b>{html.escape(a.short())}</b>{apply} "
+                   f"<span style='color:{dim}'>— for {basis}</span>")
+        if a.warnings:
+            out += ("<br>" if out else "") + "<br>".join(
+                f"<span style='color:#d9861c'>⚠ {html.escape(w)}</span>" for w in a.warnings)
+        return out
+
+    def _hint_tooltip(self) -> str:
+        a = self.advice
+        if a is None or not a.why:
+            return ""
+        return "Why:\n" + "\n".join("• " + w for w in a.why) + "\n\nRules of thumb, not measurements: check the " \
+            "first iterations (GPU memory in nvidia-smi, the time per iteration)."
+
+    def _on_hint_link(self, href: str) -> None:
+        if href == "apply":
+            self.apply_advice()
+
+    def apply_advice(self) -> bool:
+        """Put the suggested values into the form (those that can be changed). False: nothing to apply."""
+        a = self.advice
+        if a is None or self.readonly:
+            return False
+        changed = []
+        for k, v in a.values.items():
+            w = self.widgets.get(k)
+            if w is not None and w.isEnabled() and w.value() != v:
+                w.set_value(v)
+                changed.append(f"{self.options[k].label.strip().rstrip(':')} {v}")
+        if changed:
+            self.status.setText("Set " + ", ".join(changed) + ".")
+        self._update_states()
+        return bool(changed)
+
+    def compute_hint(self) -> str:
+        """The text of the compute suggestion as shown ("": none; tests)."""
+        return next((h.text() for h, _ in self.compute_hints if not h.isHidden()), "")
 
     def _update_box_warnings(self, vals: dict[str, str] | None = None) -> None:
         """Under each box size in use (its group active, its row not hidden by the search) that is not a good
@@ -1074,6 +1200,7 @@ class JobEditor(QWidget):
             self.tabs.setTabText(ti, f"{base}  ({counts[ti]})" if filtering else base)
             self.tabs.setTabEnabled(ti, counts[ti] > 0 or not filtering)
         self._update_box_warnings()  # a row hidden by the search hides its warning too
+        self._update_compute_hints()
         if filtering and counts and counts[self.tabs.currentIndex()] == 0:
             first = next((i for i, c in enumerate(counts) if c), None)
             if first is not None:
@@ -1100,6 +1227,12 @@ class JobEditor(QWidget):
                    "than others (128 px almost twice as fast as 122 px): cryo-savanna warns when the size is not "
                    "on " f"<a href='{box_sizes.SOURCE}'>{box_sizes.SOURCE_NAME}</a> (EMAN wiki, “Particle Box "
                    "Size”), gives the closest good ones, and asks before the job is run or scheduled.</p>")
+        if self.compute_hints and key in HINT_KEYS + (advice_rules.DEDICATED,):
+            box += ("<p>cryo-savanna suggests MPI processes, threads, pooled particles and GPUs for what the job "
+                    "runs on: this machine (its CPUs, RAM and the GPUs nvidia-smi lists), or, when the job is "
+                    "submitted to the queue, a node of the SLURM partition its submission script asks for (sinfo). "
+                    "For refinements it reads the box size of the input particles to see how many processes fit "
+                    "in GPU memory and RAM. Apply puts the values in; point at the suggestion for why.</p>")
         self.help.setHtml(
             f"<b>{html.escape(o.label.strip())}</b> <span style='color:gray'>{name}default "
             f"{html.escape(o.default or '—')}{' · ' + html.escape(' · '.join(extra)) if extra else ''}</span>"

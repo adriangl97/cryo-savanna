@@ -72,6 +72,10 @@ and can be used interchangeably, even at the same time, on the same project.
 - A box size that is not a good one for FFTs (after
   [EMAN2's list](https://blake.bcm.edu/emanwiki/doku.php?id=eman2:boxsize)) is flagged in the job editor,
   with the closest good sizes below and above.
+- **Suggested MPI processes, threads and pooled particles** under the compute options, with Apply, for
+  this machine (CPUs, RAM, the GPUs chosen) or, for a queued job, a node of the SLURM partition its
+  submission script asks for. For refinements they come from the box size of the input particles, and
+  values RELION would refuse (VDAM with MPI, an even MPI count for Refine3D) are flagged.
 - Failed jobs show their **likely cause** in the Overview and the tree (GPU or RAM out of memory, the
   queue's time limit, a missing input, too few MPI processes, ...), with the log line it comes from.
 - RELION's command-line-only programs (`relion_image_handler`, `relion_reconstruct`, the

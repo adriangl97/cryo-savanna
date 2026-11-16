@@ -122,6 +122,15 @@ Some box sizes make the FFTs, and so a job and every job that uses its particles
 [EMAN2's list of good box sizes](https://blake.bcm.edu/emanwiki/doku.php?id=eman2:boxsize), the job editor
 warns and gives the closest good sizes below and above it, and Run / Schedule ask before going on. The list is cited in NOTICE.md.
 
+## MPI processes, threads and pooled particles
+
+Under the compute options (the GPUs on the Compute tab, the threads on the Running tab) the job editor
+suggests the number of MPI processes, threads and pooled particles for what the job will run on, with
+**Apply** to put them in. Below it,
+in orange, the values in the form that RELION will refuse or that waste the machine: VDAM with MPI, an even
+MPI count for 3D auto-refine, more MPI × threads than there are CPUs, GPU ids the machine does not have,
+more followers than may fit in GPU memory or RAM.
+
 ## Why a job failed
 
 For a failed job, the Overview shows **Likely cause** under its status, and the tree its first one in the
