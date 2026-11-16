@@ -287,6 +287,9 @@ pytom writes into the extraction job's own directory (the matching job's score m
 there). The output is RELION 5's: `particles.star` (rlnTomoName, rlnCenteredCoordinate[XYZ]Angst,
 the angles as rlnAngleRot/Tilt/Psi or rlnTomoSubtomogramRot/Tilt/Psi, rlnLCCmax and
 rlnAutopickFigureOfMerit) and `optimisation_set.star` with the tomograms, for Extract subtomos.
+The centred coordinates are computed by cryo-savanna rather than by pytom's `--relion5-compat`,
+exactly as RELION 5 reads them back: (voxel × the tomogram's binning − rlnTomoSize / 2) × rlnTomoTiltSeriesPixelSize. If a tomogram's size does not fit its rlnTomoSize
+at its binning, the job log warns and the coordinates are centred on the tomogram itself.
 Like matching, extraction has to run on a machine with a GPU and its NVIDIA driver: pytom's
 programs look for a GPU as they start, even for the extraction itself. Submit it to a GPU queue
 (one GPU is enough) or run it on a GPU workstation. On a machine without one (a CPU node) every tomogram fails with `cudaErrorInsufficientDriver`.
@@ -353,6 +356,11 @@ loaded with `module load` first. A new job takes both from the project's last Ar
   SART or WBP, CTF correction (local, phase flip, none, or CTF multiplication for template
   matching), tilt range, layout of the tomogram (`-FlipVol 1` or `2`), contrast, more AreTomo3
   arguments.
+- For tomograms to pick particles in (template matching with pytom), keep the defaults
+  `-FlipVol 1` and `-TiltCor 0`: these tomograms are oriented as RELION's reconstructions of the
+  aligned tilt series. `-FlipVol 2` flips them in z relative to RELION's, and `-TiltCor 1` levels them,
+  which the alignment written for RELION does not include, so picks from either may land in the wrong
+  place when RELION extracts subtomograms. The job log warns when either is used.
 - *Compute*: GPU ids separated by colons (`0:1:2:3`): one tilt series per GPU at a time (or more,
   with *Tilt series per GPU*). Tilt series already done are skipped when the job runs again
   (Continue), so after a failure only the rest run.

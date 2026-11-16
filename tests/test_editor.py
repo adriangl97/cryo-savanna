@@ -117,6 +117,45 @@ def test_input_lists_offer_matching_outputs(editor):
     assert editor.values()["fn_img"] == "my/own.star"
 
 
+
+@pytest.mark.parametrize("label", ["TomoOptimisationSet.star.relion.tomo.pytom",  # pytom extraction
+                                   "TomoOptimisationSet.star.relion"])
+def test_input_lists_follow_outputs_added_when_a_job_finishes(window, tomo_project, tmp_path, label):
+    """An External job's outputs (its RELION_OUTPUT_NODES.star) go into the pipeline only when it finishes, a
+    status change: the input lists, of the form already open and of new ones, offer them then."""
+    from cryo_savanna.project.lock import PipelineLock
+    from cryo_savanna.project.pipeline import Node, Process
+    dst = tmp_path / "tomo"
+    shutil.copytree(tomo_project, dst, symlinks=True)
+    job = "External/job030/"
+    out = job + "optimisation_set.star"
+    (dst / job).mkdir(parents=True)
+
+    def write(status, outputs):
+        p = Pipeline.read(dst)
+        p.processes[job] = Process(job, "None", "relion.external", status, outputs=list(outputs))
+        for n in outputs:
+            p.nodes[n] = Node(n, label, 1, producer=job)
+        with PipelineLock(dst) as lock:
+            p.write(dst, "default", lock)
+
+    write("Running", [])
+    w = window(dst)
+    ed = w.actions.editor
+    ed.new_job(DEFS.variant("relion.pseudosubtomo:tomo"))
+
+    def items():
+        c = ed.widgets["in_optimisation"].combo
+        return [c.itemData(i) for i in range(c.count())]
+    assert out not in items()
+    (dst / out).write_text("")
+    write("Succeeded", [out])  # what relion_pipeliner does when the job ends
+    w.load_now()
+    assert items()[0] == out
+    ed.new_job(DEFS.variant("relion.reconstructparticletomo:tomo"))
+    assert items()[0] == out
+
+
 def test_search_filters_rows(editor):
     editor.new_job(DEFS.variant("relion.class3d"))
     editor.search.setText("symmetry")

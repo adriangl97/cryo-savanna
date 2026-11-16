@@ -107,6 +107,7 @@ class ActionsBase(QObject):
         self.pool.setMaxThreadCount(1)  # one change at a time, in the order asked
         self._pending: set[_Signals] = set()
         self._structure: object = None  # snapshot.structure_key() of the last snapshot
+        self._nodes: object = None  # the pipeline's nodes (name, type, producer) when the input lists were filled
         self._has_trash = False  # looked at when the project changes, not on every selection
         self._has_repeating = False
         self._look_pool = QThreadPool(self)  # those looks read Trash/ and the run records: off the GUI thread
@@ -164,7 +165,7 @@ class ActionsBase(QObject):
         self.project_dir = Path(project_dir)
         self.pipeliner = Pipeliner(project_dir)
         self.ops = PipelineOps(project_dir)
-        self.snapshot, self.current, self._structure = None, None, None
+        self.snapshot, self.current, self._structure, self._nodes = None, None, None, None
         self.editor.set_project(self.project_dir, None)
         self.hide_editor()
         self._look_at_project()
@@ -176,9 +177,16 @@ class ActionsBase(QObject):
         pipeline_changed = self.snapshot is None or snap.pipeline is not self.snapshot.pipeline
         self.snapshot = snap
         key = snap.structure_key()
-        if key != self._structure:  # new or changed jobs: refresh the input lists
-            self._structure = key
+        # new or changed jobs, or new outputs (an External job's, RELION_OUTPUT_NODES.star, are only added when
+        # it finishes, a status change): refresh the input lists
+        nodes = self._nodes
+        if pipeline_changed:
+            nodes = tuple((n.name, n.type_label, n.producer) for n in snap.pipeline.nodes.values())
+        if key != self._structure or nodes != self._nodes:
+            self._structure, self._nodes = key, nodes
             self.editor.update_pipeline(snap.pipeline)
+        elif pipeline_changed:
+            self.editor.pipeline = snap.pipeline  # same nodes: no need to fill the lists again
         if pipeline_changed:
             self._look_at_project()
         self.update_state()

@@ -667,26 +667,66 @@ def read_pytom_particles(path):
         return []  # no rows: pytom found nothing above the cut-off
 
 
+def tomogram_geometry(info):
+    """How a matched tomogram's voxels map to RELION 5's frame: (tilt-series pixel size, binning,
+    rlnTomoSize[XYZ], voxel size) when they can be trusted, else (None, None, the tomogram's (nx, ny, nz),
+    voxel size): centred on the tomogram.
+
+    The binning is the tomogram's: rlnTomoTomogramBinning, or the voxel size it was matched with over the
+    pixel size (a tomogram of another binning than the tomograms.star says, with the voxel size given in the
+    job), whichever fits the tomogram's size (n × binning = rlnTomoSize, give or take a voxel)."""
+    px = _f(info, "rlnTomoTiltSeriesPixelSize")
+    sizes = [_f(info, "rlnTomoSize" + a) for a in "XYZ"]
+    voxel = _f(info, COL_VOXEL)  # what the tomogram was matched with
+    try:
+        nx, ny, nz, hv = mrc_header(info.get(COL_TOMOGRAM, ""))
+        dims = (nx, ny, nz)
+    except (OSError, Usage):
+        dims, hv = None, 0.0
+    voxel = voxel or hv
+    if px and all(sizes):
+        bins = [b for b in (_f(info, "rlnTomoTomogramBinning"), voxel / px if voxel else None) if b]
+        for b in bins:
+            if dims is None or all(abs(n * b - s) <= b for n, s in zip(dims, sizes)):
+                return px, b, sizes, voxel
+        if bins and dims:
+            say("WARNING: %s: the tomogram is %s voxels of %.3f Å, rlnTomoSize %s pixels of %.3f Å: the "
+                "coordinates are centred on the tomogram instead"
+                % (info[TOMO_NAME], "×".join(map(str, dims)), voxel, "×".join(num(s) for s in sizes), px))
+    if dims is None:
+        raise Usage("%s: no tomogram geometry (rlnTomoTiltSeriesPixelSize, rlnTomoSize[XYZ] or the tomogram's "
+                    "MRC header) for RELION 5 coordinates" % info[TOMO_NAME])
+    return None, None, dims, voxel
+
+
 def to_relion5(rows, info, angles):
     """pytom's particles (voxels of the tomogram, from its corner) as RELION 5 rows: rlnTomoName and
-    rlnCenteredCoordinate[XYZ]Angst (Å from the tomogram's centre, as RELION 5's picker writes them)."""
+    rlnCenteredCoordinate[XYZ]Angst (Å from the tomogram's centre, as RELION 5's picker writes them).
+
+    RELION 5 takes a centred coordinate to tilt-series pixels as Å / rlnTomoTiltSeriesPixelSize +
+    rlnTomoSize / 2, and its tomograms have voxel i at tilt-series pixel i × binning (origin 0), so voxel i
+    is (i × binning − rlnTomoSize / 2) × pixel size. This is done here rather than with pytom's own
+    --relion5-compat, which puts the centre one pixel off (size × binning / 2 − 1) and, unless the matching
+    was given --relion5-tomograms-star, centres on the tomogram at its voxel size. If pytom was given
+    --relion5-compat anyway (More arguments), its centred coordinates are kept."""
     name = info[TOMO_NAME]
-    px, binning = _f(info, "rlnTomoTiltSeriesPixelSize"), _f(info, "rlnTomoTomogramBinning")
-    sizes = [_f(info, "rlnTomoSize" + a) for a in "XYZ"]
-    voxel = _f(info, COL_VOXEL)
-    dims = None
-    if not (px and binning and all(sizes)):
-        tomo = info.get(COL_TOMOGRAM, "")
-        nx, ny, nz, hv = mrc_header(tomo)
-        dims, voxel = (nx, ny, nz), voxel or hv
+    px, binning, sizes, voxel = tomogram_geometry(info) if rows else (None, None, (), None)
     out = []
     for r in rows:
-        xyz = [_f(r, "rlnCoordinate" + a) or 0.0 for a in "XYZ"]
-        if dims is None:
-            c = [(x * binning - s / 2.0) * px for x, s in zip(xyz, sizes)]
+        if all(_f(r, c) is not None for c in CENTERED):  # pytom's --relion5-compat
+            c = [_f(r, k) for k in CENTERED]
         else:
-            v = _f(r, "rlnDetectorPixelSize") or voxel
-            c = [(x - n / 2.0) * v for x, n in zip(xyz, dims)]
+            xyz = [_f(r, "rlnCoordinate" + a) for a in "XYZ"]
+            if None in xyz:
+                raise Usage("%s: a particle of pytom without coordinates (rlnCoordinate[XYZ] or "
+                            "rlnCenteredCoordinate[XYZ]Angst)" % name)
+            if binning:
+                c = [(x * binning - s / 2.0) * px for x, s in zip(xyz, sizes)]
+            else:
+                v = _f(r, "rlnDetectorPixelSize") or voxel
+                if not v:
+                    raise Usage("%s: no voxel size for RELION 5 coordinates" % name)
+                c = [(x - n / 2.0) * v for x, n in zip(xyz, sizes)]
         row = {TOMO_NAME: name, CENTERED[0]: c[0], CENTERED[1]: c[1], CENTERED[2]: c[2]}
         for src, dst in zip(("rlnAngleRot", "rlnAngleTilt", "rlnAnglePsi"), angles):
             row[dst] = _f(r, src) or 0.0

@@ -378,8 +378,9 @@ def test_match_and_extract(project, fake_pytom):
     cands = read_star(e / P.CANDIDATES)["particles"]
     assert cands.columns[:4] == ["rlnTomoName"] + list(P.CENTERED) and "rlnAngleRot" in cands.columns
     assert len(cands.rows) == 5 * 15  # 0.5 down to 0.22
-    x = float(cands.rows[0][1])
-    assert x == pytest.approx((32 * 10 - 4000 / 2) * 0.675)  # RELION 5: (voxel × binning − size / 2) × pixel
+    x = float(cands.rows[3][1])  # voxel 35 of 64
+    assert x == pytest.approx((35 * 10 - 640 / 2) * 0.675)  # RELION 5: (voxel × binning − size / 2) × pixel
+    assert "centred on the tomogram" not in res.stdout
     parts = read_star(e / P.PARTICLES)["particles"]
     assert len(parts.rows) == 5 * 11  # 0.5 down to 0.3
     sel = RP.read_selection(project, ex)
@@ -902,3 +903,75 @@ def test_mask_mirror(project, fake_pytom):
     v = CATALOG.variant("match")
     group_of = {k: r.group for t in v.tabs for r in t.rows for k in r.keys}
     assert group_of["mask_mirror"] == group_of["mask_box"]
+
+
+# ---------------------------------------------------------------------------- RELION 5 coordinates
+
+def _tomogram(tmp_path, shape=(16, 64, 64), voxel=6.75):
+    path = tmp_path / "rec_TS_01.mrc"
+    with mrcfile.new(path, overwrite=True) as m:
+        m.set_data(np.zeros(shape, np.float32))
+        m.voxel_size = voxel
+    return str(path)
+
+
+def _info(tomogram, **kw):
+    info = {"rlnTomoName": "TS_01", "rlnTomoTiltSeriesPixelSize": "0.675", "rlnTomoTomogramBinning": "10",
+            "rlnTomoSizeX": "640", "rlnTomoSizeY": "640", "rlnTomoSizeZ": "160", P.COL_VOXEL: "6.75",
+            P.COL_TOMOGRAM: tomogram}
+    info.update(kw)
+    return info
+
+
+PYTOM_ROW = {"rlnCoordinateX": "40", "rlnCoordinateY": "10", "rlnCoordinateZ": "4", "rlnAngleRot": "10",
+             "rlnAngleTilt": "20", "rlnAnglePsi": "30", "rlnLCCmax": "0.4", "rlnDetectorPixelSize": "6.75"}
+ANGLES = P.ORIENTATIONS["rlnAngleRot/Tilt/Psi"]
+
+
+def _xyz(row):
+    return [row[c] for c in P.CENTERED]
+
+
+def test_relion5_coordinates(tmp_path):
+    """RELION 5: Å = (voxel × binning − rlnTomoSize / 2) × tilt-series pixel (its tomograms start at pixel 0)."""
+    out = P.to_relion5([PYTOM_ROW], _info(_tomogram(tmp_path)), ANGLES)
+    assert _xyz(out[0]) == pytest.approx([(400 - 320) * 0.675, (100 - 320) * 0.675, (40 - 80) * 0.675])
+    assert (out[0]["rlnTomoName"], out[0]["rlnAngleRot"], out[0]["rlnAnglePsi"]) == ("TS_01", 10.0, 30.0)
+
+
+def test_relion5_coordinates_use_the_tomograms_own_binning(tmp_path):
+    """A tomogram at bin 20 matched with its voxel size, under a tomograms.star that says bin 10."""
+    tomo = _tomogram(tmp_path, (8, 32, 32), 13.5)
+    out = P.to_relion5([PYTOM_ROW], _info(tomo, **{P.COL_VOXEL: "13.5"}), ANGLES)
+    assert _xyz(out[0]) == pytest.approx([(800 - 320) * 0.675, (200 - 320) * 0.675, (80 - 80) * 0.675])
+
+
+def test_relion5_coordinates_of_a_tomogram_rlnTomoSize_does_not_fit(tmp_path, capsys):
+    """Neither binning fits rlnTomoSize: centred on the tomogram itself, with a warning."""
+    tomo = _tomogram(tmp_path, (30, 64, 64))  # thicker than rlnTomoSizeZ / binning
+    out = P.to_relion5([PYTOM_ROW], _info(tomo), ANGLES)
+    assert _xyz(out[0]) == pytest.approx([(40 - 32) * 6.75, (10 - 32) * 6.75, (4 - 15) * 6.75])
+    assert "centred on the tomogram" in capsys.readouterr().out
+
+
+def test_relion5_coordinates_without_tomogram_sizes(tmp_path):
+    info = _info(_tomogram(tmp_path))
+    for k in ("rlnTomoSizeX", "rlnTomoSizeY", "rlnTomoSizeZ"):
+        del info[k]
+    out = P.to_relion5([PYTOM_ROW], info, ANGLES)
+    assert _xyz(out[0]) == pytest.approx([(40 - 32) * 6.75, (10 - 32) * 6.75, (4 - 8) * 6.75])
+
+
+def test_relion5_coordinates_from_pytoms_relion5_compat(tmp_path):
+    """--relion5-compat given to pytom (More arguments): its centred coordinates are kept, not zeroed."""
+    row = {k: v for k, v in PYTOM_ROW.items() if not k.startswith("rlnCoordinate")}
+    row.update({"rlnCenteredCoordinateXAngst": "12.5", "rlnCenteredCoordinateYAngst": "-40",
+                "rlnCenteredCoordinateZAngst": "3"})
+    out = P.to_relion5([row], _info(_tomogram(tmp_path)), ANGLES)
+    assert _xyz(out[0]) == [12.5, -40.0, 3.0]
+
+
+def test_relion5_coordinates_missing(tmp_path):
+    row = {k: v for k, v in PYTOM_ROW.items() if k != "rlnCoordinateZ"}
+    with pytest.raises(P.Usage, match="without coordinates"):
+        P.to_relion5([row], _info(_tomogram(tmp_path)), ANGLES)

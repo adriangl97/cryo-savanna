@@ -751,6 +751,20 @@ def check_executable(opts):
                     "in 'Modules')" % exe)
 
 
+def picking_warnings(opts):
+    """Settings whose tomograms are not in RELION's frame: particles picked in them (e.g. by template
+    matching) may land in the wrong place when RELION extracts subtomograms from the aligned tilt series."""
+    out = []
+    if FLIP_VOL.get(text(opts, "flip_vol"), "1") == "2":
+        out.append("-FlipVol 2: the tomograms are flipped in z relative to RELION's reconstructions of the "
+                   "aligned tilt series; do not pick particles in them for RELION (use -FlipVol 1)")
+    if text(opts, "alignment") != ALIGN_INPUT and TILTCOR.get(text(opts, "tilt_cor"), "0") == "1":
+        out.append("-TiltCor 1: the tomograms are levelled, which the alignment written for RELION does not "
+                   "include, so z is off in RELION (more so away from the tilt axis); do not pick particles "
+                   "in them for RELION (use -TiltCor 0)")
+    return out
+
+
 def run_align(sup, job_dir, threads, opts):
     star, columns, rows = tilt_series_rows(opts)
     for d in (INPUTS_DIR, OUT_DIR, TS_DIR, LOG_DIR):
@@ -758,6 +772,8 @@ def run_align(sup, job_dir, threads, opts):
         if not os.path.isdir(p):
             os.makedirs(p)
     check_executable(opts)
+    for w in picking_warnings(opts):
+        say("WARNING: " + w)
     use_input = text(opts, "alignment") == ALIGN_INPUT
     series, state = {}, {}
     for r in rows:  # every tilt series' inputs first: a wrong setting shows before hours of processing

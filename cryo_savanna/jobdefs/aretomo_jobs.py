@@ -91,7 +91,9 @@ def align_options() -> tuple[list[OptionDef], list[Tab], dict[int, Group]]:
            "Empty: global alignment only."),
         _radio("tilt_cor", "Tilt angle offset:", tuple(A.TILTCOR), next(iter(A.TILTCOR)),
                "-TiltCor: measure the offset of the tilt angles and use it in the alignment only (0, AreTomo3's "
-               "default), also to level the tomogram (1), or neither (-1)."),
+               "default), also to level the tomogram (1), or neither (-1). Do not use 1 for tomograms to pick "
+               "particles in (template matching): the levelling is not in the alignment written for RELION, so "
+               "the picks are off in z (more so away from the tilt axis) when RELION extracts subtomograms."),
         _o("tilt_offset", "Tilt angle offset (°):", "", "Use this offset instead of the measured one (the "
            "second value of -TiltCor). Empty: measured."),
         _o("dark_tol", "Dark image tolerance:", "0.7", "-DarkTol, 0 to 1: higher is stricter. Tilts AreTomo3 "
@@ -121,9 +123,11 @@ def align_options() -> tuple[list[OptionDef], list[Tab], dict[int, Group]]:
            "-50 50. Empty: all."),
         _radio("flip_vol", "Tomogram layout:", tuple(A.FLIP_VOL), next(iter(A.FLIP_VOL)),
                "Both write the tomograms with z as the slowest axis, as RELION's are. -FlipVol 1 (what "
-               "AreTomo3's examples use) flips AreTomo3's xzy volume; -FlipVol 2 rotates it instead, keeping "
-               "its hand. Check the hand against a RELION reconstruction of the aligned tilt series before using "
-               "picks from these tomograms for subtomogram averaging."),
+               "AreTomo3's examples use) flips AreTomo3's xzy volume: the tomograms are oriented as RELION's "
+               "reconstructions of the aligned tilt series. -FlipVol 2 rotates it instead, keeping AreTomo3's "
+               "hand: the tomograms are flipped in z relative to RELION's. Do not use 2 for tomograms to pick "
+               "particles in (template matching): the picks land at the wrong depth when RELION extracts "
+               "subtomograms."),
         _yn("flip_int", "Invert contrast?", "No", "Make the density white (-FlipInt 1)."),
         _o("aretomo_args", "More AreTomo3 arguments:", "", "Added to its command line, e.g. -OutImod 1."),
         # Compute
