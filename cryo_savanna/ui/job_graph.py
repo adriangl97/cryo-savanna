@@ -41,6 +41,7 @@ from cryo_savanna.ui.graph_layout import ARROW, GraphLayout, layout_graph
 PAD_L, PAD_R, PAD_V = 15.0, 10.0, 6.0  # text padding inside a card (left includes the status strip)
 MIN_CARD_W = 230.0
 STAR_W = 16.0  # kept free right of the header for the star, so a star does not change the layout
+MARGIN = 4.0  # around a card, for its frame (the selection's, the job editor input's)
 
 
 class CardFonts:
@@ -84,6 +85,7 @@ class JobNodeItem(QGraphicsItem):
         self.info: JobInfo | None = None
         self.summary: JobSummary | None = None
         self.queue_text = ""  # place in the SLURM queue
+        self.input_labels: list[str] = []  # the open job editor's fields that take this job's outputs
         self.setFlag(QGraphicsItem.ItemIsSelectable, True)
         self.setAcceptHoverEvents(True)
         self.setZValue(1)
@@ -115,7 +117,25 @@ class JobNodeItem(QGraphicsItem):
                 tip.append("Likely cause: " + self.summary.failure[0].text)
         if self.queue_text:
             tip.append(getattr(self, "_queue_details", self.queue_text))
+        if self.input_labels:
+            tip.append(style.input_text(self.input_labels))
         self.setToolTip("\n".join(tip))
+
+    def set_inputs(self, labels: list[str]) -> None:
+        if labels != self.input_labels:
+            self.prepareGeometryChange()  # the badge sticks out above the card
+            self.input_labels = list(labels)
+            self.setZValue(2 if labels else 1)  # above the links and the cards next to it
+            self._update_tooltip()
+            self.update()
+
+    def _badge(self) -> tuple[QRectF, str]:
+        """The badge on the card's top edge naming the editor's fields: its rectangle and its text."""
+        fm = self.view.fonts.fm_small
+        text = fm.elidedText("⇢ " + ", ".join(self.input_labels), Qt.ElideRight, int(self.w - 40))
+        h = fm.height() + 2
+        w = fm.horizontalAdvance(text) + 10
+        return QRectF(self.w / 2 - 12 - w, -self.h / 2 - h / 2 - 2, w, h), text  # on the edge, clear of the text
 
     def job_line(self) -> str:
         info = self.info
@@ -137,7 +157,8 @@ class JobNodeItem(QGraphicsItem):
             self.update()
 
     def boundingRect(self) -> QRectF:
-        return QRectF(-self.w / 2 - 2, -self.h / 2 - 2, self.w + 4, self.h + 4)
+        r = QRectF(-self.w / 2 - MARGIN, -self.h / 2 - MARGIN, self.w + 2 * MARGIN, self.h + 2 * MARGIN)
+        return r.united(self._badge()[0].adjusted(-1, -1, 1, 1)) if self.input_labels else r
 
     def paint(self, p: QPainter, option: QStyleOptionGraphicsItem, widget=None) -> None:
         pal = self.view.palette()
@@ -146,10 +167,18 @@ class JobNodeItem(QGraphicsItem):
         color = style.status_color(self.info.status if self.info else "")
         selected = self.isSelected()
         if lod < 0.35:  # too small to read: a block in the status colour, like a minimap
+            if self.input_labels:  # a frame of its own, outside the selection's
+                p.setPen(Qt.NoPen)
+                p.setBrush(style.INPUT_COLOR)
+                p.drawRect(r.adjusted(-MARGIN, -MARGIN, MARGIN, MARGIN))
             p.setPen(QPen(pal.color(QPalette.Highlight), 3 / lod) if selected else Qt.NoPen)
             p.setBrush(color)
             p.drawRect(r)
             return
+        if self.input_labels:  # a frame round the card, so that a selected input shows both
+            p.setPen(QPen(style.INPUT_COLOR, 3))
+            p.setBrush(Qt.NoBrush)
+            p.drawRoundedRect(r.adjusted(-2.5, -2.5, 2.5, 2.5), 8, 8)
         if selected:
             pen = QPen(pal.color(QPalette.Highlight), 3)
         elif self._hover:
@@ -193,6 +222,14 @@ class JobNodeItem(QGraphicsItem):
         line(self.job_line(), fonts.small, fonts.fm_small, color if self.info.status != "Succeeded" else dim)
         for text in (self.summary.lines() if self.summary is not None else [])[:n_summary]:
             line(text, fonts.small, fonts.fm_small, dim)
+        if self.input_labels:
+            badge, text = self._badge()
+            p.setPen(Qt.NoPen)
+            p.setBrush(style.INPUT_COLOR)
+            p.drawRoundedRect(badge, badge.height() / 2, badge.height() / 2)
+            p.setFont(fonts.small)
+            p.setPen(QColor("#ffffff"))
+            p.drawText(badge, Qt.AlignCenter, text)
 
     def hoverEnterEvent(self, e):
         self._hover = True
@@ -295,6 +332,7 @@ class JobGraphView(QGraphicsView):
         self.graph_layout: GraphLayout | None = None
         self.fonts = CardFonts(self.font())
         self.summaries: dict[str, JobSummary] = {}
+        self.inputs: dict[str, list[str]] = {}  # the open job editor's input jobs (set_inputs)
         self.scene().selectionChanged.connect(self._on_selection)
 
     def set_snapshot(self, snap: ProjectSnapshot) -> None:
@@ -327,6 +365,7 @@ class JobGraphView(QGraphicsView):
             item.set_info(info)
             item.set_summary(self.summaries.get(name))
             item.set_queue(*style.queue_entry(self.queue, name)[:2])
+            item.set_inputs(self.inputs.get(name, []))
             item.setPos(*lay.pos[name])
             scene.addItem(item)
             self.nodes[name] = item
@@ -358,6 +397,14 @@ class JobGraphView(QGraphicsView):
 
     def clear_summaries(self) -> None:
         self.summaries.clear()
+
+    def set_inputs(self, inputs: dict[str, list[str]]) -> None:
+        """Frame the cards of the jobs the open job editor takes inputs from ({job: [field labels]}; {} clears),
+        with a badge naming the fields."""
+        old, self.inputs = self.inputs, dict(inputs)
+        for name in old.keys() | self.inputs.keys():
+            if name in self.nodes:
+                self.nodes[name].set_inputs(self.inputs.get(name, []))
 
     def set_show_all_links(self, on: bool) -> None:
         self.show_all_links = on

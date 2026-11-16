@@ -74,7 +74,9 @@ class JobActions(FormActions, SelectionActions, RunActions, PipelineActions, Act
         self.act_run = self._act("Run scheduled…", self.run_scheduled, "Ctrl+R", "Run scheduled jobs")
         self.act_stop_runs = self._act("Stop repeating runs…", self.stop_runs,
                                        tip="Stop a repeating run of scheduled jobs after its current job")
-        self.act_abort = self._act("Abort", self.abort_job, tip="Ask the selected running job to stop")
+        self.act_abort = self._act("Abort…", self.abort_job,
+                                   tip="Ask the selected running job to stop; a job run on this machine (not in a "
+                                       "queue) can also be killed (force abort)")
         self.act_alias = self._act("Set alias…", self.set_alias, "F2")
         self.act_star = self._act("Star", lambda on: self.current and self.star.emit(self.current, on), "Ctrl+B",
                                   "Mark the job, to find it with the Starred filter (for everyone who opens "

@@ -42,7 +42,7 @@ DEFAULTS = {
     "queue_poll_s": 20.0,  # seconds between looks at the SLURM queue (0 = off)
     "cache_mb": 2048,  # micrograph previews kept on disk
     "chimerax": "",  # ChimeraX to use instead of the one on PATH
-    "theme": "system",  # colours of the window: system, light or dark (style.THEMES)
+    "theme": "light",  # colours of the window: light or dark (style.THEMES; a saved "system" is light)
     "editor": "window",  # where the job editor opens (EDITOR_PLACES)
     "scratch_dir": "",  # default "Copy particles to scratch directory" of new jobs (as $RELION_SCRATCH_DIR)
     "scratch_own": False,  # each job a savanna_NNN subdirectory of its scratch directory (off: as RELION's GUI)
@@ -122,7 +122,7 @@ class PreferencesDialog(QDialog):
         for key, text in THEMES.items():
             self.theme.addItem(text, key)
         self.theme.setCurrentIndex(self.theme.findData(setting(settings, "theme")))
-        self.theme.setToolTip("Light or dark colours; as the system follows its dark mode where Qt can tell")
+        self.theme.setToolTip("Light or dark colours")
         form.addRow("Theme", self.theme)
         self.editor = QComboBox()
         for key, text in EDITOR_PLACES.items():

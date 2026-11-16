@@ -367,6 +367,24 @@ class NodeWidget(FileWidget):
         return self.combo
 
 
+_JOB_DIR = re.compile(r"(?:\./)?([^/\s]+/[^/\s]+/)")  # Type/jobNNN/ (or Type/alias/) at the start of a path
+
+
+def _input_job(value: str, pipeline: Pipeline, dirs: dict[str, str], project: str) -> str | None:
+    """The job of the pipeline an input field's value comes from (JobEditor.input_jobs), or None.
+    ``dirs``: job directory or alias directory -> job; ``project``: the project's path, with a slash."""
+    v = value.strip()
+    if not v:
+        return None
+    if v.startswith(project):
+        v = v[len(project):]
+    node = pipeline.nodes.get(v)
+    if node is not None and node.producer:
+        return node.producer
+    m = _JOB_DIR.match(v)
+    return dirs.get(m.group(1)) if m else None
+
+
 def make_widget(opt: OptionDef, editor: "JobEditor") -> OptionWidget:
     if opt.kind in ("boolean", "radio"):
         return ChoiceWidget(opt, editor)
@@ -409,6 +427,7 @@ class JobEditor(QWidget):
     submit = Signal(object, str, bool)  # JobStar, alias, schedule_only
     submit_many = Signal(object, bool)  # [(JobStar, alias, values)] of Variations…, schedule_only
     closed = Signal()
+    inputs_changed = Signal(object)  # {job: [labels of the fields that take its outputs]} (input_jobs)
     _specs_ready = Signal()  # emitted from a lookup thread: the machine, a queue node or particles are known
 
     def __init__(self, env: RelionEnv, type_names: dict[str, str], parent=None, flag_source: FlagSource | None = None,
@@ -429,6 +448,7 @@ class JobEditor(QWidget):
         self._flags_pool.setMaxThreadCount(1)
         self._flag_tasks: set[FlagsTask] = set()
         self.project_dir = Path(".")
+        self._project_prefix = ""  # the project's absolute path with a slash (set_project)
         self.pipeline: Pipeline | None = None
         self.variant: JobVariant | None = None
         self.options: dict[str, OptionDef] = {}
@@ -450,6 +470,7 @@ class JobEditor(QWidget):
         self.can_run = True
         self._reason = ""  # why jobs cannot run (set_permissions), shown in the status line
         self.own_scratch = False  # each job a savanna_NNN of its scratch directory (Preferences)
+        self._inputs: dict[str, list[str]] = {}  # input_jobs, as last told (inputs_changed)
 
         self.title = QLabel()
         f = QFont(self.font())
@@ -532,6 +553,7 @@ class JobEditor(QWidget):
     # ------------------------------------------------------------------ loading
     def set_project(self, project_dir: Path, pipeline: Pipeline | None) -> None:
         self.project_dir = Path(project_dir)
+        self._project_prefix = os.path.abspath(self.project_dir).rstrip("/") + "/"  # input_jobs: once, not per key
         self.update_pipeline(pipeline)
 
     def update_pipeline(self, pipeline: Pipeline | None) -> None:
@@ -540,6 +562,7 @@ class JobEditor(QWidget):
         for w in self.widgets.values():
             if isinstance(w, NodeWidget):
                 w.fill(pipeline)
+        self._update_inputs()
 
     def new_job(self, variant: JobVariant, values: dict[str, str] | None = None, note: str = "",
                 source_job: str | None = None) -> None:
@@ -1043,6 +1066,41 @@ class JobEditor(QWidget):
             self.selector.setEnabled(not self.readonly and interactive_kind(self.variant.label, vals) is not None)
         self._update_box_warnings(vals)
         self._update_compute_hints(vals)
+        self._update_inputs(vals)
+
+    # ------------------------------------------------------------------ the jobs it takes inputs from
+    def input_jobs(self, vals: dict[str, str] | None = None) -> dict[str, list[str]]:
+        """The jobs whose outputs the form takes as inputs: {job: [labels of those fields]}, in the form's order.
+        Only fields that count (their on/off group is on) and that name a job of the pipeline: one of its
+        output nodes, or a file in its directory (by name, alias or a path in the project). The job being
+        continued or overwritten is left out (its own files)."""
+        p = self.pipeline
+        if self.variant is None or p is None:
+            return {}
+        vals = self.values() if vals is None else vals
+        dirs = {name: name for name in p.processes}
+        dirs.update({pr.alias.rstrip("/") + "/": name for name, pr in p.processes.items() if pr.has_alias})
+        project = self._project_prefix or os.path.abspath(self.project_dir).rstrip("/") + "/"
+        out: dict[str, list[str]] = {}
+        for _, row, _parts in self.rows:
+            if not self.variant.group_active(row.group, vals):
+                continue
+            for k in row.keys:
+                if k not in self.widgets or not is_input(self.options[k]):
+                    continue
+                job = _input_job(vals[k], p, dirs, project)
+                if job is None or job == self.job:
+                    continue
+                label = self.options[k].label.strip().rstrip(":").strip() or k
+                if label not in out.setdefault(job, []):
+                    out[job].append(label)
+        return out
+
+    def _update_inputs(self, vals: dict[str, str] | None = None) -> None:
+        inputs = self.input_jobs(vals)
+        if inputs != self._inputs:
+            self._inputs = inputs
+            self.inputs_changed.emit(inputs)
 
     # ------------------------------------------------------------------ compute suggestion
     def _job_specs(self, vals: dict[str, str]) -> Specs | str | None:

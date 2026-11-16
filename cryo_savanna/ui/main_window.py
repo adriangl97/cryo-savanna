@@ -330,6 +330,8 @@ class MainWindow(QMainWindow):
             lambda pos: self.actions.context_menu(self.tree._name(self.tree.indexAt(pos)) if self.tree.indexAt(pos).isValid()
                                                   else None, self.tree.viewport().mapToGlobal(pos)))
         self.graph.context_requested.connect(self.actions.context_menu)
+        for view in (self.tree, self.graph):  # the jobs the open job editor takes inputs from
+            self.actions.editor_inputs.connect(view.set_inputs)
 
         self.status_project = QLabel()
         self.status_state = QLabel()

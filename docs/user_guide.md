@@ -67,6 +67,11 @@ polling interval (Preferences, or `--poll`), and views of running jobs read new 
   editor (Ctrl+E) opens in its own window (or docked in the main window: Preferences → Job editor;
   an open editor moves at once), and closes once the job it runs has started. It has RELION's tabs and options, with its help below; changed options are marked,
   "Defaults" resets them. New jobs start from the settings last used in this project, like RELION.
+- While the job editor is open, the jobs its inputs come from are marked: a tinted row in bold in the
+  List, a magenta frame in the Tree with a badge naming the field ("⇢ Reference map"). An input counts
+  when its field is in use (not greyed out) and names an output of a job, or a file in a job's directory
+  (by its name, its alias or its full path). The marks follow the fields as you change them, and go when the
+  editor closes.
 - **Additional arguments** lists every flag of the program the job runs, with its default and help:
   tick a flag or type a value and it is added to the arguments.
 - **Setting presets** (job editor, next to "Defaults"): named settings of a job type, kept for you
@@ -84,7 +89,7 @@ polling interval (Preferences, or `--poll`), and views of running jobs read new 
   asks first when several would run on this machine rather than the queue). Above 20 jobs it asks again as a safety measure.
 - **Clone** (Ctrl+D), **Continue**, **Overwrite** (the job goes to Trash/ and runs again in the same
   directory with new settings), **Schedule**, **Run scheduled** (Ctrl+R), **Stop repeating runs** (a repeating run stops after its
-  current job), **Abort**, **Clean**,
+  current job), **Abort** (see below), **Clean**,
   **Set alias** (F2), **Star** (Ctrl+B), **Mark as finished / failed**, **Delete** (Del, to Trash/), **Undelete**.
   Trash/ keeps one copy per job directory: overwriting or deleting a job whose earlier version is
   already there (after an overwrite) deletes that version for good, and the confirmation says so.
@@ -94,6 +99,14 @@ polling interval (Preferences, or `--poll`), and views of running jobs read new 
   overwritten, and the jobs scheduled after it stay linked to it. Marking it finished is refused.
   In a project shared by a group, files must be group-writable: cryo-savanna, like RELION, does
   not change a file (the pipeline, a job.star) that you cannot write.
+- **Abort** of a job that runs on this machine (not in a queue) offers two ways. *Ask it to stop* is
+  RELION's abort: the program stops at its next check and saves what it can. *Force abort…* kills it now:
+  cryo-savanna lists the job's processes on this machine (those under the relion_pipeliner it started,
+  and any of yours whose command line writes to the job's directory: `--o`, `--odir`, `--part_dir` or
+  `>> run.out`, as RELION starts them, also from its own GUI), asks before it kills them (SIGTERM, then
+  SIGKILL after 5 s), and marks the job aborted (RELION_JOB_EXIT_ABORTED, and a line at the end of run.err),
+  so a run of several jobs stops as for an abort. Files the job was writing may be left incomplete. A job
+  started on another machine is force-aborted from a cryo-savanna there.
 - **CLI tools**: RELION programs that RELION's GUI has no job for (relion_image_handler,
   relion_reconstruct, …) as job forms; they run as External jobs and appear in the pipeline.
   With MPI they run locally only, with at most RELION_ERROR_LOCAL_MPI processes (default 32), as
@@ -390,7 +403,8 @@ Help → Keyboard shortcuts (F1) lists every key.
 
 ### Theme
 
-Light, dark, or as the system.
+Light (the default) or dark. cryo-savanna does not follow the system's dark mode: Qt can only tell
+it on some desktops.
 
 ### Where the job editor opens
 

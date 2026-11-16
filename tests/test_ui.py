@@ -12,7 +12,7 @@ import pytest
 pytest.importorskip("qtpy")
 pytest.importorskip("pytestqt")
 
-from qtpy.QtCore import QSettings  # noqa: E402
+from qtpy.QtCore import QSettings, Qt  # noqa: E402
 from qtpy.QtWidgets import QHeaderView  # noqa: E402
 
 from cryo_savanna.project.lock import is_locked  # noqa: E402
@@ -607,3 +607,45 @@ def test_graph_paints_only_the_cards_that_changed(window, spa_project):
     jobs["Refine3D/job011/"] = dataclasses.replace(snap.jobs["Refine3D/job011/"], status="Failed")
     w.graph.set_snapshot(dataclasses.replace(snap, jobs=jobs))
     assert painted == ["Refine3D/job011/"]
+
+
+def test_jobs_the_open_editor_takes_inputs_from_are_marked(window, spa_project):
+    from cryo_savanna.ui import style
+    from cryo_savanna.ui.job_tree import COL_JOB, COL_STATUS
+    w = window(spa_project)
+    a, ed = w.actions, w.actions.editor
+    w.select_job("Class3D/job009/")
+    a.clone_job()
+    assert a.editor_shown()
+    tint = style.input_tint(w.tree.palette())
+
+    def marked() -> dict[str, list[str]]:
+        tree = {n for n, row in w.tree._items.items() if row[COL_STATUS].data(Qt.BackgroundRole) == tint}
+        graph = {n: item.input_labels for n, item in w.graph.nodes.items() if item.input_labels}
+        assert tree == set(graph) == set(w.tree.inputs)
+        return graph
+
+    labels = {k: ed.options[k].label.rstrip(":").strip() for k in ("fn_img", "fn_ref")}
+    assert marked() == {"Select/job007/": [labels["fn_img"]], "InitialModel/job008/": [labels["fn_ref"]]}
+    job = w.tree._items["Select/job007/"][COL_JOB]
+    assert job.font().bold() and style.input_text([labels["fn_img"]]) in job.toolTip()
+    assert style.input_text([labels["fn_img"]]) in w.graph.nodes["Select/job007/"].toolTip()
+    assert not w.tree._items["Class3D/job009/"][COL_JOB].font().bold()  # cloned, not an input
+
+    # as the inputs change: a file in a job's directory (also as an absolute path), none, another node
+    ed.widgets["fn_ref"].set_value(f"{spa_project}/Refine3D/job011/run_class001.mrc")
+    ed.widgets["fn_img"].set_value("")
+    assert marked() == {"Refine3D/job011/": [labels["fn_ref"]]}
+    assert w.tree._items["Select/job007/"][COL_STATUS].data(Qt.BackgroundRole) is None
+    assert "Input of" not in w.tree._items["Select/job007/"][COL_JOB].toolTip()
+    ed.widgets["fn_img"].set_value("Refine3D/job011/run_data.star")
+    assert marked() == {"Refine3D/job011/": [labels["fn_img"], labels["fn_ref"]]}
+    ed.widgets["fn_ref"].set_value("elsewhere/map.mrc")  # not a job's
+    assert marked() == {"Refine3D/job011/": [labels["fn_img"]]}
+    w.load_now()  # a new look at the project keeps the marks
+    assert marked() == {"Refine3D/job011/": [labels["fn_img"]]}
+
+    a.hide_editor()  # closed: nothing marked
+    assert marked() == {} and not w.tree._items["Refine3D/job011/"][COL_JOB].font().bold()
+    a.act_editor.trigger()  # shown again
+    assert marked() == {"Refine3D/job011/": [labels["fn_img"]]}

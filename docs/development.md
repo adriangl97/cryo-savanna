@@ -70,6 +70,7 @@ has to be checked before it is used. The runners (`*_runner.py`, `runner_common.
 | `cryo_savanna/env/machine.py` | What a job runs on: this machine's CPUs, RAM and GPUs, or a SLURM node (the submission script's partition, GPUs and memory, then sinfo), looked up in a thread |
 | `cryo_savanna/jobdefs/compute_advice.py` | The job editor's suggested MPI processes, threads, pooled particles and GPU ids, and warnings about the values typed |
 | `cryo_savanna/jobdefs/box_sizes.py` | Good box sizes (EMAN2's list, cited in NOTICE.md), which options are box sizes, and the job editor's warning |
+| `cryo_savanna/project/processes.py` | Force abort: a local job's processes (under the pipeliner cryo-savanna started, or writing to its directory), killed, and the job marked aborted |
 | `cryo_savanna/project/failure_hints.py` | Why a job failed: known messages in run.err / run.out, read with the job summaries (`project/summary.py`) |
 | `cryo_savanna/project/rebuild.py`, `cryo_savanna/ui/rebuild_dialog.py` | A pipeline rebuilt from job folders (lost `default_pipeline.star`, jobs run from the command line), and its review |
 | `cryo_savanna/project/selection.py`, `cryo_savanna/viewers/selectors.py` | Class selection and tilt-image exclusion done in cryo-savanna, writing RELION's files |

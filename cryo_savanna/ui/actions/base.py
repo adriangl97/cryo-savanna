@@ -92,6 +92,7 @@ class ActionsBase(QObject):
     select = Signal(str)  # select this job once it shows up
     message = Signal(str)  # short status message
     star = Signal(str, bool)  # star or unstar this job
+    editor_inputs = Signal(object)  # {job: [field labels]} the shown job editor takes inputs from ({}: none, or closed)
 
     def __init__(self, window: QMainWindow, defs: JobDefs, env: RelionEnv, type_names: dict[str, str],
                  tomo: bool, readonly: bool, flag_source=None):
@@ -121,6 +122,8 @@ class ActionsBase(QObject):
         self.queue: QueueState | None = None  # from the main window's monitor
 
         self.editor = JobEditor(env, type_names, flag_source=flag_source, relion_version=defs.version)
+        self._shown_inputs: dict[str, list[str]] = {}  # as last told (editor_inputs)
+        self.editor.inputs_changed.connect(lambda _: self._tell_editor_inputs())
         # the forms of the External jobs made here (CLI tools, pytom, AreTomo3, tomogram masks), built once
         self.forms = external_jobs.Forms(defs, env, self.editor.flag_source)
         self.cli, self.pytom = self.forms.cli, self.forms.pytom
@@ -312,6 +315,14 @@ class ActionsBase(QObject):
 
     def _sync_editor_action(self) -> None:
         self.act_editor.setChecked(self.editor_shown())
+        self._tell_editor_inputs()
+
+    def _tell_editor_inputs(self) -> None:
+        """editor_inputs, when they change: the editor's input jobs while it is shown, none once it is closed."""
+        inputs = self.editor.input_jobs() if self.editor_shown() else {}
+        if inputs != self._shown_inputs:
+            self._shown_inputs = inputs
+            self.editor_inputs.emit(inputs)
 
     def _edit(self, title: str, fn: Callable, *args) -> None:
         """Fill the editor with fn(*args) and show it; a RELION_* value RELION itself refuses is reported instead."""

@@ -13,6 +13,7 @@ files (byte-identical to RELION's: tests/test_against_relion.py) and starts the 
 - overwrite: as RELION's GUI does it: the job goes to Trash/, and the new job is added with the
             pipeline's job counter set back to its number, so it gets the same directory.
 - abort:    RELION_JOB_ABORT_NOW in the job directory (what RELION's programs check).
+- force abort: the job's processes on this host killed, RELION_JOB_EXIT_ABORTED written (project/processes.py).
 - clean:    relion_pipeliner --gentle_clean N / --harsh_clean N.
 
 Every run started here is recorded in <project>/.cryo-savanna/runs/<id>.json with its output in
@@ -34,6 +35,7 @@ from pathlib import Path
 
 from cryo_savanna.env.child import external_environ
 from cryo_savanna.jobdefs import external_jobs
+from cryo_savanna.project import processes
 from cryo_savanna.project.jobstar import JobStar
 from cryo_savanna.project.ops import TRASH_DIR, PipelineOps
 from cryo_savanna.project.pipeline import Pipeline
@@ -328,9 +330,25 @@ class Pipeliner:
             out.append(rec)
         return out
 
+    def runs_of(self, job: str) -> list[RunRecord]:
+        """The recorded runs that ran (or run) ``job``, newest first."""
+        return sorted((r for r in self.runs() if job in r.jobs), key=lambda r: r.started, reverse=True)
+
     # ------------------------------------------------------------------ abort / clean
     def abort(self, job: str) -> None:
         (self.project_dir / job / RELION_JOB_ABORT_NOW).touch()
+
+    def force_abort_targets(self, job: str) -> tuple[list[processes.Proc], str]:
+        """The processes of ``job`` on this host (project/processes.py), and, when there are none, the host the
+        last run of it was started on if that is another one ("" otherwise)."""
+        here = socket.gethostname()
+        runs = self.runs_of(job)
+        procs = processes.job_processes(self.project_dir, job, [r.pid for r in runs if r.host == here and r.is_alive()])
+        return procs, (runs[0].host if not procs and runs and runs[0].host != here else "")
+
+    def force_abort(self, job: str, procs: list[processes.Proc]) -> None:
+        """Kill ``procs`` (force_abort_targets) and mark the job as aborted."""
+        processes.kill(self.project_dir, job, procs)
 
     def clean(self, job: str, harsh: bool = False) -> None:
         number = Pipeline.read(self.project_dir).processes[job].job_number

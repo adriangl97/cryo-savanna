@@ -1,7 +1,8 @@
 # Copyright (C) 2026 Adrián González-López
 # SPDX-License-Identifier: GPL-2.0-or-later
-"""Running jobs and what follows them: run scheduled jobs, stop repeating runs, abort (with SLURM: scancel),
-mark the jobs SLURM ended without RELION's exit file, clean, empty Trash/, and the disk usage window."""
+"""Running jobs and what follows them: run scheduled jobs, stop repeating runs, abort (with SLURM: scancel; on
+this machine: force abort, its processes killed), mark the jobs SLURM ended without RELION's exit file, clean,
+empty Trash/, and the disk usage window."""
 
 from __future__ import annotations
 
@@ -23,7 +24,8 @@ from qtpy.QtWidgets import (
     QVBoxLayout,
 )
 
-from cryo_savanna.project import disk_usage
+from cryo_savanna.project import disk_usage, processes
+from cryo_savanna.project.jobstar import JobStar
 from cryo_savanna.relion_consts import RELION_JOB_EXIT_ABORTED, RELION_JOB_EXIT_FAILURE, RELION_JOB_EXIT_SUCCESS
 from cryo_savanna.ui import style
 
@@ -126,9 +128,71 @@ class RunActions(_Base):
             elif choice == "stop":
                 self._run(f"Abort {self._label(job)}", lambda: pl.abort(job))
             return
-        if QMessageBox.question(self.window, "Abort", f"Ask {self._label(job)} to stop?") != QMessageBox.Yes:
+        if self._queued(job):  # in a queue cryo-savanna does not watch: its processes are not here
+            if QMessageBox.question(self.window, "Abort", f"Ask {self._label(job)} to stop?") == QMessageBox.Yes:
+                self._run(f"Abort {self._label(job)}", lambda: pl.abort(job))
             return
-        self._run(f"Abort {self._label(job)}", lambda: pl.abort(job))
+        choice = self._choose_local_abort(job)
+        if choice == "stop":
+            self._run(f"Abort {self._label(job)}", lambda: pl.abort(job))
+        elif choice == "force":
+            self.force_abort(job)
+
+    def _queued(self, job: str) -> bool:
+        """Whether the job was submitted to a queue (its job.star's "Submit to queue?")."""
+        try:
+            return JobStar.read(self._ready()[0] / job / "job.star").options.get("do_queue", "No") == "Yes"
+        except (OSError, ValueError, KeyError):
+            return False
+
+    def _choose_local_abort(self, job: str) -> str:
+        """"stop" (RELION's abort file), "force" (kill its processes here) or "" for a job run on a machine."""
+        box = QMessageBox(QMessageBox.Question, "Abort",
+                          f"{self._label(job)} is running (not in a queue).\n\n"
+                          "Ask it to stop: RELION's programs stop at their next check and save what they can.\n"
+                          "Force abort: its processes on this machine are killed now, and the job is marked as "
+                          "aborted. What it was writing may be left incomplete.",
+                          parent=self.window)
+        stop = box.addButton("Ask it to stop", QMessageBox.AcceptRole)
+        force = box.addButton("Force abort…", QMessageBox.DestructiveRole)
+        box.addButton(QMessageBox.Cancel)
+        box.setDefaultButton(stop)
+        box.exec()
+        return {stop: "stop", force: "force"}.get(box.clickedButton(), "")
+
+    def force_abort(self, job: str) -> None:
+        """Kill the job's processes on this host, after showing which (project/processes.py)."""
+        pl, label = self._ready()[1], self._label(job)
+        try:
+            procs, host = pl.force_abort_targets(job)
+        except processes.ForceAbortError as e:
+            QMessageBox.warning(self.window, "Force abort", str(e))
+            return
+        if not procs:
+            where = (f"It was started on {host}: force abort it from a cryo-savanna there." if host else
+                     "It may run on another machine, or it has just ended. If it is not running anywhere, use "
+                     "Job → Mark as failed.")
+            QMessageBox.information(self.window, "Force abort", f"No process of {label} was found on this machine.\n\n"
+                                    + where)
+            return
+        if not self._confirm_kill(label, procs):
+            return
+        self._run(f"Force abort {label}", lambda: pl.force_abort(job, procs))
+
+    def _confirm_kill(self, label: str, procs: list) -> bool:
+        shown = [f"{p.pid:>7}  {p.args if len(p.args) <= 110 else p.args[:107] + '...'}" for p in procs[:12]]
+        if len(procs) > len(shown):
+            shown.append(f"... and {len(procs) - len(shown)} more")
+        box = QMessageBox(QMessageBox.Warning, "Force abort",
+                          f"Kill these {len(procs)} process(es) of {label}?\n\n" + "\n".join(shown) +
+                          f"\n\nThey get SIGTERM, then SIGKILL after {processes.TERM_WAIT_S:g} s.",
+                          parent=self.window)
+        box.setDetailedText("\n".join(f"{p.pid}  (parent {p.ppid})  {p.args}" for p in procs))
+        kill = box.addButton("Kill", QMessageBox.DestructiveRole)
+        box.addButton(QMessageBox.Cancel)
+        box.setDefaultButton(QMessageBox.Cancel)
+        box.exec()
+        return box.clickedButton() is kill
 
     def _choose_abort(self, job: str, q) -> str:
         """"cancel" (scancel), "stop" (RELION's abort file) or "" for a job in the SLURM queue."""

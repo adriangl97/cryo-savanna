@@ -61,7 +61,9 @@ def test_theme_preference(qtbot, tmp_path, spa_project, monkeypatch):
     app = QApplication.instance()
     s = QSettings(str(tmp_path / "s.ini"), QSettings.IniFormat)
     s.setValue("theme", "nonsense")
-    assert P.setting(s, "theme") == "system"
+    assert P.setting(s, "theme") == "light"
+    s.setValue("theme", "system")  # saved before the system's theme was dropped
+    assert P.setting(s, "theme") == "light"
     w = make(qtbot, spa_project, s)
     w.load_now()
     plot = pg.PlotWidget()  # an open plot follows the theme
@@ -87,7 +89,7 @@ def test_theme_preference(qtbot, tmp_path, spa_project, monkeypatch):
         assert text.name() in plot.getPlotItem().titleLabel.item.toHtml()
         assert style.excluded_row_color(app.palette()).lightness() < 128
         assert w.graph.edges and all(e.pen().color().rgb() == text.rgb() for e in w.graph.edges if not e.highlighted)
-        style.apply_theme(app, "system")
+        style.apply_theme(app, "light")
         w2 = make(qtbot, spa_project, s)  # and at the next start
         app.processEvents()
         assert style.is_dark(w2.palette())
@@ -95,7 +97,7 @@ def test_theme_preference(qtbot, tmp_path, spa_project, monkeypatch):
         assert not style.is_dark(app.palette())
         assert plot.backgroundBrush().color() == app.palette().color(QPalette.Base)
     finally:
-        style.apply_theme(app, "system")
+        style.apply_theme(app, "light")
 
 
 
