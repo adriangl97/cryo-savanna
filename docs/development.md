@@ -65,6 +65,10 @@ has to be checked before it is used. The runners (`*_runner.py`, `runner_common.
 | `tools/bundle_help.py` | Regenerates the bundled `--help` texts from the validation dumps and the RELION source |
 | `tools/pipeline_ops_ref/` | RELION's own alias/mark/delete/undelete code as a small program, to test `project/ops.py` against |
 | `cryo_savanna/project/disk_usage.py`, `cryo_savanna/ui/disk_usage.py` | Project → Disk usage: the size of each job, Trash/ and the rest (as `du`), what RELION's gentle and harsh clean would move (`PipeLine::cleanupJob`), emptying Trash/; and its window |
+| `cryo_savanna/project/presets.py`, `cryo_savanna/ui/presets_dialog.py` | Setting presets: the user's named options per job type (`~/.config/cryo-savanna/presets/`), and the editor's save and manage dialogs |
+| `cryo_savanna/project/variations.py`, `cryo_savanna/ui/variations_dialog.py` | Variations…: values, ranges, combinations and aliases, and the dialog; the jobs are added by `ui/actions/forms.py` (`_on_submit_many`) |
+| `cryo_savanna/jobdefs/box_sizes.py` | Good box sizes (EMAN2's list, cited in NOTICE.md), which options are box sizes, and the job editor's warning |
+| `cryo_savanna/project/failure_hints.py` | Why a job failed: known messages in run.err / run.out, read with the job summaries (`project/summary.py`) |
 | `cryo_savanna/project/rebuild.py`, `cryo_savanna/ui/rebuild_dialog.py` | A pipeline rebuilt from job folders (lost `default_pipeline.star`, jobs run from the command line), and its review |
 | `cryo_savanna/project/selection.py`, `cryo_savanna/viewers/selectors.py` | Class selection and tilt-image exclusion done in cryo-savanna, writing RELION's files |
 | `tools/hooks/`, `tools/install_hooks.sh` | The version of each commit (the date), written by the pre-commit hook |

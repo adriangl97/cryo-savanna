@@ -69,6 +69,19 @@ polling interval (Preferences, or `--poll`), and views of running jobs read new 
   "Defaults" resets them. New jobs start from the settings last used in this project, like RELION.
 - **Additional arguments** lists every flag of the program the job runs, with its default and help:
   tick a flag or type a value and it is added to the arguments.
+- **Setting presets** (job editor, next to "Defaults"): named settings of a job type, kept for you
+  (`~/.config/cryo-savanna/presets/`, or `$CRYO_SAVANNA_CONFIG`), for every project. *Save current settings
+  as…* lists the options: those changed from RELION's default are ticked, inputs (input nodes, files,
+  folders) are not. Loading a preset keeps the inputs of the form, sets every other option to RELION's
+  default, then the preset's options; *Update “‹preset›”* saves the form's values into the loaded one.
+  *Manage presets…* renames, copies and deletes presets, and edits, adds or removes their options. Options
+  of another RELION version are kept, and skipped when loading. Not when continuing a job (only some
+  options can change then).
+- **Variations…** (job editor, new jobs): choose options and their values: a list (`3, 4, 5`), a range
+  (`2:8:2`), the choices of a Yes/No or menu option, or input nodes. Every combination becomes a job,
+  with an alias from its values (`Class2D_K50_T2`, editable; the tags too). *Schedule all* adds them as
+  scheduled jobs; *Run all now* starts each in its own `relion_pipeliner`, so they run side by side (it
+  asks first when several would run on this machine rather than the queue). Above 20 jobs it asks again as a safety measure.
 - **Clone** (Ctrl+D), **Continue**, **Overwrite** (the job goes to Trash/ and runs again in the same
   directory with new settings), **Schedule**, **Run scheduled** (Ctrl+R), **Stop repeating runs** (a repeating run stops after its
   current job), **Abort**, **Clean**,
@@ -101,6 +114,22 @@ polling interval (Preferences, or `--poll`), and views of running jobs read new 
   looking, by sacct's submit line (newer SLURM releases only). A submit template with
   `#SBATCH --job-name=XXXnameXXX` (RELION fills in the job directory) makes this direct, and squeue
   readable for everyone.
+
+## Box sizes
+
+Some box sizes make the FFTs, and so a job and every job that uses its particles, much faster than others
+(128 px is almost twice as fast as 122 px). Under a box size in pixels that is not on
+[EMAN2's list of good box sizes](https://blake.bcm.edu/emanwiki/doku.php?id=eman2:boxsize), the job editor
+warns and gives the closest good sizes below and above it, and Run / Schedule ask before going on. The list is cited in NOTICE.md.
+
+## Why a job failed
+
+For a failed job, the Overview shows **Likely cause** under its status, and the tree its first one in the
+card's tooltip: known messages at the end of run.err and run.out (RELION 5.1.1's own errors, CUDA, MPI,
+SLURM, and cryo-savanna's runners), each with a one-line hint and a link to the log line it comes from:
+GPU or RAM out of memory, wrong GPU ids, the queue's time limit, a failed node, a full disk, permission
+denied, too few MPI processes, a mask or pixel size that does not fit, no particles left, a missing input
+file, a missing Python module, a crash. When none matches, it shows RELION's own error message.
 
 ## Disk usage
 

@@ -21,6 +21,7 @@ from cryo_savanna.jobdefs.pytom_jobs import (EXTRACT as PYTOM_EXTRACT, MATCH as 
 from cryo_savanna.project.jobstar import JobStar, read_last_used
 from cryo_savanna.project.ops import OpsError, PipelineOps
 from cryo_savanna.project.pipeline import Pipeline
+from cryo_savanna.project.pipeliner import PipelinerError
 from cryo_savanna.project.scratch import ENV_VAR as SCRATCH_VAR
 from cryo_savanna.project.scratch import SCRATCH_KEY
 from cryo_savanna.project.scratch import assign as assign_scratch
@@ -240,6 +241,34 @@ class FormActions(_Base):
             pass
         return assign_scratch(js.options, project, pipeline, labels)
 
+    def _check_values(self, variant: JobVariant | None, v: dict[str, str]) -> tuple[str, str] | None:
+        """(title, what is wrong) when these options of this form cannot be submitted, else None: what RELION
+        or the runner would refuse later, said now."""
+        if isinstance(variant, PytomVariant):
+            bad = quoted_values(v, variant.own_keys)
+            if bad:
+                return variant.program, ("These options cannot have a double quote (\") in them (RELION's job.star "
+                                         "keeps them in double quotes): " + ", ".join(
+                                             variant.options[k].label.rstrip(": ") for k in bad))
+        if isinstance(variant, CliVariant):
+            if v.get("nr_mpi", "1") not in ("", "1") and v.get("do_queue") == "Yes":
+                return variant.program, ("MPI runs of CLI tools can only run locally: RELION's External jobs cannot "
+                                         "ask the queue for MPI slots. Use 1 MPI process, or switch off 'Submit to "
+                                         "queue'.")
+            try:
+                limit = self.env.error_local_mpi
+            except RelionEnvError as e:  # RELION would refuse to start
+                return variant.program, self._env_message(e)
+            try:
+                nr_mpi = int(float(v.get("nr_mpi") or 1))
+            except ValueError:
+                nr_mpi = 1  # cli_runner reports it
+            if nr_mpi > limit:  # as relion_pipeliner refuses it for RELION's own jobs (cli_runner checks again)
+                return variant.program, (f"You're submitting a local job with {nr_mpi} parallel MPI processes. "
+                                         "That's more than allowed by the RELION_ERROR_LOCAL_MPI environment "
+                                         f"variable ({limit}).")
+        return None
+
     def _on_submit(self, js: JobStar, alias: str, schedule_only: bool) -> None:
         pl = self._ready()[1]
         kind = interactive_kind(js.type_label, js.options)
@@ -247,35 +276,10 @@ class FormActions(_Base):
             job = self.editor.job if self.editor.mode in (MODE_CONTINUE, MODE_OVERWRITE) else None
             self.open_tool(kind, js, alias, self.editor.mode, job)
             return
-        if isinstance(self.editor.variant, PytomVariant):
-            bad = quoted_values(self.editor.values(), self.editor.variant.own_keys)
-            if bad:
-                QMessageBox.warning(self.window, self.editor.variant.program,
-                                    "These options cannot have a double quote (\") in them (RELION's job.star "
-                                    "keeps them in double quotes): " + ", ".join(
-                                        self.editor.variant.options[k].label.rstrip(": ") for k in bad))
-                return
-        if isinstance(self.editor.variant, CliVariant):
-            v = self.editor.values()
-            if v.get("nr_mpi", "1") not in ("", "1") and v.get("do_queue") == "Yes":
-                QMessageBox.warning(self.window, self.editor.variant.program,
-                                    "MPI runs of CLI tools can only run locally: RELION's External jobs cannot ask "
-                                    "the queue for MPI slots. Use 1 MPI process, or switch off 'Submit to queue'.")
-                return
-            try:
-                limit = self.env.error_local_mpi
-            except RelionEnvError as e:  # RELION would refuse to start
-                self._env_error(self.editor.variant.program, e)
-                return
-            try:
-                nr_mpi = int(float(v.get("nr_mpi") or 1))
-            except ValueError:
-                nr_mpi = 1  # cli_runner reports it
-            if nr_mpi > limit:  # as relion_pipeliner refuses it for RELION's own jobs (cli_runner checks again)
-                QMessageBox.warning(self.window, self.editor.variant.program,
-                                    f"You're submitting a local job with {nr_mpi} parallel MPI processes. That's more "
-                                    f"than allowed by the RELION_ERROR_LOCAL_MPI environment variable ({limit}).")
-                return
+        problem = self._check_values(self.editor.variant, self.editor.values())
+        if problem is not None:
+            QMessageBox.warning(self.window, *problem)
+            return
         if self.editor.mode == MODE_OVERWRITE:
             self._submit_overwrite(js, alias, schedule_only)
             return
@@ -331,6 +335,61 @@ class FormActions(_Base):
                 self._started(edit, text)
 
         self._run("Schedule job" if schedule_only else "Run job", add_and_run, done)
+    def _on_submit_many(self, jobs: list[tuple[JobStar, str, dict[str, str]]], schedule_only: bool) -> None:
+        """Variations…: add these new jobs, in order, then run each in its own relion_pipeliner (so they run at
+        the same time, each to the queue if it is submitted there) or leave them scheduled."""
+        if not jobs:
+            return
+        pl = self._ready()[1]
+        project = self._ready()[0]
+        variant = self.editor.variant
+        for js, alias, values in jobs:
+            problem = self._check_values(variant, values)
+            if problem is not None:
+                QMessageBox.warning(self.window, problem[0], f"{alias or js.type_label}: {problem[1]}")
+                return
+        if self.snapshot is not None and variant is not None:  # --setJobAlias checks again
+            for _, alias, _ in jobs:
+                try:
+                    PipelineOps.check_alias(self.snapshot.pipeline, f"{variant.dirname}/job000/", alias)
+                except OpsError as e:
+                    QMessageBox.warning(self.window, "Alias", f"{alias}: {e}")
+                    return
+        cli = variant if isinstance(variant, CliVariant) else None  # its outputs go to the job's directory
+        pipeline = self.editor.pipeline
+        own_scratch = self.editor.own_scratch
+
+        def add_and_run():
+            added: list[str] = []
+            try:
+                for js, alias, values in jobs:
+                    if own_scratch:
+                        self._own_scratch(js, pipeline)
+                    res = pl.add_job(js, alias or None)
+                    if cli is not None:  # outputs must go to its own directory (the one guessed may be taken)
+                        cli.make_jobstar(values, False, res.job, pipeline).write(project / res.job / "job.star")
+                    added.append(res.job)
+            except (PipelinerError, OSError) as e:
+                raise PipelinerError(str(e) + (f"\n\nAdded before this (scheduled, not run): {', '.join(added)}"
+                                               if added else ""))
+            for job in [] if schedule_only else added:  # each its own pipeliner: they run side by side
+                pl.run([job])
+            return added
+
+        edit = self._edits
+
+        def done(added):
+            if added:
+                self.select.emit(added[0])
+            verb = "scheduled" if schedule_only else "started"
+            text = f"{len(added)} jobs {verb}: " + ", ".join(j.rstrip("/") for j in added) + "."
+            if schedule_only:
+                self.editor.status.setText(text)
+            else:
+                self._started(edit, text)
+
+        what = f"{'Schedule' if schedule_only else 'Run'} {len(jobs)} variations"
+        self._run(what, add_and_run, done)
 
 
 

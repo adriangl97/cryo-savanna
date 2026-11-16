@@ -119,13 +119,14 @@ class ActionsBase(QObject):
         self._marked_lost: set[tuple[str, str]] = set()  # (job, SLURM id) already marked (mark_lost)
         self.queue: QueueState | None = None  # from the main window's monitor
 
-        self.editor = JobEditor(env, type_names, flag_source=flag_source)
+        self.editor = JobEditor(env, type_names, flag_source=flag_source, relion_version=defs.version)
         # the forms of the External jobs made here (CLI tools, pytom, AreTomo3, tomogram masks), built once
         self.forms = external_jobs.Forms(defs, env, self.editor.flag_source)
         self.cli, self.pytom = self.forms.cli, self.forms.pytom
         self.aretomo, self.tomomask = self.forms.aretomo, self.forms.tomomask
         warm_pytom_defaults()  # "module avail cuda", in the background: not when the first form opens
         self.editor.submit.connect(self._on_submit)
+        self.editor.submit_many.connect(self._on_submit_many)
         # the editor goes in its own window or in the dock (Preferences → Job editor: set_editor_place)
         self.dock = QDockWidget("Job editor", window)
         self.dock.setObjectName("job_editor_dock")
@@ -322,6 +323,9 @@ class ActionsBase(QObject):
         if edit == self._edits:
             self.hide_editor()
 
+    @staticmethod
+    def _env_message(e: Exception) -> str:
+        return f"{e}.\n\nCorrect it in the shell (or the RELION module) that starts cryo-savanna, then start it again."
+
     def _env_error(self, title: str, e: Exception) -> None:
-        QMessageBox.warning(self.window, title, f"{e}.\n\nCorrect it in the shell (or the RELION module) that "
-                            "starts cryo-savanna, then start it again.")
+        QMessageBox.warning(self.window, title, self._env_message(e))

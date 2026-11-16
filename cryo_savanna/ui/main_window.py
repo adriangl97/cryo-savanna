@@ -341,6 +341,7 @@ class MainWindow(QMainWindow):
         self.info.job_link.connect(self.select_job)
         self.info.tool_requested.connect(self.actions.request_tool)
         self.info.main_input_requested.connect(self.set_main_input)
+        self.info.log_requested.connect(self.logs.show_log)
 
     def _action(self, tb: QToolBar | None, text: str, shortcut, slot) -> QAction:
         a = QAction(text, self)

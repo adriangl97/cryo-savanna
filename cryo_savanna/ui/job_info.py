@@ -34,6 +34,7 @@ from cryo_savanna.jobdefs.cli_catalog import POSITIONAL
 from cryo_savanna.jobdefs import external_jobs
 from cryo_savanna.jobdefs.cli_tools import CliCatalog
 from cryo_savanna.jobdefs.model import JobDefs, JobVariant
+from cryo_savanna.project.failure_hints import RELION_ERROR, Diagnosis
 from cryo_savanna.jobdefs.pytom_jobs import PytomVariant, decode
 from cryo_savanna.project.jobstar import JobStar
 from cryo_savanna.project.main_inputs import MainInputs
@@ -49,6 +50,7 @@ class JobInfoPanel(QTabWidget):
     job_link = Signal(str)  # a link to another job was clicked
     tool_requested = Signal(str, str)  # a viewer asks for a selection tool (kind, file or job)
     main_input_requested = Signal(str, str)  # make this input node the job's main input ("": the default)
+    log_requested = Signal(str, str)  # show this log (run.err) at this line (a failure hint's)
 
     def __init__(self, defs: JobDefs, env: RelionEnv, type_names: dict[str, str], parent=None):
         super().__init__(parent)
@@ -288,6 +290,9 @@ class JobInfoPanel(QTabWidget):
                     rows.append((label, html.escape(" · ".join(items))))
             if info.status == "Running" and summary.progress():
                 rows.append(("Progress", html.escape(summary.progress())))
+            if summary.failure:  # just under the status
+                at = next((i + 1 for i, (label, _) in enumerate(rows) if label == "Status"), len(rows))
+                rows.insert(at, ("Likely cause", self._failure_html(summary.failure, color)))
         if info.modified:
             rows.append(("Last change", f"{style.timestamp(info.modified)} ({style.ago(info.modified)})"))
         if self._jobstar is not None:
@@ -371,10 +376,26 @@ class JobInfoPanel(QTabWidget):
         out.append("</table>")
         return out
 
+    @staticmethod
+    def _failure_html(failure: list[Diagnosis], color: str) -> str:
+        """The hints of a failed job, each with the log line it comes from (a link to it)."""
+        out = []
+        for i, d in enumerate(failure):
+            line = d.line if len(d.line) <= 160 else d.line[:157] + "…"
+            quote = "" if d.hint is RELION_ERROR else f": {html.escape(line)}"
+            out.append(f"<b style='color:{color}'>{html.escape(d.text)}</b><br><span style='color:gray'>"
+                       f"<a href='log:{i}'>{d.file}, line {d.line_no}</a>{quote}</span>")
+        return "<br>".join(out)
+
     def _on_link(self, url: QUrl) -> None:
         s = url.toString()
         if s.startswith("job:"):
             self.job_link.emit(s[4:])
+        elif s.startswith("log:") and self._job:
+            summary = self.summaries.get(self._job)
+            i = int(s[4:]) if s[4:].isdigit() else -1
+            if summary is not None and 0 <= i < len(summary.failure):
+                self.log_requested.emit(summary.failure[i].file, summary.failure[i].line)
         elif s.startswith("main:") and self._job:
             self.main_input_requested.emit(self._job, s[5:])
 

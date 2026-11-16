@@ -111,6 +111,8 @@ class JobNodeItem(QGraphicsItem):
             tip.append("starred")
         if self.summary is not None:
             tip += self.summary.lines()
+            if self.summary.failure:
+                tip.append("Likely cause: " + self.summary.failure[0].text)
         if self.queue_text:
             tip.append(getattr(self, "_queue_details", self.queue_text))
         self.setToolTip("\n".join(tip))

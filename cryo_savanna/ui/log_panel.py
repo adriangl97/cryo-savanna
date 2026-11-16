@@ -8,7 +8,7 @@ import codecs
 import os
 from pathlib import Path
 
-from qtpy.QtGui import QFontDatabase, QTextCursor
+from qtpy.QtGui import QFontDatabase, QTextCursor, QTextDocument
 from qtpy.QtWidgets import QPlainTextEdit, QTabWidget
 
 from cryo_savanna.project.snapshot import Stamp, stamp
@@ -157,6 +157,16 @@ class LogPanel(QTabWidget):
         if job_dir and self.currentIndex() == 0 and (job_dir / "run.err").exists() and \
                 (job_dir / "run.err").stat().st_size > 0 and not (job_dir / "run.out").exists():
             self.setCurrentIndex(1)
+
+    def show_log(self, name: str, text: str = "") -> None:
+        """Show this log ("run.err"), at the last line with this text if it is in the part shown."""
+        v = self.views.get(name)
+        if v is None:
+            return
+        self.setCurrentWidget(v)
+        v.moveCursor(QTextCursor.End)
+        if text and v.find(text, QTextDocument.FindBackward):
+            v.centerCursor()
 
     def refresh(self) -> None:
         changed = [v.refresh() for v in self.views.values()]  # every log, not only up to the first change

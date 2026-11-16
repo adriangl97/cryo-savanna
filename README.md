@@ -65,6 +65,15 @@ and can be used interchangeably, even at the same time, on the same project.
 
 - Every flag of the program a job runs, read from its `--help`, is listed under "Additional
   arguments" with its default and help text, to tick and fill in.
+- **Setting presets** in the job editor: save the options you choose under a name, load them in any project
+  (the inputs stay, the rest goes back to RELION's defaults first), and rename, copy or edit them.
+- **Variations…** in the job editor: vary some options (K = 3,4,5 × T = 2,4) and get one job for every
+  combination, each with its own alias, scheduled or all started at once.
+- A box size that is not a good one for FFTs (after
+  [EMAN2's list](https://blake.bcm.edu/emanwiki/doku.php?id=eman2:boxsize)) is flagged in the job editor,
+  with the closest good sizes below and above.
+- Failed jobs show their **likely cause** in the Overview and the tree (GPU or RAM out of memory, the
+  queue's time limit, a missing input, too few MPI processes, ...), with the log line it comes from.
 - RELION's command-line-only programs (`relion_image_handler`, `relion_reconstruct`, the
   `relion_tomo_*` tools, ...) can be run from the **CLI tools** menu. They appear in the pipeline
   as ordinary External jobs, with their inputs and outputs.

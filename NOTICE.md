@@ -122,6 +122,15 @@ Dari Kimanius, Erik Lindahl, Takanori Nakane, Joaquin Oton, Colin Palmer, Euan P
 and Jasenko Zivanov (RELION's `AUTHORS` file). If you use RELION through cryo-savanna, please cite
 the RELION papers.
 
+## Good box sizes (EMAN2)
+
+The list of good box sizes that the job editor checks box sizes against (`cryo_savanna/jobdefs/box_sizes.py`)
+is EMAN2's, from the EMAN wiki page "Particle Box Size"
+(<https://blake.bcm.edu/emanwiki/doku.php?id=eman2:boxsize>, last modified 2025-07-04 by Steve Ludtke),
+licensed under CC Attribution-Share Alike 4.0 International. Tang G, Peng L, Baldwin PR,
+Mann DS, Jiang W, Rees I, Ludtke SJ (2007) EMAN2: an extensible image processing suite for electron
+microscopy. *J Struct Biol* 157:38–46.
+
 ## Programs cryo-savanna runs
 
 cryo-savanna starts RELION's own programs (`relion_pipeliner`, `relion_display`, the tomography
