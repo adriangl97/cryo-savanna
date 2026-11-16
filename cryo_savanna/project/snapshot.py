@@ -66,9 +66,16 @@ class ProjectSnapshot:
     loaded_at: float
 
     def structure_key(self) -> tuple:
-        """Changes when jobs, their parents, their names or what they run change, not when only statuses change."""
-        return tuple((j.name, j.process.alias, j.primary_parent, tuple(j.other_parents), j.program)
-                     for j in self.jobs.values())
+        """Changes when jobs, their parents, their names or what they run change, not when only statuses change.
+
+        Worked out once per snapshot (the list, the tree and the job actions each ask at every refresh); a
+        snapshot's jobs are not changed once it is made."""
+        key = self.__dict__.get("_structure_key")
+        if key is None:
+            key = self.__dict__["_structure_key"] = tuple(
+                (j.name, j.process.alias, j.primary_parent, tuple(j.other_parents), j.program)
+                for j in self.jobs.values())
+        return key
 
     def type_dir_counts(self) -> dict[str, int]:
         out: dict[str, int] = {}

@@ -55,6 +55,13 @@ def test_gold_standard_needs_an_odd_count():
     assert int(three.values["nr_mpi"]) % 2 == 1 and int(three.values["nr_mpi"]) >= 3
 
 
+def test_values_that_are_no_whole_number():
+    # "inf", "nan" or "1e999" typed in the MPI field: taken as not given, not an error in the editor
+    for typed in ("inf", "nan", "1e999", "-inf"):
+        a = advise("relion.refine3d", {"use_gpu": "Yes", "nr_mpi": typed}, box(), A.Particles(360, None))
+        assert a.values["nr_mpi"] == "5"
+
+
 def test_vdam_runs_without_mpi():
     a = advise("relion.class2d", {"use_gpu": "Yes", "do_grad": "Yes", "nr_mpi": "5"}, box(gpus=2))
     assert a.values == {"nr_mpi": "1", "nr_threads": "12", "nr_pool": "30"}  # as RELION's Schemes: 12 on 2 GPUs

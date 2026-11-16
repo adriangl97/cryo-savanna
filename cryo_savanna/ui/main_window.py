@@ -496,7 +496,8 @@ class MainWindow(QMainWindow):
         self.tree.set_snapshot(snap)
         self.graph.set_snapshot(snap)
         self.actions.set_snapshot(snap)
-        self._apply_filter()
+        if self.tree.proxy.is_active():  # what the filter shows may have changed; without one, all is shown
+            self._apply_filter()
         if self._summary_worker is not None:
             self._generation += 1
             self._summary_worker.generation = self._generation

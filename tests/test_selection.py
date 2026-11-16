@@ -15,6 +15,7 @@ from cryo_savanna.project.selection import (
     read_class_input,
     read_tilt_exclusion,
     read_tilt_input,
+    regroup_count,
     regroup_particles,
     write_class_selection,
     write_tilt_exclusion,
@@ -313,3 +314,12 @@ def test_saving_a_selection_as_a_job_and_a_failed_overwrite(spa_copy, tmp_path, 
     with pytest.raises(OSError):
         pl.add_done_here(js, fail, command)
     assert set(Pipeline.read(spa_copy).processes) == before
+
+
+def test_regroup_count():
+    assert regroup_count({"do_regroup": "Yes", "nr_groups": "12"}) == 12
+    assert regroup_count({"do_regroup": "Yes", "nr_groups": "12.0"}) == 12
+    assert regroup_count({"do_regroup": "No", "nr_groups": "12"}) == 0
+    # a job.star with a value that is not a whole number: no regrouping, not an error opening the selection
+    for bad in ("", "abc", "inf", "nan", "-3"):
+        assert regroup_count({"do_regroup": "Yes", "nr_groups": bad}) == 0

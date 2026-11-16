@@ -41,6 +41,7 @@ from cryo_savanna.project.selection import (
     read_class_input,
     read_tilt_exclusion,
     read_tilt_input,
+    regroup_count,
     selected_numbers,
 )
 from cryo_savanna.results.classes import read_model_classes
@@ -466,7 +467,7 @@ class SelectionView(QWidget):
             self.note.setText(f"⚠ Cannot read {self.job}job.star: {e}")
             return
         if self.kind == "classes":
-            regroup = int(float(o.get("nr_groups", "0") or 0)) if o.get("do_regroup") == "Yes" else 0
+            regroup = regroup_count(o)
             self.panel = ClassSelection(self.project_dir, o.get("fn_model", ""), recenter=o.get("do_recenter") == "Yes",
                                         regroup=regroup, editable=False)
             self.panel.loaded.connect(self._on_classes)

@@ -142,12 +142,18 @@ class JobTreeView(QTreeView):
             self._set_snapshot(snap)
 
     def _set_snapshot(self, snap: ProjectSnapshot) -> None:
-        self._snapshot = snap
+        prev, self._snapshot = self._snapshot, snap
         key = snap.structure_key()
         if key == self._structure:
+            # every poll while a job runs: only the rows of the jobs that changed are filled again (aliases
+            # and parents are in the structure key, summaries and the queue come by their own calls)
+            changed = False
             for name, info in snap.jobs.items():
-                self._fill_row(self._items[name], info, snap)
-            self.proxy.refilter()
+                if prev is None or prev.jobs.get(name) != info:
+                    self._fill_row(self._items[name], info, snap)
+                    changed = True
+            if changed and self.proxy.is_active():  # no filter: every row is shown already
+                self.proxy.refilter()
             return
         selected = self.current_job()
         scroll = self.verticalScrollBar().value()

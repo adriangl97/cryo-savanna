@@ -261,7 +261,7 @@ class FormActions(_Base):
                 return variant.program, self._env_message(e)
             try:
                 nr_mpi = int(float(v.get("nr_mpi") or 1))
-            except ValueError:
+            except (ValueError, OverflowError):
                 nr_mpi = 1  # cli_runner reports it
             if nr_mpi > limit:  # as relion_pipeliner refuses it for RELION's own jobs (cli_runner checks again)
                 return variant.program, (f"You're submitting a local job with {nr_mpi} parallel MPI processes. "

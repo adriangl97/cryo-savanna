@@ -142,7 +142,7 @@ def read_particles(project_dir: str | os.PathLike, star: str, count: bool = True
     if optics is not None and optics.has("rlnImageSize") and optics.rows:
         try:
             box = max(int(float(x)) for x in optics.column("rlnImageSize"))
-        except (TypeError, ValueError):
+        except (TypeError, ValueError, OverflowError):
             box = None
     n = None
     if count:
@@ -160,7 +160,7 @@ def read_particles(project_dir: str | os.PathLike, star: str, count: bool = True
 def _int(text: str | None, default: int = 1) -> int:
     try:
         return int(float((text or "").strip()))
-    except ValueError:
+    except (ValueError, OverflowError):  # also "nan" and "inf" (OverflowError)
         return default
 
 

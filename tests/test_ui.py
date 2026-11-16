@@ -82,6 +82,26 @@ def test_filter_keeps_ancestors_and_dims_graph(window, spa_project):
     assert len(visible) == 16
 
 
+def test_status_changes_reach_the_list_with_and_without_a_filter(window, spa_copy):
+    from cryo_savanna.ui.job_tree import COL_STATUS, SORT_ROLE
+
+    w = window(spa_copy)
+    job = "Polish/job015/"  # Running; its only child is Scheduled
+    row = w.tree._items[job]
+    assert row[COL_STATUS].data(SORT_ROLE) == "Running"
+    unchanged = w.tree._items["Import/job001/"]
+    (spa_copy / job / "RELION_JOB_EXIT_FAILURE").touch()  # finished on disk: the same structure, a new status
+    w.load_now()
+    assert w.tree._items[job] is row and row[COL_STATUS].data(SORT_ROLE) == "Failed"  # filled again in place
+    assert w.tree._items["Import/job001/"] is unchanged
+    w.status_filter.setCurrentText("Failed or aborted")
+    assert job in w.tree.visible_jobs()
+    (spa_copy / job / "RELION_JOB_EXIT_FAILURE").unlink()
+    (spa_copy / job / "RELION_JOB_EXIT_SUCCESS").touch()
+    w.load_now()  # with a filter on, a job whose status changed is filtered again
+    assert row[COL_STATUS].data(SORT_ROLE) == "Succeeded" and job not in w.tree.visible_jobs()
+
+
 def test_star_marks_and_filters_jobs(window, spa_copy):
     from cryo_savanna.project.stars import Stars
     from cryo_savanna.ui import style

@@ -19,6 +19,7 @@ from cryo_savanna.project.selection import (
     read_class_input,
     read_tilt_exclusion,
     read_tilt_input,
+    regroup_count,
     relion_command,
     selected_numbers,
     write_class_selection,
@@ -97,7 +98,7 @@ class SelectionActions(_Base):
                 pre = read_backup_selection(project, job, len(inp.classes)) if job else None
                 w = ClassSelector(project, src, selected_numbers(inp, pre),
                                   recenter=o.get("do_recenter") == "Yes",
-                                  regroup=int(float(o.get("nr_groups", "0") or 0)) if o.get("do_regroup") == "Yes" else 0,
+                                  regroup=regroup_count(o),
                                   title=f"Select classes — {src} — {what}", parent=self.window)
             else:
                 src = o["in_tiltseries"]

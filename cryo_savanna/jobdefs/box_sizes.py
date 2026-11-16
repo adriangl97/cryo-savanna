@@ -14,6 +14,7 @@ closest good sizes below and above.
 
 from __future__ import annotations
 
+import math
 from bisect import bisect_left
 
 SOURCE = "https://blake.bcm.edu/emanwiki/doku.php?id=eman2:boxsize"
@@ -68,7 +69,7 @@ def as_size(text: str) -> int | None:
         v = float(text.strip())
     except ValueError:
         return None
-    if v <= 0 or v != int(v):
+    if not math.isfinite(v) or v <= 0 or v != int(v):  # "inf", "nan", "1e999": no whole number
         return None
     return int(v)
 

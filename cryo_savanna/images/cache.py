@@ -22,6 +22,7 @@ import re
 import threading
 import time
 import uuid
+import zipfile
 from collections import OrderedDict
 from pathlib import Path
 from typing import Callable
@@ -149,11 +150,20 @@ class ThumbCache:
         return img
 
     def _load(self, key: tuple) -> np.ndarray | None:
+        f = self._file(key)
         try:
-            with np.load(self._file(key)) as z:
+            with np.load(f) as z:
                 mean, std = (float(v) for v in z["stats"])
                 return z["img"].astype(np.float32) * std + mean
-        except (OSError, ValueError, KeyError):
+        except FileNotFoundError:
+            return None
+        except (OSError, ValueError, KeyError, EOFError, zipfile.BadZipFile):
+            # a damaged file (cut short by a crash or a full disk, or written by another host meanwhile):
+            # made again, and saved again over it, instead of failing at every look at this image
+            try:
+                f.unlink()
+            except OSError:
+                pass
             return None
 
     def _save(self, key: tuple, img: np.ndarray) -> None:

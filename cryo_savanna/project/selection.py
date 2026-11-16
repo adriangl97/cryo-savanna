@@ -441,6 +441,17 @@ def interactive_kind(type_label: str, options: dict[str, str]) -> str | None:
     return None
 
 
+def regroup_count(options: dict[str, str]) -> int:
+    """The number of groups a class selection regroups its particles into (0: no regrouping), from the job's
+    options; 0 also for a value that is not a whole number ("", "abc", "inf")."""
+    if options.get("do_regroup") != "Yes":
+        return 0
+    try:
+        return max(0, int(float(options.get("nr_groups", "0") or 0)))
+    except (ValueError, OverflowError):
+        return 0
+
+
 def relion_command(kind: str, options: dict[str, str], job: str, recenter: bool = False, regroup: int = 0) -> str:
     """The command RELION would have run for the job (written to note.txt)."""
     if kind == "classes":

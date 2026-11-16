@@ -80,7 +80,7 @@ def setting(settings: QSettings, key: str):
     if isinstance(default, int):
         try:
             return int(float(v))
-        except (TypeError, ValueError):
+        except (TypeError, ValueError, OverflowError):
             return default
     v = str(v or "")
     if key in CHOICES and v not in CHOICES[key]:

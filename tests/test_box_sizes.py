@@ -41,6 +41,8 @@ def test_sizes_typed():
     assert B.as_size("130") == 130 and B.as_size(" 130.0 ") == 130
     assert B.as_size("-1") is None and B.as_size("0") is None and B.as_size("") is None
     assert B.as_size("abc") is None and B.as_size("130.5") is None
+    # what int() cannot take: no warning, and no error while it is being typed
+    assert B.as_size("inf") is None and B.as_size("nan") is None and B.as_size("1e999") is None
 
 
 def test_every_box_option_is_in_its_form():
