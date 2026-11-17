@@ -243,6 +243,8 @@ class RunActions(_Base):
         exits = (RELION_JOB_EXIT_SUCCESS, RELION_JOB_EXIT_FAILURE, RELION_JOB_EXIT_ABORTED)
         if not d.is_dir() or any((d / f).exists() for f in exits):  # meanwhile written, or the job is gone
             return
+        if self.slurm is not None and self.slurm.ended_before_submission(job, acct):
+            return  # sent to the queue again since that look (Continue): this run is not the one that ended
         marker = RELION_JOB_EXIT_ABORTED if acct.state.startswith("CANCELLED") else RELION_JOB_EXIT_FAILURE
         details = style.lost_details(acct)
         with open(d / "run.err", "a") as fh:  # where RELION's GUI and this window show why a job failed

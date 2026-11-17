@@ -649,3 +649,31 @@ def test_jobs_the_open_editor_takes_inputs_from_are_marked(window, spa_project):
     assert marked() == {} and not w.tree._items["Refine3D/job011/"][COL_JOB].font().bold()
     a.act_editor.trigger()  # shown again
     assert marked() == {"Refine3D/job011/": [labels["fn_img"]]}
+
+
+def test_a_change_made_while_a_poll_reads_is_read_after_it(qtbot, window, spa_copy, monkeypatch):
+    """A change (Mark as failed, abort, a job added) asks for a forced refresh. Asked while a poll was still reading,
+    it was dropped: the window kept the status read before the change until the next poll, or, with the same
+    stamp, until the pipeline changed again."""
+    import threading
+    w = window(spa_copy)
+    qtbot.waitUntil(lambda: not w._busy, timeout=5000)  # the first read, of the opening
+    reading, go, calls = threading.Event(), threading.Event(), []
+    real = w.loader.refresh
+
+    def refresh(force=False):
+        calls.append(force)
+        if len(calls) == 1:  # the poll: reads the pipeline as it was, slowly
+            snap = real(force)
+            reading.set()
+            go.wait(10)
+            return snap
+        return real(force)
+    monkeypatch.setattr(w.loader, "refresh", refresh)
+    w.refresh()
+    assert reading.wait(10)
+    add_job(spa_copy, NEW_JOB)  # the change, made meanwhile
+    w._force_refresh()
+    go.set()
+    qtbot.waitUntil(lambda: "Class2D/job019/" in w.snapshot.jobs, timeout=5000)
+    assert calls == [False, True]

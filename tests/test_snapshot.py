@@ -127,3 +127,43 @@ def test_a_loop_of_parents_keeps_every_job_in_the_tree(tmp_path):
     assert sorted(seen) == sorted(snap.jobs)
     assert snap.jobs["External/job002/"].primary_parent is None
     assert "External/job002/" not in snap.jobs["External/job002/"].other_parents
+
+
+def rewrite_keeping_stamp(path: Path, old: str, new: str) -> None:
+    """Rewrite ``path`` in place, as RELION does, with the same size and modification time: two writes within one
+    tick of a coarse file-system clock (1 s on Lustre, ext3, HFS+ and many NFS servers)."""
+    st = path.stat()
+    text = path.read_text()
+    assert len(old) == len(new) and old in text
+    path.write_text(text.replace(old, new, 1))
+    os.utime(path, ns=(st.st_atime_ns, st.st_mtime_ns))
+    assert (path.stat().st_mtime_ns, path.stat().st_size) == (st.st_mtime_ns, st.st_size)
+
+
+def test_a_rewrite_that_keeps_the_stamp_is_still_seen(spa_copy):
+    """Running -> Aborted keeps the file's size: with a coarse clock, a second write in the same second as the one
+    just read left the stamp as it was, and the job stayed Running until the pipeline changed again."""
+    loader = ProjectLoader(spa_copy)
+    assert loader.refresh().jobs["Polish/job015/"].status == "Running"
+    pipeline = spa_copy / "default_pipeline.star"
+    rewrite_keeping_stamp(pipeline, "relion.polish    Running", "relion.polish    Aborted")
+    snap = loader.refresh()
+    assert snap is not None and snap.jobs["Polish/job015/"].status == "Aborted"
+    assert snap.jobs["Polish/job015/"].process.status == "Aborted"
+
+
+def test_an_unchanged_stamp_is_trusted_once_it_settled(spa_copy, monkeypatch):
+    """The content is only compared for a short while after a new stamp: not on every poll of an idle project."""
+    import cryo_savanna.project.snapshot as S
+    now = [1000.0]
+    monkeypatch.setattr(S.time, "monotonic", lambda: now[0])
+    loader = ProjectLoader(spa_copy)
+    loader.refresh()
+    reads = []
+    real = Path.read_text
+    monkeypatch.setattr(Path, "read_text", lambda self, *a, **k: reads.append(self.name) or real(self, *a, **k))
+    assert loader.refresh() is None and reads.count("default_pipeline.star") == 1  # still within the window
+    now[0] += S.RACY_S + 0.1
+    assert loader.refresh() is None and reads.count("default_pipeline.star") == 2  # once after it: settled
+    assert loader.refresh() is None and loader.refresh() is None
+    assert reads.count("default_pipeline.star") == 2

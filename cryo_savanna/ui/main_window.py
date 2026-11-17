@@ -174,6 +174,7 @@ class MainWindow(QMainWindow):
         self.snapshot: ProjectSnapshot | None = None
         self.current: str | None = None
         self._busy = False
+        self._again: bool | None = None  # a refresh asked while one was reading (forced or not), done after it
         self._thread: QThread | None = None
         self._worker: LoaderWorker | None = None
         self._summary_thread: QThread | None = None
@@ -475,7 +476,10 @@ class MainWindow(QMainWindow):
         self.refresh(force=True)
 
     def refresh(self, force: bool = False) -> None:
-        if self._busy or self._worker is None:
+        if self._worker is None:
+            return
+        if self._busy:  # the read going may have looked before a change: read again after it, not never
+            self._again = force or bool(self._again)
             return
         self._busy = True
         self.request_refresh.emit(force)
@@ -642,7 +646,12 @@ class MainWindow(QMainWindow):
 
     @Slot()
     def _on_finished(self) -> None:
+        if self.sender() is not self._worker:  # the loader of the project open before
+            return
         self._busy = False
+        again, self._again = self._again, None
+        if again is not None:
+            self.refresh(again)
 
     def _stop_worker(self, wait_ms: int = 3000) -> None:
         """Stop the loader and summary threads of the project open now. A thread still reading after
@@ -667,7 +676,7 @@ class MainWindow(QMainWindow):
             self._retire(self._thread, self._worker, wait_ms)
             self._thread = None
             self._worker = None
-            self._busy = False
+            self._busy, self._again = False, None
 
     def _retire(self, thread: QThread, worker: QObject | None, wait_ms: int) -> None:
         thread.quit()

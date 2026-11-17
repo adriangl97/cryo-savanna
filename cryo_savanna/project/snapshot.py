@@ -4,11 +4,13 @@
 
 The loader never writes to the project. Each refresh costs one stat of the pipeline file plus a
 few stats per running job, so it can poll every couple of seconds on network filesystems.
-Finished jobs are only looked at again when the pipeline file changes.
+Finished jobs are only looked at again when the pipeline file changes. For a moment after the
+pipeline file changed, it is also read again (RACY_S).
 """
 
 from __future__ import annotations
 
+import hashlib
 import os
 import time
 from dataclasses import dataclass, field
@@ -37,6 +39,16 @@ from cryo_savanna.stamps import Stamp, stamp  # noqa: F401 - also imported from 
 # Checked in this order, like PipeLine::checkProcessCompletion
 EXIT_MARKERS = ((RELION_JOB_EXIT_SUCCESS, STATUS_SUCCEEDED), (RELION_JOB_EXIT_FAILURE, STATUS_FAILED),
                 (RELION_JOB_EXIT_ABORTED, STATUS_ABORTED))
+
+# A file system's clock can be coarse (1 s on Lustre, ext3, HFS+ and many NFS servers): a second write of the
+# pipeline in the tick of the one just read, of the same size (Running -> Aborted, Scheduled -> Succeeded: one
+# job started or stopped right after another), leaves its stamp as it was, and would never be seen. For this
+# long after a new stamp was seen, the file's content is compared too (once more after it, then trusted).
+RACY_S = 2.0
+
+
+def _digest(text: str) -> bytes:
+    return hashlib.blake2b(text.encode("utf-8"), digest_size=16).digest()
 
 
 @dataclass
@@ -103,6 +115,8 @@ class ProjectLoader:
         self._jobstars: dict[Path, tuple[Stamp, JobStar]] = {}
         self._snapshot: ProjectSnapshot | None = None
         self._live: dict[str, tuple] = {}  # running job -> stamps of its markers and log
+        self._digest: bytes = b""  # of the pipeline text last read
+        self._settle_at: float | None = None  # until then (time.monotonic) an unchanged stamp is not trusted
 
     @property
     def snapshot(self) -> ProjectSnapshot | None:
@@ -122,11 +136,12 @@ class ProjectLoader:
 
     def refresh(self, force: bool = False) -> ProjectSnapshot | None:
         """Return a new snapshot if anything changed since the last one, else None."""
+        seen = time.monotonic()
         st = stamp(self.pipeline_path)
         old = self._snapshot
         main = self.main_inputs.stamp() if self.main_inputs is not None else None
-        if force or old is None or st != old.pipeline_stamp or main != self._main_stamp:
-            self._snapshot = self._load(st)
+        if force or old is None or st != old.pipeline_stamp or main != self._main_stamp or self._rewritten():
+            self._snapshot = self._load(st, seen)
             self._main_stamp = main  # after the load: a failed one is tried again
             return self._snapshot
         live = self._live_stamps(old)
@@ -137,11 +152,27 @@ class ProjectLoader:
         return None
 
     # ------------------------------------------------------------------ internals
-    def _load(self, st: Stamp) -> ProjectSnapshot:
-        pipeline = Pipeline.read(self.project_dir, self.pipeline_name)
+    def _load(self, st: Stamp, seen: float) -> ProjectSnapshot:
+        """``seen``: when ``st`` was taken (time.monotonic)."""
+        pipeline, text = Pipeline.read_with_text(self.project_dir, self.pipeline_name)
+        self._digest, self._settle_at = _digest(text), seen + RACY_S
         # The stamp taken before reading may be older than what was read; take it again so a
         # write that raced with this read is picked up by the next refresh, not missed.
         return self._rebuild(pipeline, st if st == stamp(self.pipeline_path) else None, self._snapshot)
+
+    def _rewritten(self) -> bool:
+        """Whether the pipeline file was written again without a new stamp (RACY_S): its content is compared
+        while the stamp is new, and once more after RACY_S (a write in the same tick happened by then)."""
+        if self._settle_at is None:
+            return False
+        now = time.monotonic()
+        try:
+            text = self.pipeline_path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            return True  # gone or unreadable meanwhile: a full read tells
+        if now >= self._settle_at:
+            self._settle_at = None
+        return _digest(text) != self._digest
 
     def _rebuild(self, pipeline: Pipeline, st: Stamp, old: ProjectSnapshot | None) -> ProjectSnapshot:
         if old is not None and old.pipeline is pipeline:

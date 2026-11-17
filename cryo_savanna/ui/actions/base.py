@@ -253,8 +253,8 @@ class ActionsBase(QObject):
             self.message.emit(f"{what}: failed")
             if on_error is not None:
                 on_error(msg)
+            self.changed.emit()  # before the message: what did change (part of the jobs) shows while it is read
             QMessageBox.warning(self.window, what, msg)
-            self.changed.emit()
 
         signals.done.connect(finished)
         signals.error.connect(failed)
