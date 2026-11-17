@@ -221,7 +221,8 @@ def parse_queue_request(template: str, values: Mapping[str, str]) -> QueueReques
             req.gpus = int(m.group(1))
         m = re.search(r"--mem[=\s]+(\d+(?:\.\d+)?)([KMGT]?)B?\b", line, re.I)
         if m:
-            req.mem_gb = float(m.group(1)) * _SIZE[m.group(2).upper()]
+            # --mem=0 is SLURM's "all the memory of the node": the node's, not a request of 0 GB
+            req.mem_gb = float(m.group(1)) * _SIZE[m.group(2).upper()] or None
         req.unresolved += [p for p in re.findall(r"XXX\w+?XXX", line) if p not in req.unresolved]
     if req.partition and "XXX" in req.partition:
         req.partition = None

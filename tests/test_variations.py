@@ -151,6 +151,27 @@ def test_run_all_now_runs_each_in_its_own_pipeliner(window, qtbot, monkeypatch):
     assert all(len(r) == 1 for r in runs) and len({r[0] for r in runs}) == 3
 
 
+def test_a_run_that_fails_part_way_says_which_jobs_started(window, qtbot, monkeypatch):
+    from qtpy.QtWidgets import QMessageBox
+    from cryo_savanna.project.pipeliner import PipelinerError
+    a, ed = window.actions, window.actions.editor
+    runs, told = [], []
+
+    def run(jobs, **kw):
+        if runs:
+            raise PipelinerError("cannot start")
+        runs.append(list(jobs))
+    monkeypatch.setattr(a.pipeliner, "run", run)
+    monkeypatch.setattr(QMessageBox, "warning", lambda *args, **k: told.append(args[2]))
+    a.new_job("relion.class2d")
+    ed.widgets["do_queue"].set_value("Yes")
+    assert ed.open_variations(answer({"nr_classes": "10, 20, 30"}, schedule_only=False))
+    qtbot.waitUntil(lambda: bool(told), timeout=20000)
+    started = runs[0][0].rstrip("/")
+    assert "cannot start" in told[0] and f"Started: {started}." in told[0]
+    assert "Scheduled, not started: " in told[0] and told[0].count("Class2D/job") == 3
+
+
 def test_alias_clashes_are_refused_before_anything_is_added(window):
     a, ed = window.actions, window.actions.editor
     a.new_job("relion.class2d")

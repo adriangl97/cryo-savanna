@@ -369,11 +369,19 @@ class FormActions(_Base):
                     if cli is not None:  # outputs must go to its own directory (the one guessed may be taken)
                         cli.make_jobstar(values, False, res.job, pipeline).write(project / res.job / "job.star")
                     added.append(res.job)
-            except (PipelinerError, OSError) as e:
+            except Exception as e:  # also a timeout or an unreadable pipeline: say what was added already
                 raise PipelinerError(str(e) + (f"\n\nAdded before this (scheduled, not run): {', '.join(added)}"
-                                               if added else ""))
+                                               if added else "")) from e
+            started: list[str] = []
             for job in [] if schedule_only else added:  # each its own pipeliner: they run side by side
-                pl.run([job])
+                try:
+                    pl.run([job])
+                except Exception as e:
+                    def names(jobs: list[str]) -> str:
+                        return ", ".join(j.rstrip("/") for j in jobs) or "none"
+                    raise PipelinerError(f"{e}\n\nStarted: {names(started)}. "
+                                         f"Scheduled, not started: {names(added[len(started):])}.") from e
+                started.append(job)
             return added
 
         edit = self._edits

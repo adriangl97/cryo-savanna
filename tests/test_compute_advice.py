@@ -197,6 +197,8 @@ def test_queue_request_from_the_template():
     assert M.parse_queue_request("#SBATCH --gres=gpu:a100:2,tmpfs:10G --mem 64000\n", {}).mem_gb == 62.5
     assert M.parse_queue_request("#SBATCH --gres=gpu:XXXextra5XXX\n", {}).gpus is None  # no such field
     assert not M.parse_queue_request("#$ -pe XXXqueueXXX XXXnodesXXX\n", {}).is_slurm
+    # --mem=0 is all the memory of the node: no request of its own (the node's RAM counts), not 0 GB
+    assert M.parse_queue_request("#SBATCH -p gpu --mem=0\n", {}).mem_gb is None
 
 
 def test_sinfo_and_gpu_memory():
