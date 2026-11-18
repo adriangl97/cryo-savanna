@@ -48,6 +48,17 @@ def test_load_bin_sections_and_levels(tmp_path):
         load_volume(tmp_path / "flat.mrc")
 
 
+def test_maps_with_nan_voxels(tmp_path):
+    vol = ball(40, 6)
+    vol[:5] = np.nan  # e.g. written outside the mask
+    write_map(tmp_path / "nan.mrc", vol)
+    v = load_volume(tmp_path / "nan.mrc", max_size=20)
+    assert all(np.isfinite(x) for x in (v.mean, v.std, v.minimum, v.maximum))
+    assert np.isfinite(v.level_for_fraction(0.01)) and v.minimum < v.level_for_fraction(0.01) < v.maximum
+    write_map(tmp_path / "all_nan.mrc", np.full((4, 4, 4), np.nan))
+    with pytest.raises(ImageError):
+        load_volume(tmp_path / "all_nan.mrc")
+
 def test_mask_outline_and_colours():
     m = np.zeros((9, 9), np.float32)
     m[2:7, 2:7] = 1

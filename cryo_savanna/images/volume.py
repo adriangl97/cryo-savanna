@@ -44,7 +44,8 @@ class Volume:
         flat = self.data.ravel()
         if flat.size > 2_000_000:
             flat = flat[:: flat.size // 2_000_000]
-        return float(np.quantile(flat, 1.0 - fraction))
+        flat = flat[np.isfinite(flat)]  # NaN voxels (some programs write them outside the mask)
+        return float(np.quantile(flat, 1.0 - fraction)) if flat.size else 0.0
 
 
 def bin_volume(vol: np.ndarray, k: int) -> np.ndarray:
@@ -71,6 +72,9 @@ def load_volume(path: str | os.PathLike, max_size: int = 192) -> Volume:
                 small[i] = slab.reshape(k, y, k, x, k).mean(axis=(0, 2, 4))
         voxel = r.voxel
     flat = small.ravel()
+    flat = flat[np.isfinite(flat)]  # one NaN voxel would make every statistic NaN
+    if flat.size == 0:
+        raise ImageError(f"{path}: no finite values in the map")
     return Volume(str(path), small, shape, voxel, k, float(flat.mean()), float(flat.std()) or 1.0,
                   float(flat.min()), float(flat.max()), full)
 
