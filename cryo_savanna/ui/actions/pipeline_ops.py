@@ -9,6 +9,8 @@ from typing import TYPE_CHECKING
 
 from qtpy.QtWidgets import QInputDialog, QMessageBox
 
+from cryo_savanna.relion_consts import STATUS_RUNNING
+
 if TYPE_CHECKING:  # checked as the actions they are part of; at run time a plain class (no Qt diamond)
     from cryo_savanna.ui.actions.base import ActionsBase as _Base
 else:
@@ -57,6 +59,12 @@ class PipelineActions(_Base):
         running = [p for p in procs if snap.jobs[p].status == "Running"]
         if running:
             text += "\n\nStill running: " + ", ".join(self._label(p) for p in running)
+        moved = moved_running(snap, procs)
+        if moved:
+            text += ("\n\nWARNING: these running jobs come after it in the pipeline: "
+                     + ", ".join(self._label(p) for p in moved) + ". RELION's pipeliner keeps the jobs it waits for by "
+                     "their place in the pipeline, and deleting moves them up, so it may mark the wrong job as "
+                     "finished (or never mark the one that ended). Better delete once they have finished.")
         text += self._trash_warning(procs)
         if QMessageBox.question(self.window, "Delete", text) != QMessageBox.Yes:
             return
@@ -96,3 +104,12 @@ class PipelineActions(_Base):
                 self.select.emit(restored[0])
 
         self._run(f"Undelete {label}", lambda: ops.undelete(fn), done)
+
+
+def moved_running(snap, procs: list[str]) -> list[str]:
+    """Jobs the pipeline has as Running that deleting ``procs`` moves up in it (they come after the first one)."""
+    names = list(snap.pipeline.processes)
+    first = min((names.index(p) for p in procs if p in snap.pipeline.processes), default=len(names))
+    gone = set(procs)
+    return [n for n in names[first + 1:]
+            if n not in gone and snap.pipeline.processes[n].status == STATUS_RUNNING]

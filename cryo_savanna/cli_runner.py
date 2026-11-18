@@ -359,9 +359,13 @@ def run(argv):
     if stopped:
         _touch(os.path.join(job_dir, ABORTED))
         return 128 + stopped[0][0]
-    if aborted_at is not None:
+    if aborted_at is not None or (rc == 0 and os.path.exists(os.path.join(control, ABORTED))):
         _touch(os.path.join(job_dir, ABORTED))
         return rc or 1
+    if rc == 0 and os.path.exists(os.path.join(control, FAILURE)):  # it said so, whatever its exit code (mpirun's)
+        print("ERROR: %s ended with an error (%s)" % (program, FAILURE), file=sys.stderr, flush=True)
+        _touch(os.path.join(job_dir, FAILURE))
+        return 1
     if rc != 0:
         print("ERROR: %s exited with %s" % (program, rc), file=sys.stderr, flush=True)
         _touch(os.path.join(job_dir, FAILURE))

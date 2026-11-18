@@ -195,6 +195,17 @@ def test_runner_reports_failure(job):
     assert not (root / "External/job001/RELION_OUTPUT_NODES.star").exists()
 
 
+def test_runner_believes_the_exit_file_over_an_exit_code_of_0(job):
+    """A RELION program that wrote RELION_JOB_EXIT_FAILURE failed, even when what started it (an mpirun) exits with 0."""
+    root, bin_dir = job
+    tool(bin_dir, "relion_image_handler",
+         "d = args[args.index('--pipeline_control') + 1]\nopen(d + 'RELION_JOB_EXIT_FAILURE', 'w').close()")
+    r = run_runner("relion_image_handler", "--o", "External/job001/", "--j", "1", "--i", "x")
+    assert r.returncode == 1
+    jd = root / "External/job001"
+    assert (jd / "RELION_JOB_EXIT_FAILURE").exists() and not (jd / "RELION_JOB_EXIT_SUCCESS").exists()
+
+
 def test_runner_passes_an_abort_on(job):
     root, bin_dir = job
     tool(bin_dir, "relion_reconstruct", """

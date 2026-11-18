@@ -32,7 +32,7 @@ holding RELION's pipeline lock and re-read the pipeline first, as RELION does, s
 next to the original GUI and running pipeliners. tests/test_ops.py compares every operation with
 RELION's own code (tools/pipeline_ops_ref).
 
-Five deliberate differences:
+Six deliberate differences:
 - Delete: RELION runs "rm -rf Trash/<job>; mv <job> Trash/...; rm -rf <job>" after writing the
   pipeline, so when the earlier copy in Trash/ cannot be removed, the mv fails and the job is deleted
   for good. Here that copy is cleared (or moved out of the way) before anything is written, and a
@@ -52,6 +52,9 @@ Five deliberate differences:
   without changing it. It is marked failed as it is: its outputs stay declared (none was written,
   so all of them would be dropped), so that the jobs scheduled after it stay linked to it, also
   through an Overwrite.
+- Overwrite: RELION's GUI runs the new job in the old job's place in the pipeline. relion_pipeliner can
+  only add a job at the end, so the old job's place is kept by a placeholder (``placeholder``) while it
+  adds it, and the new job then takes that place: no job moves (see ``delete``'s ``keep_place``).
 - Aliases: RELION keeps a job's alias symlink when the alias is removed, and when another job of
   the same type later gets that alias, symlink() fails and the alias still leads to the first job.
   Here removing an alias removes its symlink, and a symlink left at an alias's path is replaced.
@@ -79,6 +82,7 @@ from cryo_savanna.relion_consts import (
 
 NODES_DIR = ".Nodes"
 TRASH_DIR = "Trash"
+PLACEHOLDER_SUFFIX = ".overwriting/"  # placeholder(job): keeps a job's place in the pipeline during an overwrite
 REFINE_TYPES = {"relion.class2d", "relion.class3d", "relion.refine3d", "relion.initialmodel"}  # markAsFinishedJob
 LABEL_OPTIMISER = "OptimiserData.star.relion"
 LABEL_PARTS = "ParticleGroupMetadata.star.relion"
@@ -90,6 +94,11 @@ _JOB_DIR = re.compile(r"job\d\d\d")
 
 class OpsError(RuntimeError):
     """An operation was refused, with RELION's own message."""
+
+
+def placeholder(job: str) -> str:
+    """Name of the process that keeps ``job``'s place in the pipeline while it is overwritten."""
+    return job.rstrip("/") + PLACEHOLDER_SUFFIX
 
 
 def decompose(name: str) -> tuple[str, str, str] | None:
@@ -260,20 +269,36 @@ class PipelineOps:
         order = [n for n in p.processes if n in chosen]
         return order, nodes  # every downstream job (RELION's loop can stop early; see the module docstring)
 
-    def delete(self, job: str, recursive: bool = False) -> list[str]:
+    def delete(self, job: str, recursive: bool = False, keep_place: bool = False) -> list[str]:
         """deleteNodesAndProcesses: move the job(s) to Trash/. Returns the deleted job names.
 
         Unlike RELION, the earlier copies in Trash/ are cleared before the pipeline is written, and a
         directory that cannot be moved puts everything back: the job never ends up outside both the
         pipeline and Trash/ (RELION's "mv" fails there, and its "rm -rf" then deletes the job).
         A job whose directory is gone (removed by hand) leaves the pipeline too, with nothing to undelete.
+
+        ``keep_place`` (an overwrite; not with ``recursive``): the job's process is replaced by
+        ``placeholder(job)``, with no inputs or outputs, so no job after it moves up. RELION's pipeliners
+        keep the jobs they wait for by their place in the pipeline (PipeLine::checkProcessCompletion and
+        runScheduledJobs index processList, and re-read the file only now and then): a job that moved can
+        be taken for another, and the wrong job is marked as finished, or a finished one never is.
+        ``take_place`` then puts the new job there.
         """
+        if keep_place and recursive:
+            raise ValueError("keep_place is for one job")
         with self._lock("deleteNodesAndProcesses") as lock:
             p = self._read()
             procs, nodes = self.delete_plan(job, recursive, p)
             for name in procs:
                 self._clear_trash(name)
             kept, deleted = split_pipeline(p, set(procs), nodes)
+            if keep_place:
+                old = p.processes[job]
+                held = placeholder(job)
+                kept.processes = {
+                    (held if n == job else n): (Process(held, "None", old.type_label, old.status) if n == job
+                                                else kept.processes[n])
+                    for n in p.processes if n == job or n in kept.processes}
             fn_del = self._path(procs[0] + "deleted_pipeline.star")
             if fn_del.parent.is_dir():  # a job directory removed by hand: RELION writes no file there either
                 write_star(fn_del, deleted, atomic=False)
@@ -395,6 +420,24 @@ class PipelineOps:
                 p.nodes[node].producer = proc
 
     # ------------------------------------------------------------------ overwrite
+    def take_place(self, held: str, job: str | None) -> None:
+        """Put ``job`` (added at the end by relion_pipeliner) where the placeholder ``held`` is
+        (``delete(..., keep_place=True)``), and remove the placeholder; ``job`` None only removes it.
+        In one write: the jobs between them keep their places."""
+        with self._lock("overwriteJob") as lock:
+            p = self._read()
+            if held not in p.processes:
+                return
+            out: dict[str, Process] = {}
+            for name, pr in p.processes.items():
+                if name == held:
+                    if job is not None and job in p.processes:
+                        out[job] = p.processes[job]
+                elif name != job:
+                    out[name] = pr
+            p.processes = out
+            p.write(self.project_dir, self.pipeline_name, lock)
+
     def set_job_counter(self, counter: int) -> int:
         """Set the number the next job gets; returns the old one. RELION's GUI overwrites a job by
         deleting it and adding the new job with the counter set back to its number."""

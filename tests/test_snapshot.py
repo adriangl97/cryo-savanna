@@ -167,3 +167,32 @@ def test_an_unchanged_stamp_is_trusted_once_it_settled(spa_copy, monkeypatch):
     assert loader.refresh() is None and reads.count("default_pipeline.star") == 2  # once after it: settled
     assert loader.refresh() is None and loader.refresh() is None
     assert reads.count("default_pipeline.star") == 2
+
+
+def test_an_exit_file_written_while_the_snapshot_is_made_is_seen_next(spa_copy, monkeypatch):
+    """The exit file comes right after the job's status was worked out, before the refresh is over: the next
+    refresh sees it (its stamps were taken before the look), even if the pipeline never changes again (no
+    relion_pipeliner waits for the job: started from a closed GUI, or marked by cryo-savanna as lost in SLURM)."""
+    loader = ProjectLoader(spa_copy)
+    job = "Polish/job015/"
+    look = ProjectLoader._effective_status
+
+    def look_then_write(self, pr):
+        out = look(self, pr)
+        if pr.name == job:
+            (spa_copy / job / "RELION_JOB_EXIT_FAILURE").touch()
+        return out
+
+    monkeypatch.setattr(ProjectLoader, "_effective_status", look_then_write)
+    assert loader.refresh().jobs[job].status == "Running"
+    monkeypatch.setattr(ProjectLoader, "_effective_status", look)
+    snap = loader.refresh()
+    assert snap is not None and snap.jobs[job].status == "Failed" and snap.jobs[job].pending_update
+
+
+def test_deleting_a_job_before_a_running_one_is_warned_about(spa_project):
+    """Delete moves the jobs after it up in the pipeline: a running one (which RELION's pipeliner keeps by its place)."""
+    from cryo_savanna.ui.actions.pipeline_ops import moved_running
+    snap = ProjectLoader(spa_project).refresh()
+    assert moved_running(snap, ["Class2D/job006/"]) == ["Polish/job015/"]
+    assert moved_running(snap, ["Polish/job015/"]) == []  # itself

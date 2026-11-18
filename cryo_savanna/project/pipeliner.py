@@ -11,7 +11,8 @@ files (byte-identical to RELION's: tests/test_against_relion.py) and starts the 
             input files, runs the jobs in order and stops at the first failure or abort.
 - continue: the job's own job.star gets the continue flag and the changed options, then run.
 - overwrite: as RELION's GUI does it: the job goes to Trash/, and the new job is added with the
-            pipeline's job counter set back to its number, so it gets the same directory.
+            pipeline's job counter set back to its number, so it gets the same directory, and takes the
+            old job's place in the pipeline (no job moves: RELION's pipeliners keep running jobs by place).
 - abort:    RELION_JOB_ABORT_NOW in the job directory (what RELION's programs check).
 - force abort: the job's processes on this host killed, RELION_JOB_EXIT_ABORTED written (project/processes.py).
 - clean:    relion_pipeliner --gentle_clean N / --harsh_clean N.
@@ -37,7 +38,7 @@ from cryo_savanna.env.child import external_environ
 from cryo_savanna.jobdefs import external_jobs
 from cryo_savanna.project import processes
 from cryo_savanna.project.jobstar import JobStar
-from cryo_savanna.project.ops import TRASH_DIR, PipelineOps
+from cryo_savanna.project.ops import TRASH_DIR, PipelineOps, placeholder
 from cryo_savanna.project.pipeline import Pipeline
 from cryo_savanna.relion_consts import RELION_JOB_ABORT_NOW, RELION_JOB_EXIT_SUCCESS, STATUS_RUNNING, job_type_for_label
 
@@ -163,14 +164,19 @@ class Pipeliner:
         if pr.status == STATUS_RUNNING:
             raise PipelinerError(f"{job.rstrip('/')} is running: abort it first.")
         ops = PipelineOps(self.project_dir)
-        ops.delete(job)
+        # the old job's place is kept, and the new job (added at the end) is put there: as in RELION's GUI,
+        # which runs it where it was, no job moves (RELION's pipeliners keep running jobs by their place)
+        ops.delete(job, keep_place=True)
+        held = placeholder(job)
         old_counter = ops.set_job_counter(pr.job_number)
         try:
             res = self.add_job(jobstar, alias)
         except Exception as e:  # also a timeout or an unwritable job.star: the old job is in Trash/ either way
+            ops.take_place(held, None)
             raise PipelinerError(f"{e}\n\n{_in_trash(job)}") from e
         finally:
             ops.restore_job_counter(old_counter)
+        ops.take_place(held, res.job)
         # relion_pipeliner takes the lock itself, so the counter is set back and restored around it (not
         # under one lock, as in RELION's GUI): a job added meanwhile elsewhere can get a number that a
         # job further down already has
@@ -219,10 +225,11 @@ class Pipeliner:
             old = self.project_dir / TRASH_DIR / job.rstrip("/")
             aside = old.with_name(old.name + ".overwritten")
             shutil.move(str(old), str(aside))
-            ops.delete(job)
+            ops.delete(job, keep_place=True)  # and the old job back in its place (see overwrite_job)
             shutil.rmtree(old, ignore_errors=True)
             shutil.move(str(aside), str(old))
             ops.undelete(old / "deleted_pipeline.star")
+            ops.take_place(placeholder(job), job)
             (self.project_dir / job / "deleted_pipeline.star").unlink(missing_ok=True)  # it was never deleted
             raise PipelinerError(f"{e}\n\n{job.rstrip('/')} was not overwritten: it is back as it was.") from e
         return res

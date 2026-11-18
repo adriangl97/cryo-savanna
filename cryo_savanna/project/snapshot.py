@@ -144,10 +144,10 @@ class ProjectLoader:
             self._snapshot = self._load(st, seen)
             self._main_stamp = main  # after the load: a failed one is tried again
             return self._snapshot
-        live = self._live_stamps(old)
+        live = self._live_stamps(old.pipeline)
         starred = self.stars.stamp() if self.stars is not None else None
         if live != self._live or starred != self._stars_stamp:
-            self._snapshot = self._rebuild(old.pipeline, old.pipeline_stamp, old)
+            self._snapshot = self._rebuild(old.pipeline, old.pipeline_stamp, old, live)
             return self._snapshot
         return None
 
@@ -174,7 +174,14 @@ class ProjectLoader:
             self._settle_at = None
         return _digest(text) != self._digest
 
-    def _rebuild(self, pipeline: Pipeline, st: Stamp, old: ProjectSnapshot | None) -> ProjectSnapshot:
+    def _rebuild(self, pipeline: Pipeline, st: Stamp, old: ProjectSnapshot | None,
+                 live: dict[str, tuple] | None = None) -> ProjectSnapshot:
+        """``live``: _live_stamps(pipeline), when the caller took them just now."""
+        # Before the exit files are looked at: one written while this runs changes them, so the next refresh
+        # looks again. Taken after, it would be in them unseen, and the job would stay Running until the
+        # pipeline changes (never, when no relion_pipeliner waits for the job).
+        if live is None:
+            live = self._live_stamps(pipeline)
         if old is not None and old.pipeline is pipeline:
             parents = {n: j.primary_parent for n, j in old.jobs.items()}  # only live state changed
         else:
@@ -203,7 +210,7 @@ class ProjectLoader:
                 info.status, info.pending_update = self._effective_status(info.process)
                 info.modified = self._modified(name)
         snap = ProjectSnapshot(self.project_dir, pipeline, jobs, roots, st, time.time())
-        self._live = self._live_stamps(snap)
+        self._live = live
         return snap
 
     def _program(self, pr: Process) -> str:
@@ -230,10 +237,11 @@ class ProjectLoader:
         times = [st[0] for st in (stamp(jobdir), stamp(jobdir / "run.out"), stamp(jobdir / "run.err")) if st]
         return max(times) / 1e9 if times else None
 
-    def _live_stamps(self, snap: ProjectSnapshot) -> dict[str, tuple]:
+    def _live_stamps(self, pipeline: Pipeline) -> dict[str, tuple]:
+        """Stamps of what tells that a job the pipeline has as Running ended (its exit files) or did something."""
         out = {}
-        for name, info in snap.jobs.items():
-            if info.process.status == STATUS_RUNNING:
+        for name, pr in pipeline.processes.items():
+            if pr.status == STATUS_RUNNING:
                 jobdir = self.project_dir / name
                 out[name] = (stamp(jobdir), stamp(jobdir / "run.out"), stamp(jobdir / "run.err"),
                              *(stamp(jobdir / m) for m, _ in EXIT_MARKERS))
