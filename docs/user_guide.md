@@ -67,11 +67,30 @@ polling interval (Preferences, or `--poll`), and views of running jobs read new 
   editor (Ctrl+E) opens in its own window (or docked in the main window: Preferences → Job editor;
   an open editor moves at once), and closes once the job it runs has started. It has RELION's tabs and options, with its help below; changed options are marked,
   "Defaults" resets them. New jobs start from the settings last used in this project, like RELION.
+- While the job editor is open, the jobs its inputs come from are marked: a tinted row in bold in the
+  List, a magenta frame in the Tree with a badge naming the field ("⇢ Reference map"). An input counts
+  when its field is in use (not greyed out) and names an output of a job, or a file in a job's directory
+  (by its name, its alias or its full path). The marks follow the fields as you change them, and go when the
+  editor closes.
 - **Additional arguments** lists every flag of the program the job runs, with its default and help:
   tick a flag or type a value and it is added to the arguments.
+- **Setting presets** (job editor, next to "Defaults"): named settings of a job type, kept for you
+  (`~/.config/cryo-savanna/presets/`, or `$CRYO_SAVANNA_CONFIG`), for every project. *Save current settings
+  as…* lists the options: those changed from RELION's default are ticked, inputs (input nodes, files,
+  folders) are not. Loading a preset keeps the inputs of the form, sets every other option to RELION's
+  default, then the preset's options; *Update “‹preset›”* saves the form's values into the loaded one.
+  *Manage presets…* renames, copies and deletes presets, and edits, adds or removes their options. Options
+  of another RELION version are kept, and skipped when loading. Not when continuing a job (only some
+  options can change then).
+- **Variations…** (job editor, new jobs): choose options and their values: a list (`3, 4, 5`), a range
+  (`2:8:2`), the choices of a Yes/No or menu option, or input nodes. Every combination becomes a job,
+  with an alias from its values (`Class2D_K50_T2`, editable; the tags too). *Schedule all* adds them as
+  scheduled jobs; *Run all now* starts each in its own `relion_pipeliner`, so they run side by side (it
+  asks first when several would run on this machine rather than the queue). Above 20 jobs it asks again as a safety measure.
 - **Clone** (Ctrl+D), **Continue**, **Overwrite** (the job goes to Trash/ and runs again in the same
-  directory with new settings), **Schedule**, **Run scheduled** (Ctrl+R), **Stop repeating runs** (a repeating run stops after its
-  current job), **Abort**, **Clean**,
+  directory with new settings), **Schedule**, **Run scheduled** (Ctrl+R), **Stop runs** (a repeating run stops after its
+  current job. A run that waits for the input files of its next job stops now, and the job stays
+  Scheduled), **Abort** (see below), **Clean**,
   **Set alias** (F2), **Star** (Ctrl+B), **Mark as finished / failed**, **Delete** (Del, to Trash/), **Undelete**.
   Trash/ keeps one copy per job directory: overwriting or deleting a job whose earlier version is
   already there (after an overwrite) deletes that version for good, and the confirmation says so.
@@ -81,6 +100,14 @@ polling interval (Preferences, or `--poll`), and views of running jobs read new 
   overwritten, and the jobs scheduled after it stay linked to it. Marking it finished is refused.
   In a project shared by a group, files must be group-writable: cryo-savanna, like RELION, does
   not change a file (the pipeline, a job.star) that you cannot write.
+- **Abort** of a job that runs on this machine (not in a queue) offers two ways. *Ask it to stop* is
+  RELION's abort: the program stops at its next check and saves what it can. *Force abort…* kills it now:
+  cryo-savanna lists the job's processes on this machine (those under the relion_pipeliner it started,
+  and any of yours whose command line writes to the job's directory: `--o`, `--odir`, `--part_dir` or
+  `>> run.out`, as RELION starts them, also from its own GUI), asks before it kills them (SIGTERM, then
+  SIGKILL after 5 s), and marks the job aborted (RELION_JOB_EXIT_ABORTED, and a line at the end of run.err),
+  so a run of several jobs stops as for an abort. Files the job was writing may be left incomplete. A job
+  started on another machine is force-aborted from a cryo-savanna there.
 - **CLI tools**: RELION programs that RELION's GUI has no job for (relion_image_handler,
   relion_reconstruct, …) as job forms; they run as External jobs and appear in the pipeline.
   With MPI they run locally only, with at most RELION_ERROR_LOCAL_MPI processes (default 32), as
@@ -101,6 +128,61 @@ polling interval (Preferences, or `--poll`), and views of running jobs read new 
   looking, by sacct's submit line (newer SLURM releases only). A submit template with
   `#SBATCH --job-name=XXXnameXXX` (RELION fills in the job directory) makes this direct, and squeue
   readable for everyone.
+
+## Box sizes
+
+Some box sizes make the FFTs, and so a job and every job that uses its particles, much faster than others
+(128 px is almost twice as fast as 122 px). Under a box size in pixels that is not on
+[EMAN2's list of good box sizes](https://blake.bcm.edu/emanwiki/doku.php?id=eman2:boxsize), the job editor
+warns and gives the closest good sizes below and above it, and Run / Schedule ask before going on. The list is cited in NOTICE.md.
+
+## MPI processes, threads and pooled particles
+
+Under the compute options (the GPUs on the Compute tab, the threads on the Running tab) the job editor
+suggests the number of MPI processes, threads and pooled particles for what the job will run on, with
+**Apply** to put them in. Below it,
+in orange, the values in the form that RELION will refuse or that waste the machine: VDAM with MPI, an even
+MPI count for 3D auto-refine, more MPI × threads than there are CPUs, GPU ids the machine does not have,
+more followers than may fit in GPU memory or RAM.
+
+## Why a job failed
+
+For a failed job, the Overview shows **Likely cause** under its status, and the tree its first one in the
+card's tooltip: known messages at the end of run.err and run.out (RELION 5.1.1's own errors, CUDA, MPI,
+SLURM, and cryo-savanna's runners), each with a one-line hint and a link to the log line it comes from:
+GPU or RAM out of memory, wrong GPU ids, the queue's time limit, a failed node, a full disk, permission
+denied, too few MPI processes, a mask or pixel size that does not fit, no particles left, a missing input
+file, a missing Python module, a crash. When none matches, it shows RELION's own error message.
+
+## Disk usage
+
+**Project → Disk usage…** measures the project in the background, as `du` does: the space files take on
+disk, links not followed (the movies an Import job links to are not counted) and hard-linked files
+counted once. On a large project on a network file system this takes a while; the window stays usable
+meanwhile, and **Refresh** measures again.
+
+- **Jobs**: each job of the pipeline with its size and number of files, and what a **gentle** or
+  **harsh** clean would move. These follow RELION's own rules (`relion_pipeliner --gentle_clean` /
+  `--harsh_clean`): only jobs that finished successfully are cleaned, and some types never are (Import,
+  ManualPick, Select, MaskCreate, JoinStar, LocalRes; "—" in the table). Class2D, Class3D, Refine3D,
+  InitialModel and MultiBody lose every iteration but the last one and those the pipeline uses;
+  MotionCorr's gentle clean takes its logs and harsh its micrographs; Extract's harsh clean takes the
+  particle stacks, so the jobs that use them cannot run again. Select jobs and **Clean (gentle)** or
+  **Clean (harsh)** cleans them, one after another, through `relion_pipeliner`. A job with a
+  `NO_HARSH_CLEAN` file is left out of harsh cleaning, as RELION's own "clean all" does. Double-click a
+  job to select it in the main window.
+- **By type**: the same, added up per job type, with Trash/ and the other files, as a share of the
+  project.
+- **Trash**: what is in Trash/, one entry per job: a deleted job (it can be undeleted), the earlier run
+  of an overwritten job, or the files cleaned from a job.
+- **Other files**: everything that is neither a job of the pipeline nor in Trash/ (job folders run
+  outside the pipeline, links, files at the top of the project).
+
+RELION does not delete what it cleans: it moves it to Trash/, where it takes as much space as before.
+The space comes free only when Trash/ is emptied: select entries on the Trash tab and **Empty
+selected…**, or **Empty Trash/…** for all of them. This deletes them for good. The confirmation lists
+what goes, and names the deleted jobs that can then no longer be undeleted. With `--readonly` the
+window only shows.
 
 ## Results
 
@@ -219,6 +301,9 @@ pytom writes into the extraction job's own directory (the matching job's score m
 there). The output is RELION 5's: `particles.star` (rlnTomoName, rlnCenteredCoordinate[XYZ]Angst,
 the angles as rlnAngleRot/Tilt/Psi or rlnTomoSubtomogramRot/Tilt/Psi, rlnLCCmax and
 rlnAutopickFigureOfMerit) and `optimisation_set.star` with the tomograms, for Extract subtomos.
+The centred coordinates are computed by cryo-savanna rather than by pytom's `--relion5-compat`,
+exactly as RELION 5 reads them back: (voxel × the tomogram's binning − rlnTomoSize / 2) × rlnTomoTiltSeriesPixelSize. If a tomogram's size does not fit its rlnTomoSize
+at its binning, the job log warns and the coordinates are centred on the tomogram itself.
 Like matching, extraction has to run on a machine with a GPU and its NVIDIA driver: pytom's
 programs look for a GPU as they start, even for the extraction itself. Submit it to a GPU queue
 (one GPU is enough) or run it on a GPU workstation. On a machine without one (a CPU node) every tomogram fails with `cudaErrorInsufficientDriver`.
@@ -285,6 +370,11 @@ loaded with `module load` first. A new job takes both from the project's last Ar
   SART or WBP, CTF correction (local, phase flip, none, or CTF multiplication for template
   matching), tilt range, layout of the tomogram (`-FlipVol 1` or `2`), contrast, more AreTomo3
   arguments.
+- For tomograms to pick particles in (template matching with pytom), keep the defaults
+  `-FlipVol 1` and `-TiltCor 0`: these tomograms are oriented as RELION's reconstructions of the
+  aligned tilt series. `-FlipVol 2` flips them in z relative to RELION's, and `-TiltCor 1` levels them,
+  which the alignment written for RELION does not include, so picks from either may land in the wrong
+  place when RELION extracts subtomograms. The job log warns when either is used.
 - *Compute*: GPU ids separated by colons (`0:1:2:3`): one tilt series per GPU at a time (or more,
   with *Tilt series per GPU*). Tilt series already done are skipped when the job runs again
   (Continue), so after a failure only the rest run.
@@ -314,7 +404,8 @@ Help → Keyboard shortcuts (F1) lists every key.
 
 ### Theme
 
-Light, dark, or as the system.
+Light (the default) or dark. cryo-savanna does not follow the system's dark mode: Qt can only tell
+it on some desktops.
 
 ### Where the job editor opens
 

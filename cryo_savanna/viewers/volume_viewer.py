@@ -13,7 +13,7 @@ as an outline on the sections, and a local-resolution map can colour the section
 from __future__ import annotations
 
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from pathlib import Path
 
 import numpy as np
@@ -158,7 +158,7 @@ class SurfaceView(QWidget):
         self.zoom = 1.0
         self.frame = None
         self.default_frame = None  # (centre, radius) to frame instead of the part above the level
-        self.shown = None  # (rot, zoom, frame) of the image on screen, to draw on it in the same projection
+        self.shown: tuple | None = None  # (rot, zoom, frame) of the image on screen, to draw on it in the same projection
         self.image: QImage | None = None
         self.hit_fraction = 0.0
         self.render_time = 0.0  # seconds, last render
@@ -213,6 +213,8 @@ class SurfaceView(QWidget):
         self._start(fast)
 
     def _start(self, fast: bool) -> None:
+        if self.data is None:  # _request() starts nothing without a map
+            return
         side = min(self.width(), self.height())
         size = self.FAST if fast else int(np.clip(side * self.devicePixelRatioF(), self.FAST, 384))
         data, color, crange, thr = self.data, self.color, self.color_range, self.threshold
@@ -284,6 +286,8 @@ class SurfaceView(QWidget):
     def project(self, points: np.ndarray, target: QRectF) -> tuple[np.ndarray, np.ndarray, float]:
         """Screen x, y and depth (into the screen, 0 at the frame's centre) of map points (x, y, z, in
         binned voxels), as the image on screen was rendered; and screen pixels per voxel."""
+        if self.shown is None or self.image is None:
+            raise RuntimeError("project() before the first image")  # paint_layer() is called with one only
         rot, zoom, (centre, radius) = self.shown
         half = radius / zoom
         n = self.image.width()
@@ -338,7 +342,7 @@ class VolumeViewer(QWidget):
 
     loaded = Signal()
 
-    def __init__(self, project_dir: Path, maps: list[str], mask: str = "", color: str = "", masks: list[str] = (),
+    def __init__(self, project_dir: Path, maps: list[str], mask: str = "", color: str = "", masks: Sequence[str] = (),
                  parent=None, follow: Callable[[], list[str]] | None = None,
                  history: Callable[[], list[tuple[int, list[str]]]] | None = None):
         """``follow``: the maps to show now (a running job's latest iteration), asked again on every refresh;
@@ -362,7 +366,7 @@ class VolumeViewer(QWidget):
         self.locres: Volume | None = None
         self.color_range = (0.0, 1.0)
         self.pos = [0, 0, 0]  # [z, y, x], full-map voxels
-        self._stamp = None
+        self._stamp: object = None
         self._others: dict[str, tuple] = {}  # mask / local-resolution map -> (stamp, Volume): read once
         self.error = ""
 
@@ -511,7 +515,7 @@ class VolumeViewer(QWidget):
             history = self.history()
         except OSError:
             history = []
-        first = [("Latest iteration", None)] if self.follow is not None else \
+        first: list[tuple[str, list[str] | None]] = [("Latest iteration", None)] if self.follow is not None else \
             [("Final", self.final_maps)] if self.final_maps else []
         choices = first + [(f"Iteration {it}", maps) for it, maps in reversed(history)]
         if choices == self._choices:
@@ -539,14 +543,18 @@ class VolumeViewer(QWidget):
         if not 0 <= i < len(self._choices):
             return
         maps = self._choices[i][1]
-        maps = [m for m in (self.follow() if maps is None else maps) if m]
+        if maps is None:  # "Latest iteration": only listed with follow
+            if self.follow is None:
+                return
+            maps = self.follow()
+        maps = [m for m in maps if m]
         if maps:
             self._set_maps(maps)
             self.load(keep_view=True)
 
     def refresh(self) -> None:
         self._fill_iterations()  # new iterations are listed as they are written
-        if self._following():
+        if self.follow is not None and self._following():
             maps = [m for m in self.follow() if m]
             if maps and maps != self.maps:  # a new iteration
                 self._set_maps(maps)
@@ -617,6 +625,8 @@ class VolumeViewer(QWidget):
 
     # ------------------------------------------------------------------ sections
     def _on_click(self, axis: int, row: float, col: float) -> None:
+        if self.vol is None:
+            return
         ra, ca = plane_axes(axis)
         self.pos[ra], self.pos[ca] = int(row), int(col)
         for s in self.slices:
@@ -630,7 +640,7 @@ class VolumeViewer(QWidget):
     def _levels(self):
         v = self.vol
         s = self.sigma.value()
-        if self.mode.currentIndex() == 1:
+        if v is None or self.mode.currentIndex() == 1:
             return None
         return (v.minimum, v.maximum) if s <= 0 else (v.mean - s * v.std, v.mean + s * v.std)
 
@@ -681,6 +691,8 @@ class VolumeViewer(QWidget):
     def _show_plane(self, s: SliceView, planes) -> None:
         img, mask, locres = planes
         v = self.vol
+        if v is None:
+            return
         ra, ca = plane_axes(s.axis)
         ov = None
         show_mask = mask is not None and self.show_mask.isChecked()
@@ -700,7 +712,7 @@ class VolumeViewer(QWidget):
         return rgba
 
     # ------------------------------------------------------------------ surface
-    def _surface_color(self):
+    def _surface_color(self) -> tuple[np.ndarray | None, tuple[float, float]]:
         if self.locres is not None and self.show_color.isChecked():
             return self.locres.data, self.color_range
         return None, (0.0, 1.0)

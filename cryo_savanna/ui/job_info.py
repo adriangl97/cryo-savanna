@@ -29,12 +29,15 @@ from qtpy.QtWidgets import (
 )
 
 from cryo_savanna.env.relion_env import RelionEnv, RelionEnvError
+from cryo_savanna.images.cache import ThumbCache
 from cryo_savanna.jobdefs.cli_catalog import POSITIONAL
 from cryo_savanna.jobdefs import external_jobs
 from cryo_savanna.jobdefs.cli_tools import CliCatalog
 from cryo_savanna.jobdefs.model import JobDefs, JobVariant
+from cryo_savanna.project.failure_hints import RELION_ERROR, Diagnosis
 from cryo_savanna.jobdefs.pytom_jobs import PytomVariant, decode
 from cryo_savanna.project.jobstar import JobStar
+from cryo_savanna.project.main_inputs import MainInputs
 from cryo_savanna.project.snapshot import ProjectSnapshot, stamp
 from cryo_savanna.results.registry import MICROGRAPHS, TABLE_PLOT, JobContext, ViewSpec, context_for, views_for
 from cryo_savanna.ui import style
@@ -47,6 +50,7 @@ class JobInfoPanel(QTabWidget):
     job_link = Signal(str)  # a link to another job was clicked
     tool_requested = Signal(str, str)  # a viewer asks for a selection tool (kind, file or job)
     main_input_requested = Signal(str, str)  # make this input node the job's main input ("": the default)
+    log_requested = Signal(str, str)  # show this log (run.err) at this line (a failure hint's)
 
     def __init__(self, defs: JobDefs, env: RelionEnv, type_names: dict[str, str], parent=None):
         super().__init__(parent)
@@ -77,7 +81,7 @@ class JobInfoPanel(QTabWidget):
         self._job: str | None = None
         self._jobstar: JobStar | None = None
         self._jobstar_error = ""
-        self._jobstar_stamp = None  # job.star's (mtime, size) when read: a Continue writes it again
+        self._jobstar_stamp: object = None  # job.star's (mtime, size) when read: a Continue writes it again
         # the forms of External jobs made from the "Additional external jobs" menu, as in the editor
         # (the main window gives the ones of its JobActions, so a --help is read once)
         self.forms = external_jobs.Forms(defs, env)
@@ -85,14 +89,15 @@ class JobInfoPanel(QTabWidget):
         self._flags_pool = QThreadPool(self)
         self._flag_tasks: set[FlagsTask] = set()
         self.queue = None  # slurm.QueueState
+        self.held: dict = {}  # job -> pipeliner.Held: the jobs runs still going are to run
         self.history: dict[str, list | str] = {}  # job -> its SLURM jobs (slurm.AcctJob), or an error
-        self.main_inputs = None  # project.main_inputs.MainInputs: the main inputs chosen in cryo-savanna
+        self.main_inputs: MainInputs | None = None  # the main inputs chosen in cryo-savanna
         self.overview.setHtml("<p>Select a job.</p>")
 
-        self.cache = None  # images.cache.ThumbCache of the project, set by the main window
+        self.cache: ThumbCache | None = None  # the project's thumbnails, set by the main window
         self._ctx: JobContext | None = None
         self._specs: list[ViewSpec] = []
-        self._job_dir_stamp = None  # of a running job: its viewers are looked for again when it changes
+        self._job_dir_stamp: object = None  # of a running job: its viewers are looked for again when it changes
         self.windows: list[ViewerWindow] = []
         self.popout = QToolButton()
         self.popout.setText("⧉")
@@ -118,6 +123,17 @@ class JobInfoPanel(QTabWidget):
         if self._job and self._snap is not None and style.queue_entry(state, self._job) != old:
             self._refresh_overview()
 
+    def set_runs(self, held: dict) -> None:
+        """The jobs runs still going are to run (Pipeliner.held_jobs)."""
+        old = self._held_text(self._job)
+        self.held = held
+        if self._job and self._snap is not None and self._held_text(self._job) != old:
+            self._refresh_overview()
+
+    def _held_text(self, job: str | None) -> str:
+        h = self.held.get(job) if job else None
+        return h.describe() if h is not None else ""
+
     def set_history(self, job: str, rows) -> None:
         self.history[job] = rows
         if job == self._job and self._snap is not None:
@@ -133,7 +149,7 @@ class JobInfoPanel(QTabWidget):
         self._snap = snap
 
     def show_job(self, snap: ProjectSnapshot, name: str | None) -> None:
-        reload_options = name != self._job or snap.jobs.get(name) is None
+        reload_options = name != self._job or name is None or snap.jobs.get(name) is None
         self._snap, self._job = snap, name
         if name is None or name not in snap.jobs:
             self.overview.setHtml("<p>Select a job.</p>")
@@ -258,6 +274,8 @@ class JobInfoPanel(QTabWidget):
 
     def _overview_html(self) -> str:
         snap, name = self._snap, self._job
+        if snap is None or name is None or name not in snap.jobs:  # no job shown
+            return ""
         info = snap.jobs[name]
         pr = info.process
         pipe = snap.pipeline
@@ -274,6 +292,9 @@ class JobInfoPanel(QTabWidget):
         if q_text:
             rows.insert(2, ("Queue", f"<b style='color:{style.QUEUE_COLORS[q_kind].name()}'>{html.escape(q_text)}"
                                      f"</b><br><span style='color:gray'>{html.escape(q_details)}</span>"))
+        run = self._held_text(name)
+        if run:
+            rows.insert(2, ("Run", html.escape(run)))
         if pr.has_alias:
             rows.insert(0, ("Alias", html.escape(pr.alias)))
         summary = self.summaries.get(name)
@@ -284,6 +305,9 @@ class JobInfoPanel(QTabWidget):
                     rows.append((label, html.escape(" · ".join(items))))
             if info.status == "Running" and summary.progress():
                 rows.append(("Progress", html.escape(summary.progress())))
+            if summary.failure:  # just under the status
+                at = next((i + 1 for i, (label, _) in enumerate(rows) if label == "Status"), len(rows))
+                rows.insert(at, ("Likely cause", self._failure_html(summary.failure, color)))
         if info.modified:
             rows.append(("Last change", f"{style.timestamp(info.modified)} ({style.ago(info.modified)})"))
         if self._jobstar is not None:
@@ -367,10 +391,26 @@ class JobInfoPanel(QTabWidget):
         out.append("</table>")
         return out
 
+    @staticmethod
+    def _failure_html(failure: list[Diagnosis], color: str) -> str:
+        """The hints of a failed job, each with the log line it comes from (a link to it)."""
+        out = []
+        for i, d in enumerate(failure):
+            line = d.line if len(d.line) <= 160 else d.line[:157] + "…"
+            quote = "" if d.hint is RELION_ERROR else f": {html.escape(line)}"
+            out.append(f"<b style='color:{color}'>{html.escape(d.text)}</b><br><span style='color:gray'>"
+                       f"<a href='log:{i}'>{d.file}, line {d.line_no}</a>{quote}</span>")
+        return "<br>".join(out)
+
     def _on_link(self, url: QUrl) -> None:
         s = url.toString()
         if s.startswith("job:"):
             self.job_link.emit(s[4:])
+        elif s.startswith("log:") and self._job:
+            summary = self.summaries.get(self._job)
+            i = int(s[4:]) if s[4:].isdigit() else -1
+            if summary is not None and 0 <= i < len(summary.failure):
+                self.log_requested.emit(summary.failure[i].file, summary.failure[i].line)
         elif s.startswith("main:") and self._job:
             self.main_input_requested.emit(self._job, s[5:])
 

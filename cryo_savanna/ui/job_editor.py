@@ -51,7 +51,10 @@ from qtpy.QtWidgets import (
     QGridLayout,
     QHBoxLayout,
     QLabel,
+    QDialog,
     QLineEdit,
+    QMenu,
+    QMessageBox,
     QPushButton,
     QScrollArea,
     QSizePolicy,
@@ -64,22 +67,33 @@ from qtpy.QtWidgets import (
     QWidget,
 )
 
+from cryo_savanna.env.machine import Specs, SpecsCache
 from cryo_savanna.env.relion_env import RelionEnv, RelionEnvError
+from cryo_savanna.jobdefs import box_sizes
+from cryo_savanna.jobdefs import compute_advice as advice_rules
+from cryo_savanna.jobdefs.cli_tools import CliVariant
 from cryo_savanna.jobdefs.flags import Flag, FlagSource, command_flags, program_for
 from cryo_savanna.jobdefs.model import JobVariant, OptionDef, Row
 from cryo_savanna.jobdefs.pytom_jobs import PytomVariant
 from cryo_savanna.project.jobstar import JobStar
 from cryo_savanna.project.pipeline import Pipeline
+from cryo_savanna.project.presets import PresetError, PresetStore, is_input
 from cryo_savanna.relion_consts import job_type_for_label
 from cryo_savanna.project.scratch import SCRATCH_KEY
 from cryo_savanna.project.scratch import base_dir as scratch_base_dir
 from cryo_savanna.project.selection import interactive_kind
 from cryo_savanna.ui.flag_panel import FlagPanel, FlagsTask
+from cryo_savanna.ui.presets_dialog import ManagePresetsDialog, SavePresetDialog
 
 MODE_NEW, MODE_CONTINUE, MODE_OVERWRITE = "new", "continue", "overwrite"
 EXTRA_ARGS = "other_args"
 # job types whose interactive step cryo-savanna can do itself, and RELION's own tool for it
 RELION_SELECTORS = {"relion.select": "relion_display", "relion.excludetilts": "napari"}
+# the rows the compute suggestion is shown under (the last of them on each tab)
+HINT_KEYS = (advice_rules.MPI, advice_rules.THREADS, advice_rules.CLI_THREADS, advice_rules.POOL,
+             advice_rules.GPU_IDS)
+PARTICLES_TTL_S = 60.0
+SPECS = SpecsCache()  # one for the whole session: this machine is looked at once in a while
 
 
 def qt_file_filter(pattern: str) -> str:
@@ -204,8 +218,10 @@ class SliderWidget(TextWidget):
         self.edit.setMaximumWidth(110)
         self.slider = None
         self._syncing = False
+        self.range: tuple[float, float] | None = None  # (min, max) of the slider; None: no slider
         lo, hi = opt.min, opt.max
         if lo is not None and hi is not None and hi > lo:
+            self.range = (lo, hi)
             step = opt.step if opt.step and opt.step > 0 else (hi - lo) / 100
             self.n = max(1, min(self.STEPS_MAX, round((hi - lo) / step)))
             self.slider = QSlider(Qt.Horizontal)
@@ -217,11 +233,12 @@ class SliderWidget(TextWidget):
             self.layout_.addStretch(1)
 
     def _from_slider(self, i: int) -> None:
-        if self._syncing:
+        if self._syncing or self.range is None:
             return
-        v = self.opt.min + (self.opt.max - self.opt.min) * i / self.n
+        lo, hi = self.range
+        v = lo + (hi - lo) * i / self.n
         step = self.opt.step or 0
-        if step >= 1 and float(step).is_integer() and float(self.opt.min).is_integer():
+        if step >= 1 and float(step).is_integer() and float(lo).is_integer():
             text = str(int(round(v)))
         else:
             text = f"{v:.6g}"
@@ -230,15 +247,15 @@ class SliderWidget(TextWidget):
         self._syncing = False
 
     def _to_slider(self, text: str) -> None:
-        if self._syncing or self.slider is None:
+        if self._syncing or self.slider is None or self.range is None:
             return
         try:
             v = float(text)
         except ValueError:
             return
+        lo, hi = self.range
         self._syncing = True
-        self.slider.setValue(round((min(max(v, self.opt.min), self.opt.max) - self.opt.min)
-                                   / (self.opt.max - self.opt.min) * self.n))
+        self.slider.setValue(round((min(max(v, lo), hi) - lo) / (hi - lo) * self.n))
         self._syncing = False
 
     def set_value(self, v: str) -> None:
@@ -324,7 +341,7 @@ class NodeWidget(FileWidget):
                 n.type_label, n.type_depth, self.opt.node_type, self.opt.node_type_depth)
                 and _name_matches(n.name, self.opt.pattern)]
             for n in reversed(nodes):  # newest jobs first
-                pr = pipeline.processes.get(n.producer)
+                pr = pipeline.processes.get(n.producer) if n.producer else None
                 alias = f"   ({pr.alias.rstrip('/')})" if pr is not None and pr.has_alias else ""
                 self.combo.addItem(n.name + alias, n.name)
         self.combo.setCurrentIndex(-1)
@@ -348,6 +365,24 @@ class NodeWidget(FileWidget):
 
     def focus_target(self) -> QWidget:
         return self.combo
+
+
+_JOB_DIR = re.compile(r"(?:\./)?([^/\s]+/[^/\s]+/)")  # Type/jobNNN/ (or Type/alias/) at the start of a path
+
+
+def _input_job(value: str, pipeline: Pipeline, dirs: dict[str, str], project: str) -> str | None:
+    """The job of the pipeline an input field's value comes from (JobEditor.input_jobs), or None.
+    ``dirs``: job directory or alias directory -> job; ``project``: the project's path, with a slash."""
+    v = value.strip()
+    if not v:
+        return None
+    if v.startswith(project):
+        v = v[len(project):]
+    node = pipeline.nodes.get(v)
+    if node is not None and node.producer:
+        return node.producer
+    m = _JOB_DIR.match(v)
+    return dirs.get(m.group(1)) if m else None
 
 
 def make_widget(opt: OptionDef, editor: "JobEditor") -> OptionWidget:
@@ -390,10 +425,17 @@ class JobEditor(QWidget):
     """Edit a new job or continue an existing one. Emits ``submit`` with the job.star to use."""
 
     submit = Signal(object, str, bool)  # JobStar, alias, schedule_only
+    submit_many = Signal(object, bool)  # [(JobStar, alias, values)] of Variations…, schedule_only
     closed = Signal()
+    inputs_changed = Signal(object)  # {job: [labels of the fields that take its outputs]} (input_jobs)
+    _specs_ready = Signal()  # emitted from a lookup thread: the machine, a queue node or particles are known
 
-    def __init__(self, env: RelionEnv, type_names: dict[str, str], parent=None, flag_source: FlagSource | None = None):
+    def __init__(self, env: RelionEnv, type_names: dict[str, str], parent=None, flag_source: FlagSource | None = None,
+                 presets: PresetStore | None = None, relion_version: str = ""):
         super().__init__(parent)
+        self.presets = presets if presets is not None else PresetStore()  # the user's setting presets
+        self.relion_version = relion_version  # of the job definitions: saved with a preset
+        self.loaded_preset: str | None = None  # the preset loaded into the form, for "Update"
         self.env = env
         self.type_names = type_names
         self.flag_source = flag_source or FlagSource()
@@ -406,19 +448,29 @@ class JobEditor(QWidget):
         self._flags_pool.setMaxThreadCount(1)
         self._flag_tasks: set[FlagsTask] = set()
         self.project_dir = Path(".")
+        self._project_prefix = ""  # the project's absolute path with a slash (set_project)
         self.pipeline: Pipeline | None = None
         self.variant: JobVariant | None = None
         self.options: dict[str, OptionDef] = {}
         self.widgets: dict[str, OptionWidget] = {}
         self.labels: dict[str, QLabel] = {}
         self.markers: dict[str, QLabel] = {}
+        # rows with box sizes: (row, its box-size keys, the warning under it, the row's label)
+        self.box_warnings: list[tuple[Row, list[str], QLabel, QLabel]] = []
+        # the compute suggestion (jobdefs/compute_advice.py): (the line under a row, that row's label)
+        self.compute_hints: list[tuple[QLabel, QLabel]] = []
+        self.advice: advice_rules.Advice | None = None
+        self.specs_cache = SPECS
+        self._specs_ready.connect(lambda: self._update_compute_hints())
         self.rows: list[tuple[int, Row, list[QWidget]]] = []  # (tab index, row, widgets to show/hide)
         self.selector: QComboBox | None = None  # "Selection window" of jobs cryo-savanna can do itself
         self.mode = MODE_NEW
         self.job: str | None = None  # the job being continued
         self.readonly = False
         self.can_run = True
+        self._reason = ""  # why jobs cannot run (set_permissions), shown in the status line
         self.own_scratch = False  # each job a savanna_NNN of its scratch directory (Preferences)
+        self._inputs: dict[str, list[str]] = {}  # input_jobs, as last told (inputs_changed)
 
         self.title = QLabel()
         f = QFont(self.font())
@@ -439,16 +491,27 @@ class JobEditor(QWidget):
         self.reset.setToolTip("Set every option to RELION's default (with this shell's RELION_* settings and "
                               "the scratch directory of the preferences)")
         self.reset.clicked.connect(self._reset_defaults)
+        self.presets_btn = QPushButton("Setting presets")
+        self.presets_btn.setToolTip("Named settings of this job type, saved by you for every project: load one, "
+                                    "save the current settings as one, or edit them")
+        self.presets_menu = QMenu(self.presets_btn)
+        self.presets_menu.aboutToShow.connect(self._fill_presets_menu)
+        self.presets_btn.setMenu(self.presets_menu)
+        self.presets_btn.setEnabled(False)  # until a job type is chosen
 
         self.tabs = QTabWidget()
         self.tabs.setUsesScrollButtons(True)
         self.help = QTextBrowser()
-        self.help.setOpenExternalLinks(False)
+        self.help.setOpenExternalLinks(True)  # the sources a help cites (EMAN2's box sizes)
         self.help.setMinimumHeight(60)
 
         self.run_btn = QPushButton("Run now")
         self.run_btn.setDefault(True)
         self.schedule_btn = QPushButton("Schedule")
+        self.variations_btn = QPushButton("Variations…")
+        self.variations_btn.setToolTip("Several jobs from this form: choose options and their values, one job "
+                                       "for every combination (each with its own alias)")
+        self.variations_btn.clicked.connect(lambda: self.open_variations())
         self.close_btn = QPushButton("Close")
         self.run_btn.clicked.connect(lambda: self._submit(False))
         self.schedule_btn.clicked.connect(lambda: self._submit(True))
@@ -465,12 +528,14 @@ class JobEditor(QWidget):
         top.addWidget(self.search, 2, 2)
         top.addWidget(self.only_changed, 2, 3)
         top.addWidget(self.reset, 2, 4)
+        top.addWidget(self.presets_btn, 2, 5)
         top.setColumnStretch(1, 1)
         top.setColumnStretch(2, 1)
 
         buttons = QHBoxLayout()
         buttons.addWidget(self.status, 1)
         buttons.addWidget(self.close_btn)
+        buttons.addWidget(self.variations_btn)
         buttons.addWidget(self.schedule_btn)
         buttons.addWidget(self.run_btn)
 
@@ -488,6 +553,7 @@ class JobEditor(QWidget):
     # ------------------------------------------------------------------ loading
     def set_project(self, project_dir: Path, pipeline: Pipeline | None) -> None:
         self.project_dir = Path(project_dir)
+        self._project_prefix = os.path.abspath(self.project_dir).rstrip("/") + "/"  # input_jobs: once, not per key
         self.update_pipeline(pipeline)
 
     def update_pipeline(self, pipeline: Pipeline | None) -> None:
@@ -496,6 +562,7 @@ class JobEditor(QWidget):
         for w in self.widgets.values():
             if isinstance(w, NodeWidget):
                 w.fill(pipeline)
+        self._update_inputs()
 
     def new_job(self, variant: JobVariant, values: dict[str, str] | None = None, note: str = "",
                 source_job: str | None = None) -> None:
@@ -551,36 +618,53 @@ class JobEditor(QWidget):
     def _type_name(self, variant: JobVariant) -> str:
         if isinstance(variant, PytomVariant):  # pytom, AreTomo3, tomogram masks (jobdefs/external_jobs.py)
             return f"{variant.program} (runs as an External job)"
-        if getattr(variant, "is_cli", False):
+        if isinstance(variant, CliVariant):
             return f"{variant.program} (CLI tool, runs as an External job)"
         return self.type_names.get(variant.label, variant.dirname)
 
     def set_permissions(self, readonly: bool, can_run: bool, reason: str = "") -> None:
+        """Asked again at every new snapshot of the project: only a change does something, so what the status
+        line says ("Class2D/job019 scheduled.") stays until there is something new to say."""
+        if (readonly, can_run, reason) == (self.readonly, self.can_run, self._reason):
+            return
+        old, self._reason = self._reason, reason
         self.readonly, self.can_run = readonly, can_run
-        self._update_mode_widgets()
+        self._update_mode_widgets(clear_status=False)
         if reason:
             self.status.setText(reason)
+        elif old and self.status.text() == old:  # the reason shown before is gone
+            self.status.setText("")
 
-    def _update_mode_widgets(self) -> None:
+    def _update_mode_widgets(self, clear_status: bool = True) -> None:
         is_new = self.mode != MODE_CONTINUE  # a new job, or one that replaces an old one
         self.alias.setVisible(is_new)
         self.alias_label.setVisible(is_new)
         self.schedule_btn.setVisible(is_new)
+        self.variations_btn.setVisible(self.mode == MODE_NEW)
         self.run_btn.setText({MODE_NEW: "Run now", MODE_CONTINUE: "Continue now",
                               MODE_OVERWRITE: "Overwrite now"}[self.mode])
         enabled = not self.readonly and self.can_run and self.variant is not None
+        self.presets_btn.setEnabled(self.variant is not None and self.mode != MODE_CONTINUE)
         self.run_btn.setEnabled(enabled)
         self.schedule_btn.setEnabled(enabled)
-        self.status.setText("")
+        self.variations_btn.setEnabled(enabled)
+        if clear_status:
+            self.status.setText("")
         self._update_states()
 
     def _build(self, variant: JobVariant) -> None:
         options = variant.resolved_options(self.env)  # first: a bad RELION_* value leaves the editor as it was
         self.variant, self.options = variant, options
+        self.loaded_preset = None
         self.widgets.clear()
         self.labels.clear()
         self.markers.clear()
         self.rows.clear()
+        self.box_warnings.clear()
+        self.compute_hints.clear()
+        self.advice = None
+        box_keys = box_sizes.box_options(variant.key)
+        advised = advice_rules.covered(variant.key, options)
         self.flag_panel = self.flags_toggle = None
         self.flags_program = None
         self.selector = None
@@ -595,11 +679,13 @@ class JobEditor(QWidget):
             grid.setVerticalSpacing(4)
             r = 0
             panel_row = None
+            hint_rows = [i for i, rw in enumerate(tab.rows) if advised and any(k in HINT_KEYS and k in options
+                                                                                for k in rw.keys)]
             if tab.label == "Running" and variant.label in RELION_SELECTORS:
                 grid.addWidget(QLabel("Selection window:"), r, 0, Qt.AlignRight | Qt.AlignVCenter)
                 grid.addWidget(self._make_selector(RELION_SELECTORS[variant.label]), r, 1)
                 r += 1
-            for row in tab.rows:
+            for ri, row in enumerate(tab.rows):
                 keys = [k for k in row.keys if k in self.options]
                 if not keys:
                     continue
@@ -629,6 +715,24 @@ class JobEditor(QWidget):
                 parts = [label, field, marker]
                 self.rows.append((ti, row, parts))
                 r += 1
+                boxes = [k for k in keys if k in box_keys]
+                if boxes:  # a line under the field, shown when the size is not a good one
+                    warn = QLabel()
+                    warn.setWordWrap(True)
+                    warn.setTextFormat(Qt.RichText)
+                    warn.setOpenExternalLinks(True)
+                    warn.hide()
+                    grid.addWidget(warn, r, 1, 1, 2)
+                    self.box_warnings.append((row, boxes, warn, label))
+                    r += 1
+                if hint_rows and ri == hint_rows[-1]:  # the suggested MPI, threads, pool and GPUs
+                    hint = QLabel()
+                    hint.setWordWrap(True)
+                    hint.setTextFormat(Qt.RichText)
+                    hint.linkActivated.connect(self._on_hint_link)
+                    grid.addWidget(hint, r, 1, 1, 2)
+                    self.compute_hints.append((hint, label))
+                    r += 1
                 if keys == [EXTRA_ARGS] and not getattr(variant, "is_cli", False):
                     panel_row = r
                     grid.addWidget(self._make_flag_panel(), r, 0, 1, 3)
@@ -712,10 +816,12 @@ class JobEditor(QWidget):
         continued or cloned, else of the newest job of this type."""
         candidates = [self.source_job] if self.source_job else []
         if self.pipeline is not None and self.variant is not None:
+            own = self.variant.label
+
             def same_type(label: str) -> bool:
                 # whatever RELION added to the label (relion.autopick.log is a relion.autopick job)
                 jt = job_type_for_label(label)
-                return label == self.variant.label or (jt is not None and jt.label == self.variant.label)
+                return label == own or (jt is not None and jt.label == own)
             candidates += [n for n, pr in reversed(self.pipeline.processes.items())
                            if n != self.source_job and same_type(pr.type_label)]
         for job in candidates[:20]:
@@ -778,14 +884,23 @@ class JobEditor(QWidget):
         """All options, as RELION writes them to job.star."""
         return {k: (self.widgets[k].value() if k in self.widgets else o.default) for k, o in self.options.items()}
 
-    def jobstar(self, job_dir: str | None = None) -> JobStar:
-        """The job.star to submit. A CLI tool job needs its directory (outputs go there): the job
-        being continued or overwritten, else the one the next new job will get."""
-        v = self.variant
+    def jobstar(self, job_dir: str | None = None, values: dict[str, str] | None = None) -> JobStar:
+        """The job.star to submit (of these values instead of the form's: Variations…). A CLI tool job needs
+        its directory (outputs go there): the job being continued or overwritten, else the one the next new
+        job will get."""
+        v = self._variant
+        vals = values if values is not None else self.values()
         if self.is_cli:
-            return v.make_jobstar(self.values(), self.mode == MODE_CONTINUE, job_dir or self.job_dir(), self.pipeline)
+            assert isinstance(v, (CliVariant, PytomVariant))  # the forms of their own (is_cli)
+            return v.make_jobstar(vals, self.mode == MODE_CONTINUE, job_dir or self.job_dir(), self.pipeline)
         return JobStar(type_label=v.label, is_continue=self.mode == MODE_CONTINUE, is_tomo=v.is_tomo,
-                       options=self.values())
+                       options=dict(vals))
+
+    @property
+    def _variant(self) -> JobVariant:
+        """The form's job type (asked only once one is chosen)."""
+        assert self.variant is not None, "no job type chosen yet"
+        return self.variant
 
     @property
     def is_cli(self) -> bool:
@@ -798,7 +913,7 @@ class JobEditor(QWidget):
         if self.job and self.mode != MODE_NEW:
             return self.job
         counter = self.pipeline.job_counter if self.pipeline is not None else 1
-        return f"{self.variant.dirname}/job{counter:03d}/"
+        return f"{self._variant.dirname}/job{counter:03d}/"
 
     def changed_options(self) -> dict[str, tuple[str, str]]:
         """key -> (default, value) for every option that differs from RELION's default."""
@@ -822,8 +937,105 @@ class JobEditor(QWidget):
         vals.update(keep)
         self._set_values(vals)
 
+    # ------------------------------------------------------------------ setting presets
+    def _fill_presets_menu(self) -> None:
+        m = self.presets_menu
+        m.clear()
+        if self.variant is None:
+            return
+        names = self.presets.names(self.variant.key)
+        for n in names:
+            a = m.addAction(n)
+            a.setToolTip(f"Load “{n}”: its options, RELION's defaults for the rest; the inputs stay")
+            a.triggered.connect(lambda _=False, n=n: self.load_preset(n))
+        if not names:
+            m.addAction("No presets for this job type yet").setEnabled(False)
+        m.addSeparator()
+        m.addAction("Save current settings as…").triggered.connect(lambda _=False: self.save_preset_as())
+        if self.loaded_preset in names:
+            m.addAction(f"Update “{self.loaded_preset}” with the current settings").triggered.connect(
+                lambda _=False: self.update_preset())
+        m.addAction("Manage presets…").triggered.connect(lambda _=False: self.manage_presets())
+        m.setToolTipsVisible(True)
+
+    def load_preset(self, name: str) -> bool:
+        """Set the preset's options; every other option back to RELION's default, but the inputs as they are
+        (a preset that holds an input sets it). Not when continuing: only some options can change then."""
+        v = self.variant
+        if v is None or self.mode == MODE_CONTINUE:
+            return False
+        p = self.presets.get(v.key, name)
+        if p is None:
+            self.status.setText(f"There is no preset “{name}” any more.")
+            return False
+        current = self.values()
+        try:
+            vals = v.default_values(self.env)
+        except RelionEnvError as e:
+            self.status.setText(f"⚠ {e}")
+            return False
+        if self.own_scratch:
+            _scratch_base(vals)
+        vals.update({k: current[k] for k, o in self.options.items() if is_input(o)})
+        vals.update({k: val for k, val in p.options.items() if k in self.options})
+        self._set_values(vals)
+        self.loaded_preset = name
+        skipped = [k for k in p.options if k not in self.options]
+        n = len(p.options) - len(skipped)
+        self.status.setText(f"Preset “{name}” loaded: {n} option{'s' if n != 1 else ''}"
+                            + (f"; not in this form (skipped): {', '.join(skipped)}" if skipped else "") + ".")
+        if self.only_changed.isChecked():
+            self._apply_search()
+        return True
+
+    def save_preset_as(self) -> str | None:
+        """Ask for a name and the options to save (changed ones ticked, inputs not); the name saved."""
+        v = self.variant
+        if v is None:
+            return None
+        dlg = SavePresetDialog(self, v, self.options, self.values(), self.presets.names(v.key),
+                               self.loaded_preset or "")
+        if dlg.exec() != QDialog.Accepted:
+            return None
+        name = dlg.name.text()
+        try:
+            self.presets.save(v.key, name, dlg.chosen(), self.relion_version)
+        except PresetError as e:
+            self.status.setText(f"⚠ {e}")
+            return None
+        self.loaded_preset = name
+        self.status.setText(f"Preset “{name}” saved ({len(dlg.chosen())} options).")
+        return name
+
+    def update_preset(self) -> bool:
+        """The loaded preset's options, with the values in the form now (the same options as before)."""
+        v, name = self.variant, self.loaded_preset
+        if v is None or name is None:
+            return False
+        p = self.presets.get(v.key, name)
+        if p is None:
+            self.status.setText(f"There is no preset “{name}” any more.")
+            return False
+        vals = self.values()
+        try:
+            self.presets.set_options(v.key, name, {k: vals.get(k, old) for k, old in p.options.items()})
+        except PresetError as e:
+            self.status.setText(f"⚠ {e}")
+            return False
+        self.status.setText(f"Preset “{name}” updated.")
+        return True
+
+    def manage_presets(self) -> None:
+        v = self.variant
+        if v is None:
+            return
+        ManagePresetsDialog(self, self.presets, v.key, self._type_name(v), self.options,
+                            select=self.loaded_preset).exec()
+        if self.loaded_preset not in self.presets.names(v.key):  # renamed or deleted
+            self.loaded_preset = None
+
     def _editable(self, key: str, values: dict[str, str]) -> bool:
-        return self.variant.enabled_for_mode(self.options[key], self.mode == MODE_CONTINUE)
+        return self._variant.enabled_for_mode(self.options[key], self.mode == MODE_CONTINUE)
 
     def _update_states(self) -> None:
         if self.variant is None:
@@ -852,6 +1064,175 @@ class JobEditor(QWidget):
             self.flag_panel.setEnabled(self.widgets[EXTRA_ARGS].isEnabled())
         if self.selector is not None:
             self.selector.setEnabled(not self.readonly and interactive_kind(self.variant.label, vals) is not None)
+        self._update_box_warnings(vals)
+        self._update_compute_hints(vals)
+        self._update_inputs(vals)
+
+    # ------------------------------------------------------------------ the jobs it takes inputs from
+    def input_jobs(self, vals: dict[str, str] | None = None) -> dict[str, list[str]]:
+        """The jobs whose outputs the form takes as inputs: {job: [labels of those fields]}, in the form's order.
+        Only fields that count (their on/off group is on) and that name a job of the pipeline: one of its
+        output nodes, or a file in its directory (by name, alias or a path in the project). The job being
+        continued or overwritten is left out (its own files)."""
+        p = self.pipeline
+        if self.variant is None or p is None:
+            return {}
+        vals = self.values() if vals is None else vals
+        dirs = {name: name for name in p.processes}
+        dirs.update({pr.alias.rstrip("/") + "/": name for name, pr in p.processes.items() if pr.has_alias})
+        project = self._project_prefix or os.path.abspath(self.project_dir).rstrip("/") + "/"
+        out: dict[str, list[str]] = {}
+        for _, row, _parts in self.rows:
+            if not self.variant.group_active(row.group, vals):
+                continue
+            for k in row.keys:
+                if k not in self.widgets or not is_input(self.options[k]):
+                    continue
+                job = _input_job(vals[k], p, dirs, project)
+                if job is None or job == self.job:
+                    continue
+                label = self.options[k].label.strip().rstrip(":").strip() or k
+                if label not in out.setdefault(job, []):
+                    out[job].append(label)
+        return out
+
+    def _update_inputs(self, vals: dict[str, str] | None = None) -> None:
+        inputs = self.input_jobs(vals)
+        if inputs != self._inputs:
+            self._inputs = inputs
+            self.inputs_changed.emit(inputs)
+
+    # ------------------------------------------------------------------ compute suggestion
+    def _job_specs(self, vals: dict[str, str]) -> Specs | str | None:
+        """What the job runs on: this machine, or a node of the queue (SLURM) it is submitted to; a text
+        when that cannot be told; None while it is being looked up."""
+        ready = self._specs_ready.emit
+        if vals.get("do_queue") == "Yes":
+            template = (vals.get("qsubscript") or "").strip()
+            if not template:
+                return "no submission script is given"
+            path = Path(template) if os.path.isabs(template) else self.project_dir / template
+            return self.specs_cache.for_queue(str(path), vals, ready)
+        return self.specs_cache.local(ready)
+
+    def _job_particles(self, vals: dict[str, str]) -> advice_rules.Particles | None:
+        """Box size and number of the input particles of a refinement (None: none given, or not read yet)."""
+        if self.variant is None or advice_rules.base_key(self.variant.key) not in advice_rules.REFINE:
+            return None
+        star = advice_rules.input_star(self.variant.key, vals)
+        if not star:
+            return None
+        project = self.project_dir
+        found = self.specs_cache.get(("particles", str(project.resolve()), star), PARTICLES_TTL_S,
+                                     lambda: advice_rules.read_particles(project, star) or "",
+                                     self._specs_ready.emit)
+        return found if isinstance(found, advice_rules.Particles) else None
+
+    def _update_compute_hints(self, vals: dict[str, str] | None = None) -> None:
+        """Under the compute options: the suggested values for what the job runs on, with Apply, and what is
+        wrong with the values in the form."""
+        if self.variant is None or not self.compute_hints:
+            return
+        vals = vals if vals is not None else self.values()
+        specs = self._job_specs(vals)
+        self.advice = None
+        if specs is None:
+            text = "<span style='color:gray'>Looking at what the job will run on…</span>"
+        elif isinstance(specs, str):
+            text = f"<span style='color:gray'>No suggestion for MPI and threads: {html.escape(specs)}.</span>"
+        else:
+            try:
+                limit: int | None = self.env.error_local_mpi
+            except RelionEnvError:
+                limit = None
+            self.advice = advice_rules.advise(self.variant.key, self.options, vals, specs,
+                                              self._job_particles(vals), limit)
+            text = self._hint_html(self.advice, vals) if self.advice is not None else ""
+        for hint, row_label in self.compute_hints:
+            hint.setText(text)
+            hint.setToolTip(self._hint_tooltip())
+            hint.setVisible(bool(text) and not row_label.isHidden())
+
+    def _hint_html(self, a: advice_rules.Advice, vals: dict[str, str]) -> str:
+        dim = self.palette().color(QPalette.PlaceholderText).name()
+        basis = html.escape(a.basis)
+        settable = [k for k in a.values if k in self.widgets and self.widgets[k].isEnabled()]
+        if not a.values:
+            out = ""
+        elif not a.differs(vals):
+            out = f"<span style='color:{dim}'>✓ As suggested for {basis}.</span>"
+        else:
+            apply = " <a href='apply'>Apply</a>" if settable and not self.readonly else ""
+            out = (f"Suggested: <b>{html.escape(a.short())}</b>{apply} "
+                   f"<span style='color:{dim}'>— for {basis}</span>")
+        if a.warnings:
+            out += ("<br>" if out else "") + "<br>".join(
+                f"<span style='color:#d9861c'>⚠ {html.escape(w)}</span>" for w in a.warnings)
+        return out
+
+    def _hint_tooltip(self) -> str:
+        a = self.advice
+        if a is None or not a.why:
+            return ""
+        return "Why:\n" + "\n".join("• " + w for w in a.why) + "\n\nRules of thumb, not measurements: check the " \
+            "first iterations (GPU memory in nvidia-smi, the time per iteration)."
+
+    def _on_hint_link(self, href: str) -> None:
+        if href == "apply":
+            self.apply_advice()
+
+    def apply_advice(self) -> bool:
+        """Put the suggested values into the form (those that can be changed). False: nothing to apply."""
+        a = self.advice
+        if a is None or self.readonly:
+            return False
+        changed = []
+        for k, v in a.values.items():
+            w = self.widgets.get(k)
+            if w is not None and w.isEnabled() and w.value() != v:
+                w.set_value(v)
+                changed.append(f"{self.options[k].label.strip().rstrip(':')} {v}")
+        if changed:
+            self.status.setText("Set " + ", ".join(changed) + ".")
+        self._update_states()
+        return bool(changed)
+
+    def compute_hint(self) -> str:
+        """The text of the compute suggestion as shown ("": none; tests)."""
+        return next((h.text() for h, _ in self.compute_hints if not h.isHidden()), "")
+
+    def _update_box_warnings(self, vals: dict[str, str] | None = None) -> None:
+        """Under each box size in use (its group active, its row not hidden by the search) that is not a good
+        one: the closest good ones (jobdefs/box_sizes.py, after EMAN2)."""
+        if self.variant is None or not self.box_warnings:
+            return
+        vals = vals if vals is not None else self.values()
+        for row, keys, warn, row_label in self.box_warnings:
+            texts = [] if row_label.isHidden() or not self.variant.group_active(row.group, vals) else \
+                [t for t in (box_sizes.warning(box_sizes.as_size(vals[k])) for k in keys) if t]
+            if texts:
+                warn.setText(f"<span style='color:#d9861c'>⚠ {html.escape(' '.join(texts))}</span> "
+                             f"<a href='{box_sizes.SOURCE}'>{box_sizes.SOURCE_NAME}</a>")
+            warn.setVisible(bool(texts))
+
+    def box_problems(self) -> list[str]:
+        """The box sizes in use that are not good ones and can still be changed ("‹option›: why"): asked about at
+        Run / Schedule. Also those of rows the search hides."""
+        if self.variant is None:
+            return []
+        vals, out = self.values(), []
+        for row, keys, _, _ in self.box_warnings:
+            if not self.variant.group_active(row.group, vals):
+                continue
+            for k in keys:
+                text = box_sizes.warning(box_sizes.as_size(vals[k]))
+                if text and self.widgets[k].isEnabled():
+                    out.append(f"{self.options[k].label.strip().rstrip(':')}: {text}")
+        return out
+
+    def box_warning(self, key: str) -> str:
+        """The box-size warning shown under this option ("": none; tests)."""
+        return next((w.text() for _, keys, w, _ in self.box_warnings if key in keys and not w.isHidden()), "")
 
     # ------------------------------------------------------------------ search and help
     def _apply_search(self) -> None:
@@ -876,6 +1257,8 @@ class JobEditor(QWidget):
             base = self.tabs.tabText(ti).split("  (")[0]
             self.tabs.setTabText(ti, f"{base}  ({counts[ti]})" if filtering else base)
             self.tabs.setTabEnabled(ti, counts[ti] > 0 or not filtering)
+        self._update_box_warnings()  # a row hidden by the search hides its warning too
+        self._update_compute_hints()
         if filtering and counts and counts[self.tabs.currentIndex()] == 0:
             first = next((i for i, c in enumerate(counts) if c), None)
             if first is not None:
@@ -896,10 +1279,22 @@ class JobEditor(QWidget):
         if key == SCRATCH_KEY and self.own_scratch:
             extra.append("each job gets its own savanna_NNN subdirectory in it")
         name = "" if o.label.strip() == key else html.escape(key) + " · "
+        box = ""
+        if self.variant is not None and key in box_sizes.box_options(self.variant.key):
+            box = ("<p>Some box sizes make the FFTs, and so the job and those that use its particles, much faster "
+                   "than others (128 px almost twice as fast as 122 px): cryo-savanna warns when the size is not "
+                   "on " f"<a href='{box_sizes.SOURCE}'>{box_sizes.SOURCE_NAME}</a> (EMAN wiki, “Particle Box "
+                   "Size”), gives the closest good ones, and asks before the job is run or scheduled.</p>")
+        if self.compute_hints and key in HINT_KEYS + (advice_rules.DEDICATED,):
+            box += ("<p>cryo-savanna suggests MPI processes, threads, pooled particles and GPUs for what the job "
+                    "runs on: this machine (its CPUs, RAM and the GPUs nvidia-smi lists), or, when the job is "
+                    "submitted to the queue, a node of the SLURM partition its submission script asks for (sinfo). "
+                    "For refinements it reads the box size of the input particles to see how many processes fit "
+                    "in GPU memory and RAM. Apply puts the values in; point at the suggestion for why.</p>")
         self.help.setHtml(
             f"<b>{html.escape(o.label.strip())}</b> <span style='color:gray'>{name}default "
             f"{html.escape(o.default or '—')}{' · ' + html.escape(' · '.join(extra)) if extra else ''}</span>"
-            f"<p style='white-space:pre-wrap'>{html.escape(o.help.strip())}</p>")
+            f"<p style='white-space:pre-wrap'>{html.escape(o.help.strip())}</p>{box}")
 
     def show_flag_help(self, flag: Flag) -> None:
         bits = [f"flag of {self.flags_program}", flag.section]
@@ -911,7 +1306,7 @@ class JobEditor(QWidget):
         note = ""
         if job_value is not None:
             note = (f"<p style='color:gray'>The job's options set this ({html.escape(job_value or 'on')} in "
-                    f"{html.escape(self.flag_panel.job_flags_from)}). A value here overrides it: RELION uses the "
+                    f"{html.escape(self.flag_panel.job_flags_from if self.flag_panel else '')}). A value here overrides it: RELION uses the "
                     "last one given.</p>")
         self.help.setHtml(f"<b>{html.escape(flag.name)}</b> <span style='color:gray'>"
                           f"{html.escape(' · '.join(b for b in bits if b))}</span>"
@@ -932,7 +1327,41 @@ class JobEditor(QWidget):
         except ValueError:
             return str(p)
 
+    def open_variations(self, dialog_hook=None) -> bool:
+        """Variations…: the options to vary and their values, then one new job per combination (submit_many).
+        ``dialog_hook``: called with the dialog instead of showing it (tests); its answer is the dialog's."""
+        from cryo_savanna.ui.presets_dialog import tab_of
+        from cryo_savanna.ui.variations_dialog import VariationsDialog
+        v = self.variant
+        if v is None or self.mode != MODE_NEW:
+            return False
+        vals = self.values()
+        if interactive_kind(v.label, vals) is not None:
+            self.status.setText("A selection job is made in its selection window, one at a time: no variations.")
+            return False
+        base = self.alias.text().strip() or getattr(v, "program", "") or v.dirname
+        dlg = VariationsDialog(self, self._type_name(v), self.options, vals, base, self.pipeline, v.dirname, tab_of(v))
+        accepted = dialog_hook(dlg) if dialog_hook is not None else dlg.exec() == QDialog.Accepted
+        if not accepted or not dlg.jobs():
+            return False
+        counter = self.pipeline.job_counter if self.pipeline is not None else 1
+        jobs = []
+        for i, (combo, alias) in enumerate(dlg.jobs()):
+            values = {**vals, **combo}
+            # a CLI tool's outputs go to its directory: the one it will get if nothing else is added meanwhile
+            # (job_actions writes its job.star again for the one it did get)
+            js = self.jobstar(job_dir=f"{v.dirname}/job{counter + i:03d}/", values=values)
+            jobs.append((js, alias, values))
+        self.submit_many.emit(jobs, dlg.schedule_only)
+        return True
+
     def _submit(self, schedule_only: bool) -> None:
         if self.variant is None:
             return
+        problems = self.box_problems()
+        if problems:
+            verb = "Schedule" if schedule_only else self.run_btn.text().removesuffix(" now")
+            if QMessageBox.question(self, "Box size", "\n\n".join(problems) + f"\n\n{verb} the job anyway?") \
+                    != QMessageBox.Yes:
+                return
         self.submit.emit(self.jobstar(), self.alias.text().strip() if self.mode != MODE_CONTINUE else "", schedule_only)

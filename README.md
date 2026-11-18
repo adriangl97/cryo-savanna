@@ -65,6 +65,19 @@ and can be used interchangeably, even at the same time, on the same project.
 
 - Every flag of the program a job runs, read from its `--help`, is listed under "Additional
   arguments" with its default and help text, to tick and fill in.
+- **Setting presets** in the job editor: save the options you choose under a name, load them in any project
+  (the inputs stay, the rest goes back to RELION's defaults first), and rename, copy or edit them.
+- **Variations…** in the job editor: vary some options (K = 3,4,5 × T = 2,4) and get one job for every
+  combination, each with its own alias, scheduled or all started at once.
+- A box size that is not a good one for FFTs (after
+  [EMAN2's list](https://blake.bcm.edu/emanwiki/doku.php?id=eman2:boxsize)) is flagged in the job editor,
+  with the closest good sizes below and above.
+- **Suggested MPI processes, threads and pooled particles** under the compute options, with Apply, for
+  this machine (CPUs, RAM, the GPUs chosen) or, for a queued job, a node of the SLURM partition its
+  submission script asks for. For refinements they come from the box size of the input particles, and
+  values RELION would refuse (VDAM with MPI, an even MPI count for Refine3D) are flagged.
+- Failed jobs show their **likely cause** in the Overview and the tree (GPU or RAM out of memory, the
+  queue's time limit, a missing input, too few MPI processes, ...), with the log line it comes from.
 - RELION's command-line-only programs (`relion_image_handler`, `relion_reconstruct`, the
   `relion_tomo_*` tools, ...) can be run from the **CLI tools** menu. They appear in the pipeline
   as ordinary External jobs, with their inputs and outputs.
@@ -83,6 +96,16 @@ and can be used interchangeably, even at the same time, on the same project.
   with an existing alignment.
 - Class2D, Class3D, Refine3D and InitialModel jobs that have not written an iteration yet can be
   marked failed (RELION refuses and leaves them Running), and then overwritten.
+
+**Disk usage** (Project → Disk usage…)
+
+- How much space each job, each job type, Trash/ and the rest of the project take, and how much is
+  left on the file system.
+- For each finished job, what a gentle or harsh clean would move, as RELION chooses it. Several jobs
+  can be cleaned at once.
+- RELION's Clean moves files to Trash/ and does not delete them, so the space only comes free when
+  Trash/ is emptied. Entries of Trash/ can be emptied here, with a warning for deleted jobs that could
+  then no longer be undeleted.
 
 **SLURM**
 
@@ -154,10 +177,11 @@ External jobs through `cryo_savanna/cli_runner.py`, which is copied into the pro
 pytom's template matching and extraction run as External jobs through `cryo_savanna/pytom_runner.py`,
 copied into the project as `.cryo-savanna/pytom_runner.py`. It only runs pytom's programs (from the
 conda environment named in the job): cryo-savanna does not include or import pytom.
-AreTomo3 jobs run through `cryo_savanna/aretomo_runner.py` (copied as `.cryo-savanna/aretomo_runner.py`,
-with the `pytom_runner.py` whose helpers it uses), which runs the AreTomo3 executable named in the job.
-Tomogram mask jobs run through `cryo_savanna/mask_runner.py` (copied as `.cryo-savanna/mask_runner.py`,
-also with `pytom_runner.py`); the masks are then drawn in the job's Masks tab.
+AreTomo3 jobs run through `cryo_savanna/aretomo_runner.py` (copied as `.cryo-savanna/aretomo_runner.py`),
+which runs the AreTomo3 executable named in the job. Tomogram mask jobs run through
+`cryo_savanna/mask_runner.py` (copied as `.cryo-savanna/mask_runner.py`); the masks are then drawn in the
+job's Masks tab. All three import the helpers they share from `cryo_savanna/runner_common.py`, copied with
+them as `.cryo-savanna/runner_common.py`.
 
 ### SLURM
 

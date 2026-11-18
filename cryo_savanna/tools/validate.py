@@ -451,7 +451,7 @@ class PipelinerChecks:
         assert set(p.parents(match)) == {aretomo, masks}, f"parents of {match}: {p.parents(match)}"
         given = (self.proj / match / pytom_runner.TM_DIR / "arguments.txt").read_text()
         assert "--tomogram-mask" in given and "TS_1_mask.mrc" in given, f"pytom did not get the mask: {given}"
-        for runner in ("aretomo_runner.py", "mask_runner.py", "pytom_runner.py"):
+        for runner in ("aretomo_runner.py", "mask_runner.py", "pytom_runner.py", "runner_common.py"):
             assert (self.proj / ".cryo-savanna" / runner).is_file(), f"{runner} was not copied into the project"
         note = (self.proj / match / "note.txt").read_text()
         return {"jobs": [aretomo, masks, match], "parents_of_masks": p.parents(masks),

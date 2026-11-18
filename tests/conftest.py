@@ -18,6 +18,12 @@ from tests.fixtures.make_fixtures import make_spa_project, make_tomo_project
 
 
 @pytest.fixture(autouse=True)
+def _own_config(tmp_path_factory, monkeypatch):
+    """Setting presets (project/presets.py) of each test in a folder of its own, never in ~/.config."""
+    monkeypatch.setenv("CRYO_SAVANNA_CONFIG", str(tmp_path_factory.mktemp("config")))
+
+
+@pytest.fixture(autouse=True)
 def _gc_on_main_thread(request):
     """As in the app (ui/gc_guard.py): garbage is collected on the GUI thread only, also between tests,
     never in a loader or summary thread (that can deadlock with the GUI thread)."""

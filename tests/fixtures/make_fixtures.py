@@ -563,7 +563,7 @@ def _w_tilt_stage(star_name: str, job: str, cols: dict[str, Callable], extra: di
 def w_tomo_reconstruct(d: Path, ctx: Ctx, job: str = "Tomograms/job006/", denoised: bool = False) -> None:
     key = "rlnTomoReconstructedTomogramDenoised" if denoised else "rlnTomoReconstructedTomogram"
     _tomo_global(d / "tomograms.star", f"{job}tilt_series", {
-        "rlnTomoSizeX": lambda ts: 4000, "rlnTomoSizeY": lambda ts: 4000, "rlnTomoSizeZ": lambda ts: 2000,
+        "rlnTomoSizeX": lambda ts: 640, "rlnTomoSizeY": lambda ts: 640, "rlnTomoSizeZ": lambda ts: 160,  # the tomograms × binning
         "rlnTomoTomogramBinning": lambda ts: 10.0,
         # Denoise keeps the raw tomograms of its input and adds its own
         **({"rlnTomoReconstructedTomogram": lambda ts: f"Tomograms/job006/tomograms/rec_{ts}.mrc"} if denoised else {}),

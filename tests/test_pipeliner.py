@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
 """Adding and running jobs through a real relion_pipeliner 5.1 (skipped without one on PATH)."""
 
+import os
 import stat
 import subprocess
 import time
@@ -234,3 +235,87 @@ def test_a_run_whose_process_number_was_given_out_again_is_not_alive(tmp_path):
         proc.kill()
         proc.wait()
     assert mine.is_alive() is False
+
+
+# ---------------------------------------------------------------------------- runs still going
+
+def _live_run(project: Path, rid: str, jobs: list[str]):
+    """A run record whose relion_pipeliner is a process of this test (alive until killed)."""
+    import json
+    import socket
+    import sys
+    from dataclasses import asdict
+
+    from cryo_savanna.project.pipeliner import RunRecord
+    proc = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(120)", "--RunJobs", " ".join(jobs),
+                             "--schedule", "cryo-savanna"])
+    rec = RunRecord(rid, jobs, "cryo-savanna", proc.pid, socket.gethostname(), "me", time.time(), [])
+    runs = project / GUI_DIR / "runs"
+    runs.mkdir(parents=True, exist_ok=True)
+    (runs / f"{rid}.json").write_text(json.dumps(asdict(rec)))
+    return proc
+
+
+def test_the_jobs_of_runs_still_going_are_known(spa_copy):
+    waiting = _live_run(spa_copy, "a", ["Refine3D/job016/"])
+    going = _live_run(spa_copy, "b", ["Polish/job015/", "Refine3D/job016/", "Class2D/job006/"])
+    try:
+        pl = Pipeliner(spa_copy, exe="relion_pipeliner", environ={})
+        held = pl.held_jobs()
+        # the newer run wins; Class2D/job006/ succeeded: that run is past it
+        assert sorted(held) == ["Polish/job015/", "Refine3D/job016/"]
+        assert held["Polish/job015/"].current and not held["Polish/job015/"].waiting  # it runs
+        assert not held["Refine3D/job016/"].current  # after the job that runs now
+        going.kill()
+        going.wait()
+        held = pl.held_jobs()
+        assert list(held) == ["Refine3D/job016/"] and held["Refine3D/job016/"].waiting
+        assert held["Refine3D/job016/"].waiting_for == ["Polish/job015/shiny.star"]
+        assert [(r.id, kind) for r, kind in pl.stoppable_runs()] == [("a", "waiting")]
+    finally:
+        for p in (waiting, going):
+            p.kill()
+            p.wait()
+
+
+def test_a_job_in_a_run_still_going_is_not_run_overwritten_or_continued_again(spa_copy):
+    """Two pipeliners for one job would both run it in its directory and both set its status; an overwrite would
+    take its name away while the run looks it up."""
+    proc = _live_run(spa_copy, "a", ["Refine3D/job016/"])
+    try:
+        pl = Pipeliner(spa_copy, exe="/bin/false", environ={})
+        js = JobStar(type_label="relion.refine3d", is_continue=False, is_tomo=False, options={})
+        before = (spa_copy / "default_pipeline.star").read_bytes()
+        for attempt in (lambda: pl.run(["Refine3D/job016/"]), lambda: pl.continue_job("Refine3D/job016/", js),
+                        lambda: pl.overwrite_job("Refine3D/job016/", js)):
+            with pytest.raises(PipelinerError, match="Already in a run that is still going"):
+                attempt()
+        assert (spa_copy / "default_pipeline.star").read_bytes() == before
+        assert not (spa_copy / "Trash").exists() or not (spa_copy / "Trash/Refine3D/job016").exists()
+    finally:
+        proc.kill()
+        proc.wait()
+
+
+def test_a_run_waiting_for_its_inputs_is_ended_under_the_lock(spa_copy, monkeypatch):
+    proc = _live_run(spa_copy, "a", ["Refine3D/job016/"])
+    try:
+        pl = Pipeliner(spa_copy, exe="relion_pipeliner", environ={})
+        [(rec, kind)] = pl.stoppable_runs()
+        assert kind == "waiting"
+        seen = []
+        kill = os.kill
+
+        def kill_seeing_the_lock(pid, sig):
+            seen.append((spa_copy / ".relion_lock").is_dir())
+            kill(pid, sig)
+        monkeypatch.setattr(os, "kill", kill_seeing_the_lock)
+        pl.end_run(rec)
+        assert True in seen  # the signal went while cryo-savanna held RELION's lock
+        assert proc.poll() is not None
+        assert not (spa_copy / ".relion_lock").exists()
+        assert Pipeline.read(spa_copy).processes["Refine3D/job016/"].status == "Scheduled"
+        assert pl.held_jobs() == {}
+    finally:
+        proc.kill()
+        proc.wait()

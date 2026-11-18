@@ -11,7 +11,7 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable
+from typing import Any, Callable
 
 import numpy as np
 from qtpy.QtCore import QAbstractListModel, QItemSelectionModel, QModelIndex, QSize, Qt, QTimer, Signal
@@ -41,7 +41,7 @@ class GalleryItem:
     label: str
     tooltip: str = ""
     keys: dict[str, float] = field(default_factory=dict)  # sort keys
-    payload: object = None  # e.g. the ClassInfo
+    payload: Any = None  # e.g. the ClassInfo
 
 
 def make_thumbs(path: str, indices: list[int | None], size: int) -> dict[int | None, np.ndarray]:

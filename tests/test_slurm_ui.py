@@ -212,6 +212,25 @@ def test_read_only_and_earlier_runs_are_not_marked(window, spa_copy, slurm, qtbo
     assert queue_text(w, job) == "timeout in SLURM (1000)"
 
 
+def test_a_job_sent_again_before_it_is_marked_is_left_running(window, spa_copy, slurm, monkeypatch):
+    """The look at the queue found the job lost, but it was continued (sent to the queue again) before the exit
+    file was written: the new run is not marked as failed for the old one's end."""
+    import os
+    state, client = slurm
+    job = "Polish/job015/"
+    _ended_in_slurm(spa_copy, state, job, "TIMEOUT")
+    w = window(spa_copy)
+    mark = w.actions.mark_lost
+    monkeypatch.setattr(w.actions, "mark_lost", lambda lost: None)
+    lost = w.queue_now().lost
+    assert job in lost
+    now = time.time()
+    os.utime(spa_copy / job / "run_submit.script", (now, now))  # Continue: RELION writes it again
+    mark(lost)
+    assert w.actions.wait(10000)
+    assert not any((spa_copy / job / f).exists() for f in ("RELION_JOB_EXIT_FAILURE", "RELION_JOB_EXIT_ABORTED"))
+
+
 def test_a_refine_job_that_never_started_can_be_marked_failed_and_overwritten(window, spa_copy, slurm, monkeypatch):
     """RELION refuses to mark a Refine3D job without any iteration (and leaves it Running, so only Delete is left).
     Here Job → Mark as failed works, the question says it is still queued, and Overwrite is offered after it."""

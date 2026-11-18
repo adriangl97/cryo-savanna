@@ -119,6 +119,17 @@ class Pipeline:
         RELION rewrites the file in place, so a read can catch it half-written. Retry when the
         file changes while reading or does not parse.
         """
+        return cls.read_with_text(project_dir, name, retries, delay_s)[0]
+
+    @classmethod
+    def read_with_text(
+        cls,
+        project_dir: str | os.PathLike,
+        name: str = "default",
+        retries: int = 5,
+        delay_s: float = 0.3,
+    ) -> "tuple[Pipeline, str]":
+        """``read``, and the text that was parsed (to tell a later write of the file by its content)."""
         path = Path(project_dir) / f"{name}_pipeline.star"
         last_err: Exception | None = None
         for attempt in range(retries):
@@ -128,7 +139,7 @@ class Pipeline:
                 st2 = path.stat()
                 if (st1.st_mtime_ns, st1.st_size) != (st2.st_mtime_ns, st2.st_size):
                     raise PipelineError("pipeline file changed while reading")
-                return cls.parse(text)
+                return cls.parse(text), text
             except FileNotFoundError:
                 raise
             except (StarError, PipelineError, KeyError, ValueError) as e:

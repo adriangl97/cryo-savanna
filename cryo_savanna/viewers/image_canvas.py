@@ -225,6 +225,7 @@ class ImageCanvas(QWidget):
             return
         # a margin around the visible part, so small pans need no new read
         mx, my = (x1 - x0) // 4, (y1 - y0) // 4
+        assert self.full_shape is not None  # _visible() gives no region without it
         ny, nx = self.full_shape
         x0, y0, x1, y1 = max(0, x0 - mx), max(0, y0 - my), min(nx, x1 + mx), min(ny, y1 + my)
         k = max(1, int(per_px))
@@ -242,7 +243,7 @@ class ImageCanvas(QWidget):
         self.tasks.run(load, show, channel="detail")
 
     # ------------------------------------------------------------------ overlays
-    def set_points(self, x: np.ndarray, y: np.ndarray, diameter, color=(60, 220, 60)) -> None:
+    def set_points(self, x: np.ndarray | list, y: np.ndarray | list, diameter, color=(60, 220, 60)) -> None:
         """Circles of the given diameter (image pixels; one for all, or one per point) centred on (x, y),
         in one colour or one per point (a list of colours)."""
         # pyqtgraph drops the old points' bounds before telling Qt the geometry changes, so Qt would

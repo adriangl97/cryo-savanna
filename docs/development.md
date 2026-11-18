@@ -29,11 +29,14 @@ Before a commit, also:
 
 ```bash
 ./env/bin/python -m ruff check .   # unused names, loop variables caught by mistake, ...
-./env/bin/python -m mypy           # types, of everything but the windows (ui/, viewers/)
+./env/bin/python -m mypy           # types, of everything (the windows too)
 ```
 
-Both are set up in `pyproject.toml` and should say nothing. mypy does not look at `ui/` and `viewers/` yet:
-most of what it says there is about Qt's enums through qtpy and about widgets made in a later step.
+Both are set up in `pyproject.toml` and should say nothing. mypy takes Qt (through qtpy) and pyqtgraph as
+untyped: conda-forge's PySide6 has no `py.typed`, so its stubs cannot be read. What the windows do with their
+own state is checked: an attribute that is `None` until something is read (`self.sel: Selection | None`)
+has to be checked before it is used. The runners (`*_runner.py`, `runner_common.py`) run with the system
+`python3` (3.6+) and have no annotations: their types are given as `# type:` comments.
 
 ## Layout
 
@@ -41,15 +44,17 @@ most of what it says there is about Qt's enums through qtpy and about widgets ma
 |---|---|
 | `cryo_savanna/project/` | STAR reader/writer, `default_pipeline.star` model, `job.star`, RELION's lock protocol, job lineage, read-only project snapshots |
 | `cryo_savanna/ui/` | Qt windows: job tree, job graph (+ Qt-free layout), job info, logs, main window |
+| `cryo_savanna/ui/job_actions.py`, `cryo_savanna/ui/actions/` | What changes a project: `JobActions` (the job menus, and what is enabled) and its groups of actions: `forms.py` (new, clone, continue, overwrite, submit), `selection.py` (cryo-savanna's selection windows), `running.py` (run scheduled, abort, SLURM, clean, disk usage), `pipeline_ops.py` (alias, mark, delete, undelete, import), with what they share in `base.py` |
 | `cryo_savanna/images/` | MRC reads (headers, slices, regions; TIFF movies with `tifffile`), downsampling, thumbnail cache |
 | `cryo_savanna/results/` | What jobs produced, read for the viewers (no Qt), and which viewers a job gets (`registry.py`) |
 | `cryo_savanna/viewers/` | The viewer widgets: image canvas, micrographs, galleries, plots, STAR tables, files |
 | `cryo_savanna/jobdefs/relion-5.1.1.json` | Every job option and the job-window layout of RELION 5.1.1, SPA and tomo (generated) |
 | `cryo_savanna/jobdefs/model.py` | Loads the definitions and applies the `RELION_*` environment |
 | `cryo_savanna/jobdefs/cli_catalog.py`, `cli_tools.py`, `cryo_savanna/cli_runner.py` | CLI tools: the catalog, job forms from `--help`, and the runner RELION starts for them |
-| `cryo_savanna/jobdefs/pytom_jobs.py`, `cryo_savanna/pytom_runner.py`, `cryo_savanna/results/pytom.py`, `cryo_savanna/viewers/pytom_view.py` | "Additional external jobs": pytom-match-pick's forms, the runner RELION starts for them (standard library only), what they wrote, their viewers |
-| `cryo_savanna/jobdefs/tomomask_jobs.py`, `cryo_savanna/mask_runner.py`, `cryo_savanna/viewers/tomo_mask_view.py` | "Additional external jobs": Tomogram masks' form, its runner (standard library only; writes the masks from `masks.json`, identical ones as links; imports `pytom_runner.py`'s helpers) and the Masks view that draws them |
-| `cryo_savanna/jobdefs/aretomo_jobs.py`, `cryo_savanna/aretomo_runner.py` | "Additional external jobs": AreTomo3's form and its runner (standard library only; it imports the helpers of `pytom_runner.py`, and both are copied into the project) |
+| `cryo_savanna/jobdefs/pytom_jobs.py`, `cryo_savanna/pytom_runner.py`, `cryo_savanna/results/pytom.py`, `cryo_savanna/viewers/pytom_view.py` | "Additional external jobs": pytom-match-pick's forms, the runner RELION starts for them (standard library only; imports `runner_common.py`), what they wrote, their viewers |
+| `cryo_savanna/jobdefs/tomomask_jobs.py`, `cryo_savanna/mask_runner.py`, `cryo_savanna/viewers/tomo_mask_view.py` | "Additional external jobs": Tomogram masks' form, its runner (standard library only; writes the masks from `masks.json`, identical ones as links; imports `runner_common.py`) and the Masks view that draws them |
+| `cryo_savanna/jobdefs/aretomo_jobs.py`, `cryo_savanna/aretomo_runner.py` | "Additional external jobs": AreTomo3's form and its runner (standard library only; it imports `runner_common.py`, and both are copied into the project) |
+| `cryo_savanna/runner_common.py`, `cryo_savanna/jobdefs/runner_files.py` | What the runners of the "Additional external jobs" share (standard library only: External job arguments, exit files and output nodes, STAR, MRC headers, environment modules, the programs they run, RELION 5 tomograms), and how the runners and it are copied into a project's `.cryo-savanna/` |
 | `cryo_savanna/jobdefs/flags.py`, `jobdefs/help/` | Flags of the program behind each job's "Additional arguments", from `--help` (bundled 5.1.1 texts as fallback) |
 | `cryo_savanna/env/relion_env.py` | Reads `RELION_*` variables the same way RELION does |
 | `cryo_savanna/jobdefs/external_jobs.py` | The kinds of External jobs with a form and a runner of cryo-savanna's own (CLI tools, pytom, AreTomo3, tomogram masks) in one place: which kind a job is, its runner, its form, its main input. A new wrapper is one more entry there |
@@ -59,6 +64,14 @@ most of what it says there is about Qt's enums through qtpy and about widgets ma
 | `tools/extract_jobdefs/` | Regenerates the job definitions from a RELION source tree |
 | `tools/bundle_help.py` | Regenerates the bundled `--help` texts from the validation dumps and the RELION source |
 | `tools/pipeline_ops_ref/` | RELION's own alias/mark/delete/undelete code as a small program, to test `project/ops.py` against |
+| `cryo_savanna/project/disk_usage.py`, `cryo_savanna/ui/disk_usage.py` | Project → Disk usage: the size of each job, Trash/ and the rest (as `du`), what RELION's gentle and harsh clean would move (`PipeLine::cleanupJob`), emptying Trash/; and its window |
+| `cryo_savanna/project/presets.py`, `cryo_savanna/ui/presets_dialog.py` | Setting presets: the user's named options per job type (`~/.config/cryo-savanna/presets/`), and the editor's save and manage dialogs |
+| `cryo_savanna/project/variations.py`, `cryo_savanna/ui/variations_dialog.py` | Variations…: values, ranges, combinations and aliases, and the dialog; the jobs are added by `ui/actions/forms.py` (`_on_submit_many`) |
+| `cryo_savanna/env/machine.py` | What a job runs on: this machine's CPUs, RAM and GPUs, or a SLURM node (the submission script's partition, GPUs and memory, then sinfo), looked up in a thread |
+| `cryo_savanna/jobdefs/compute_advice.py` | The job editor's suggested MPI processes, threads, pooled particles and GPU ids, and warnings about the values typed |
+| `cryo_savanna/jobdefs/box_sizes.py` | Good box sizes (EMAN2's list, cited in NOTICE.md), which options are box sizes, and the job editor's warning |
+| `cryo_savanna/project/processes.py` | Force abort: a local job's processes (under the pipeliner cryo-savanna started, or writing to its directory), killed, and the job marked aborted |
+| `cryo_savanna/project/failure_hints.py` | Why a job failed: known messages in run.err / run.out, read with the job summaries (`project/summary.py`) |
 | `cryo_savanna/project/rebuild.py`, `cryo_savanna/ui/rebuild_dialog.py` | A pipeline rebuilt from job folders (lost `default_pipeline.star`, jobs run from the command line), and its review |
 | `cryo_savanna/project/selection.py`, `cryo_savanna/viewers/selectors.py` | Class selection and tilt-image exclusion done in cryo-savanna, writing RELION's files |
 | `tools/hooks/`, `tools/install_hooks.sh` | The version of each commit (the date), written by the pre-commit hook |

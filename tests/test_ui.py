@@ -12,7 +12,7 @@ import pytest
 pytest.importorskip("qtpy")
 pytest.importorskip("pytestqt")
 
-from qtpy.QtCore import QSettings  # noqa: E402
+from qtpy.QtCore import QSettings, Qt  # noqa: E402
 from qtpy.QtWidgets import QHeaderView  # noqa: E402
 
 from cryo_savanna.project.lock import is_locked  # noqa: E402
@@ -80,6 +80,26 @@ def test_filter_keeps_ancestors_and_dims_graph(window, spa_project):
     visible = w.tree.visible_jobs()
     assert "LocalRes/job017/" not in visible and "Class2D/job018/" not in visible
     assert len(visible) == 16
+
+
+def test_status_changes_reach_the_list_with_and_without_a_filter(window, spa_copy):
+    from cryo_savanna.ui.job_tree import COL_STATUS, SORT_ROLE
+
+    w = window(spa_copy)
+    job = "Polish/job015/"  # Running; its only child is Scheduled
+    row = w.tree._items[job]
+    assert row[COL_STATUS].data(SORT_ROLE) == "Running"
+    unchanged = w.tree._items["Import/job001/"]
+    (spa_copy / job / "RELION_JOB_EXIT_FAILURE").touch()  # finished on disk: the same structure, a new status
+    w.load_now()
+    assert w.tree._items[job] is row and row[COL_STATUS].data(SORT_ROLE) == "Failed"  # filled again in place
+    assert w.tree._items["Import/job001/"] is unchanged
+    w.status_filter.setCurrentText("Failed or aborted")
+    assert job in w.tree.visible_jobs()
+    (spa_copy / job / "RELION_JOB_EXIT_FAILURE").unlink()
+    (spa_copy / job / "RELION_JOB_EXIT_SUCCESS").touch()
+    w.load_now()  # with a filter on, a job whose status changed is filtered again
+    assert row[COL_STATUS].data(SORT_ROLE) == "Succeeded" and job not in w.tree.visible_jobs()
 
 
 def test_star_marks_and_filters_jobs(window, spa_copy):
@@ -587,3 +607,104 @@ def test_graph_paints_only_the_cards_that_changed(window, spa_project):
     jobs["Refine3D/job011/"] = dataclasses.replace(snap.jobs["Refine3D/job011/"], status="Failed")
     w.graph.set_snapshot(dataclasses.replace(snap, jobs=jobs))
     assert painted == ["Refine3D/job011/"]
+
+
+def test_jobs_the_open_editor_takes_inputs_from_are_marked(window, spa_project):
+    from cryo_savanna.ui import style
+    from cryo_savanna.ui.job_tree import COL_JOB, COL_STATUS
+    w = window(spa_project)
+    a, ed = w.actions, w.actions.editor
+    w.select_job("Class3D/job009/")
+    a.clone_job()
+    assert a.editor_shown()
+    tint = style.input_tint(w.tree.palette())
+
+    def marked() -> dict[str, list[str]]:
+        tree = {n for n, row in w.tree._items.items() if row[COL_STATUS].data(Qt.BackgroundRole) == tint}
+        graph = {n: item.input_labels for n, item in w.graph.nodes.items() if item.input_labels}
+        assert tree == set(graph) == set(w.tree.inputs)
+        return graph
+
+    labels = {k: ed.options[k].label.rstrip(":").strip() for k in ("fn_img", "fn_ref")}
+    assert marked() == {"Select/job007/": [labels["fn_img"]], "InitialModel/job008/": [labels["fn_ref"]]}
+    job = w.tree._items["Select/job007/"][COL_JOB]
+    assert job.font().bold() and style.input_text([labels["fn_img"]]) in job.toolTip()
+    assert style.input_text([labels["fn_img"]]) in w.graph.nodes["Select/job007/"].toolTip()
+    assert not w.tree._items["Class3D/job009/"][COL_JOB].font().bold()  # cloned, not an input
+
+    # as the inputs change: a file in a job's directory (also as an absolute path), none, another node
+    ed.widgets["fn_ref"].set_value(f"{spa_project}/Refine3D/job011/run_class001.mrc")
+    ed.widgets["fn_img"].set_value("")
+    assert marked() == {"Refine3D/job011/": [labels["fn_ref"]]}
+    assert w.tree._items["Select/job007/"][COL_STATUS].data(Qt.BackgroundRole) is None
+    assert "Input of" not in w.tree._items["Select/job007/"][COL_JOB].toolTip()
+    ed.widgets["fn_img"].set_value("Refine3D/job011/run_data.star")
+    assert marked() == {"Refine3D/job011/": [labels["fn_img"], labels["fn_ref"]]}
+    ed.widgets["fn_ref"].set_value("elsewhere/map.mrc")  # not a job's
+    assert marked() == {"Refine3D/job011/": [labels["fn_img"]]}
+    w.load_now()  # a new look at the project keeps the marks
+    assert marked() == {"Refine3D/job011/": [labels["fn_img"]]}
+
+    a.hide_editor()  # closed: nothing marked
+    assert marked() == {} and not w.tree._items["Refine3D/job011/"][COL_JOB].font().bold()
+    a.act_editor.trigger()  # shown again
+    assert marked() == {"Refine3D/job011/": [labels["fn_img"]]}
+
+
+def test_a_change_made_while_a_poll_reads_is_read_after_it(qtbot, window, spa_copy, monkeypatch):
+    """A change (Mark as failed, abort, a job added) asks for a forced refresh. Asked while a poll was still reading,
+    it was dropped: the window kept the status read before the change until the next poll, or, with the same
+    stamp, until the pipeline changed again."""
+    import threading
+    w = window(spa_copy)
+    qtbot.waitUntil(lambda: not w._busy, timeout=5000)  # the first read, of the opening
+    reading, go, calls = threading.Event(), threading.Event(), []
+    real = w.loader.refresh
+
+    def refresh(force=False):
+        calls.append(force)
+        if len(calls) == 1:  # the poll: reads the pipeline as it was, slowly
+            snap = real(force)
+            reading.set()
+            go.wait(10)
+            return snap
+        return real(force)
+    monkeypatch.setattr(w.loader, "refresh", refresh)
+    w.refresh()
+    assert reading.wait(10)
+    add_job(spa_copy, NEW_JOB)  # the change, made meanwhile
+    w._force_refresh()
+    go.set()
+    qtbot.waitUntil(lambda: "Class2D/job019/" in w.snapshot.jobs, timeout=5000)
+    assert calls == [False, True]
+
+
+def test_a_run_still_going_shows_and_guards_its_jobs(window, spa_copy, monkeypatch):
+    """A scheduled job a live run waits to run: shown as such, Stop runs offers that run, and Delete warns (RELION's
+    pipeliner looks its jobs up by name at the end of the run, and crashes if one is gone)."""
+    from qtpy.QtWidgets import QMessageBox
+
+    from cryo_savanna.ui.job_tree import COL_STATUS
+    from tests.test_pipeliner import _live_run
+    proc = _live_run(spa_copy, "a", ["Refine3D/job016/"])
+    try:
+        w = window(spa_copy)
+        w.actions.look_at_project_now()
+        job = "Refine3D/job016/"
+        assert w.tree._items[job][COL_STATUS].text() == "Scheduled · waiting for input"
+        assert w.actions.act_stop_runs.isEnabled()
+        w.select_job(job)
+        assert "waiting for Polish/job015/shiny.star" in w.info.overview.toPlainText()
+        asked = []
+        monkeypatch.setattr(QMessageBox, "question", lambda parent, title, text, *a: asked.append(text)
+                            or QMessageBox.No)
+        w.actions.delete(False)
+        assert "in a run that is still going" in asked[0]
+        proc.kill()
+        proc.wait()
+        w.actions.look_at_project_now()
+        assert w.tree._items[job][COL_STATUS].text() == "Scheduled"
+        assert not w.actions.act_stop_runs.isEnabled()
+    finally:
+        proc.kill()
+        proc.wait()

@@ -7,8 +7,8 @@ from __future__ import annotations
 import contextlib
 import time
 
-from qtpy.QtCore import QModelIndex, QSortFilterProxyModel, Qt, Signal
-from qtpy.QtGui import QStandardItem, QStandardItemModel
+from qtpy.QtCore import QEvent, QModelIndex, QSortFilterProxyModel, Qt, Signal
+from qtpy.QtGui import QFont, QStandardItem, QStandardItemModel
 from qtpy.QtWidgets import QAbstractItemView, QHeaderView, QTreeView
 
 from cryo_savanna.project.snapshot import JobInfo, ProjectSnapshot
@@ -19,6 +19,7 @@ NAME_ROLE = Qt.UserRole + 1  # job name ("Class2D/job005/") on column 0
 SORT_ROLE = Qt.UserRole + 2
 STARRED_ROLE = Qt.UserRole + 3  # on column 0
 ICON_ROLE = Qt.UserRole + 4  # on column 0: (status, pending update) its icon was made for
+BASE_TIP_ROLE = Qt.UserRole + 5  # on column 0: its tooltip without what the job editor takes from it
 COLUMNS = ("Job", "Type", "Status", "Queue", "Summary", "Modified", "Also uses")
 COL_JOB, COL_TYPE, COL_STATUS, COL_QUEUE, COL_SUMMARY, COL_MODIFIED, COL_ALSO = range(len(COLUMNS))
 
@@ -112,11 +113,13 @@ class JobTreeView(QTreeView):
             h.setSectionResizeMode(c, QHeaderView.ResizeToContents)
         self.setColumnHidden(COL_QUEUE, True)  # shown once SLURM is found
         self.queue = None  # slurm.QueueState
+        self.held: dict = {}  # job -> pipeliner.Held: the jobs runs still going are to run
         self._items: dict[str, list[QStandardItem]] = {}
         self._structure: tuple | None = None
         self._collapsed: set[str] = set()
         self._snapshot: ProjectSnapshot | None = None
         self.summaries: dict[str, JobSummary] = {}
+        self.inputs: dict[str, list[str]] = {}  # the open job editor's input jobs (set_inputs)
         self.expanded.connect(lambda i: self._collapsed.discard(self._name(i)))
         self.collapsed.connect(lambda i: self._collapsed.add(self._name(i)))
         self.selectionModel().currentChanged.connect(self._on_current)
@@ -142,12 +145,18 @@ class JobTreeView(QTreeView):
             self._set_snapshot(snap)
 
     def _set_snapshot(self, snap: ProjectSnapshot) -> None:
-        self._snapshot = snap
+        prev, self._snapshot = self._snapshot, snap
         key = snap.structure_key()
         if key == self._structure:
+            # every poll while a job runs: only the rows of the jobs that changed are filled again (aliases
+            # and parents are in the structure key, summaries and the queue come by their own calls)
+            changed = False
             for name, info in snap.jobs.items():
-                self._fill_row(self._items[name], info, snap)
-            self.proxy.refilter()
+                if prev is None or prev.jobs.get(name) != info:
+                    self._fill_row(self._items[name], info, snap)
+                    changed = True
+            if changed and self.proxy.is_active():  # no filter: every row is shown already
+                self.proxy.refilter()
             return
         selected = self.current_job()
         scroll = self.verticalScrollBar().value()
@@ -177,6 +186,14 @@ class JobTreeView(QTreeView):
         if selected and selected in self._items:
             self.select_job(selected, scroll=False)
         self.verticalScrollBar().setValue(scroll)
+
+    def set_runs(self, held: dict) -> None:
+        """The jobs runs still going are to run (Pipeliner.held_jobs): shown with their status."""
+        old, self.held = self.held, held
+        with self._many_changes():
+            for name in old.keys() | held.keys():
+                if name in self._items and self._snapshot is not None and name in self._snapshot.jobs:
+                    self._fill_summary(self._items[name], self._snapshot.jobs[name], self.summaries.get(name))
 
     def set_queue(self, state) -> None:
         """Show each job's place in the SLURM queue (a slurm.QueueState)."""
@@ -223,6 +240,41 @@ class JobTreeView(QTreeView):
 
     def clear_summaries(self) -> None:
         self.summaries.clear()
+
+    def set_inputs(self, inputs: dict[str, list[str]]) -> None:
+        """Mark the jobs the open job editor takes inputs from ({job: [field labels]}; {} clears): a tinted
+        row, the job in bold, and the fields in its tooltip."""
+        old, self.inputs = self.inputs, dict(inputs)
+        with self._many_changes():
+            for name in old.keys() | self.inputs.keys():
+                row = self._items.get(name)
+                if row is not None and old.get(name) != self.inputs.get(name):
+                    self._fill_input(row, name)
+
+    def _fill_input(self, row: list[QStandardItem], name: str) -> None:
+        """Only what changes is set: every set makes the sorted, filtered list work the row out again."""
+        labels = self.inputs.get(name)
+        tint = style.input_tint(self.palette()) if labels else None
+        for item in row:
+            if item.data(Qt.BackgroundRole) != tint:
+                item.setData(tint, Qt.BackgroundRole)
+        job = row[COL_JOB]
+        bold = None
+        if labels:
+            bold = QFont(self.font())
+            bold.setBold(True)
+        if job.data(Qt.FontRole) != bold:
+            job.setData(bold, Qt.FontRole)
+        tip = (job.data(BASE_TIP_ROLE) or "") + ("\n" + style.input_text(labels) if labels else "")
+        if job.toolTip() != tip:
+            job.setToolTip(tip)
+
+    def changeEvent(self, e) -> None:
+        super().changeEvent(e)
+        if e.type() == QEvent.PaletteChange and self.inputs:  # Preferences → Theme: the tint follows
+            for name in self.inputs:
+                if name in self._items:
+                    self._fill_input(self._items[name], name)
 
     def current_job(self) -> str | None:
         idx = self.currentIndex()
@@ -273,7 +325,9 @@ class JobTreeView(QTreeView):
         if job.data(ICON_ROLE) != icon:
             job.setData(icon, ICON_ROLE)
             job.setIcon(style.status_icon(*icon))
-        job.setToolTip(pr.name + (f"\nalias: {pr.alias}" if pr.has_alias else "") + ("\nstarred" if info.starred else ""))
+        job.setData(pr.name + (f"\nalias: {pr.alias}" if pr.has_alias else "") + ("\nstarred" if info.starred else ""),
+                    BASE_TIP_ROLE)
+        self._fill_input(row, pr.name)  # sets the tooltip
         t = row[COL_TYPE]
         t.setText(style.job_type(info, self.type_names))
         t.setData(t.text(), SORT_ROLE)
@@ -296,6 +350,9 @@ class JobTreeView(QTreeView):
 
     def _status_text(self, info: JobInfo, now: float | None = None) -> str:
         text = info.status + ("*" if info.pending_update else "")
+        held = self.held.get(info.name)
+        if info.status == "Scheduled" and held is not None:
+            text += " · waiting for input" if held.waiting else " · in a run"
         s = self.summaries.get(info.name)
         if info.status == "Running" and s is not None and s.progress(now):
             text += " · " + s.progress(now)

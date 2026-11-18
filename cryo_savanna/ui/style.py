@@ -6,14 +6,14 @@ from __future__ import annotations
 
 import time
 
-from qtpy import QT6
 from qtpy.QtCore import QRectF, Qt
 from qtpy.QtGui import QColor, QIcon, QPainter, QPalette, QPixmap
 
 from cryo_savanna.relion_consts import job_type_for_label
 
-# Preferences → Theme: key, what the menu says
-THEMES = {"system": "As the system", "light": "Light", "dark": "Dark"}
+# Preferences → Theme: key, what the menu says. Always one of these, set by cryo-savanna: Qt can tell the
+# system's dark mode on some desktops only (GNOME), so it is not followed
+THEMES = {"light": "Light", "dark": "Dark"}
 
 # Fusion's own colours, written out: the style's palette follows the system's dark mode on recent Qt
 _ROLES = {  # role: (light, dark)
@@ -64,17 +64,27 @@ def is_dark(pal: QPalette) -> bool:
 
 
 def apply_theme(app, theme: str) -> None:
-    """Preferences → Theme for the whole application, open windows included."""
+    """Preferences → Theme for the whole application, open windows included (anything but "dark" is light)."""
+    theme = "dark" if theme == "dark" else "light"
     hints = app.styleHints()
     if hasattr(hints, "setColorScheme"):  # Qt 6.8: title bars and system dialogs follow too
         scheme = Qt.ColorScheme
-        hints.setColorScheme({"light": scheme.Light, "dark": scheme.Dark}.get(theme, scheme.Unknown))
-    if theme in ("light", "dark"):
-        app.setPalette(theme_palette(theme))
-    else:  # Qt 6: an empty palette gives back the system's (and keeps following it); Qt 5: the style's
-        app.setPalette(QPalette() if QT6 else app.style().standardPalette())
+        hints.setColorScheme(scheme.Dark if theme == "dark" else scheme.Light)
+    app.setPalette(theme_palette(theme))
     from cryo_savanna.viewers import apply_plot_theme
     apply_plot_theme(app.palette())
+
+
+def input_tint(pal: QPalette) -> QColor:
+    """Background of a row of the List that the open job editor takes inputs from: INPUT_COLOR over Base."""
+    base, c, a = pal.color(QPalette.Base), INPUT_COLOR, 0.35 if is_dark(pal) else 0.22
+    return QColor(*(round(x * a + y * (1 - a)) for x, y in ((c.red(), base.red()), (c.green(), base.green()),
+                                                             (c.blue(), base.blue()))))
+
+
+def input_text(labels: list[str]) -> str:
+    """What a job is to the open job editor: its fields that take this job's outputs."""
+    return "Input of the job editor: " + ", ".join(labels)
 
 
 def excluded_row_color(pal: QPalette) -> QColor:
@@ -90,6 +100,8 @@ STATUS_COLORS = {
     "Aborted": QColor("#d9861c"),
 }
 UNKNOWN_COLOR = QColor("#888888")
+# jobs whose outputs the open job editor takes as inputs (List and Tree): not a status colour, not the selection's
+INPUT_COLOR = QColor("#c93f9a")
 STAR = "★"  # starred jobs (project/stars.py)
 STAR_COLOR = QColor("#e0a100")
 

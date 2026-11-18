@@ -116,6 +116,16 @@ def test_thumb_cache_memory_disk_and_changes(tmp_path):
     time.sleep(0.01)
     write_mrc(f, np.zeros((8, 8)))  # rewritten: read again
     assert c2.get(ref, 64, make, disk=True).max() == 0 and len(calls) == 2
+    # a damaged file on disk (cut short by a crash, emptied by a full disk): made again and saved again
+    saved = c2._file(c2.key(ref, 64))
+    assert saved.is_file()
+    for damage in (saved.read_bytes()[:40], b""):
+        saved.write_bytes(damage)
+        c4 = ThumbCache(tmp_path / "proj", root=tmp_path / "cache")
+        before = len(calls)
+        assert c4.get(ref, 64, make, disk=True).max() == 0 and len(calls) == before + 1
+        assert ThumbCache(tmp_path / "proj", root=tmp_path / "cache").get(ref, 64, make, disk=True).max() == 0
+        assert len(calls) == before + 1  # saved whole again: read from disk
     c3 = ThumbCache(tmp_path / "proj", root=tmp_path / "cache", max_disk_mb=0)
     c3.prune()
     assert not list((c3.dir).glob("*.npz"))

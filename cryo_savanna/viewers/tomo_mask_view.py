@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import copy
 import os
+from collections.abc import Callable
 from pathlib import Path
 
 import numpy as np
@@ -62,8 +63,8 @@ UNDO_KEPT = 200  # edits that can be taken back
 class _Tomograms(TomogramViewer):
     """The tomogram viewer, telling the mask view when a tomogram set or a tomogram was read."""
 
-    after_loaded = None
-    after_geometry = None
+    after_loaded: Callable[[], None] | None = None
+    after_geometry: Callable[[], None] | None = None
 
     def _on_loaded(self, result) -> None:
         super()._on_loaded(result)
@@ -89,7 +90,7 @@ class TomoMaskView(QWidget):
         self.current: str | None = None
         self.dirty = False
         self.saving = False
-        self._stamp = None
+        self._stamp: object = None
         self._syncing = False
         self.viewer: _Tomograms | None = None
 
@@ -235,14 +236,21 @@ class TomoMaskView(QWidget):
 
     def _on_viewer_loaded(self) -> None:
         col = P.TOMOGRAM_KINDS.get((self.data or {}).get("tomo_kind", ""), "")
-        i = self.viewer.kind.findData(col)
-        if i >= 0 and i != self.viewer.kind.currentIndex():
-            self.viewer.kind.setCurrentIndex(i)
+        viewer = self.viewer
+        if viewer is None:
+            return
+        i = viewer.kind.findData(col)
+        if i >= 0 and i != viewer.kind.currentIndex():
+            viewer.kind.setCurrentIndex(i)
         if self.current is not None:
-            self.viewer.select_name(self.current)
+            viewer.select_name(self.current)
 
     def names(self) -> list[str]:
         return list(self.data["tomograms"]) if self.data else []
+
+    def _tomograms(self) -> dict:
+        """masks.json's tomograms (none before it is read)."""
+        return self.data["tomograms"] if self.data is not None else {}
 
     # ------------------------------------------------------------------ the table
     def _fill_table(self) -> None:
@@ -259,7 +267,7 @@ class TomoMaskView(QWidget):
     def _update_row(self, name: str, row: int | None = None) -> None:
         if row is None:
             row = self.names().index(name)
-        t = self.data["tomograms"][name]
+        t = self._tomograms()[name]
         g = t["geometry"]
         changed = M.geometry_key(t["shape"], g) != self.saved.get(name)
         values = [name, "×".join(str(v) for v in t["shape"]), "planes" if g.get("z_mode") == M.Z_SLAB else "all",
@@ -280,7 +288,7 @@ class TomoMaskView(QWidget):
     def _shape_note(self) -> str:
         if self.viewer is None or self.viewer.shape is None or self.current is None:
             return ""
-        nx, ny, nz = self.data["tomograms"][self.current]["shape"]
+        nx, ny, nz = self._tomograms()[self.current]["shape"]
         if tuple(self.viewer.shape) != (nz, ny, nx):
             z, y, x = self.viewer.shape
             return f"   ·   ⚠ the tomogram shown is {x}×{y}×{z}, its mask {nx}×{ny}×{nz}"
@@ -379,7 +387,7 @@ class TomoMaskView(QWidget):
         g = copy.deepcopy(g)
         if len(self.poly.getHandles()) >= 3:
             g["polygon"] = self._read_polygon(shape)
-        if view is not None:
+        if view is not None and side is not None:
             self._read_line(g, view, side, shape)
         return g
 
@@ -427,12 +435,17 @@ class TomoMaskView(QWidget):
     def _on_zmode(self, _i: int) -> None:
         if self._syncing or self.current is None:
             return
-        g = copy.deepcopy(self.geometry())
+        g = self.geometry()
+        if g is None:
+            return
+        g = copy.deepcopy(g)
         g["z_mode"] = self.zmode.currentData()
         self.set_geometry(g)
 
     def _targets(self) -> list[str]:
-        return self.names() if self.same.isChecked() else [self.current]
+        if self.same.isChecked():
+            return self.names()
+        return [self.current] if self.current is not None else []
 
     def set_geometry(self, g: dict | None, names: list[str] | None = None) -> None:
         """The mask of the tomogram shown (of all of them with "Same mask for all tomograms")."""
@@ -453,7 +466,7 @@ class TomoMaskView(QWidget):
         rows = {n: i for i, n in enumerate(self.names())}
         for n, g in geometries.items():
             if n in rows:
-                self.data["tomograms"][n]["geometry"] = copy.deepcopy(g)
+                self._tomograms()[n]["geometry"] = copy.deepcopy(g)
                 self._update_row(n, rows[n])
         for c in (2, 3, 4):
             self.table.resizeColumnToContents(c)
@@ -484,7 +497,7 @@ class TomoMaskView(QWidget):
 
     def _changed(self) -> None:
         self.dirty = any(M.geometry_key(t["shape"], t["geometry"]) != self.saved.get(n)
-                         for n, t in self.data["tomograms"].items())
+                         for n, t in self._tomograms().items())
         self.save_btn.setEnabled(self.dirty and self._writable())
         self._update_info()
 
@@ -506,7 +519,7 @@ class TomoMaskView(QWidget):
     def _draw_shade(self) -> None:
         shape, viewer = self.shape(), self.viewer
         g = self._live or self.geometry()
-        if not self.shade.isChecked() or g is None or viewer is None or viewer.shape is None:
+        if not self.shade.isChecked() or shape is None or g is None or viewer is None or viewer.shape is None:
             self.shade_item.hide()
             return
         nx, ny, nz = shape
@@ -521,6 +534,7 @@ class TomoMaskView(QWidget):
     def inside_fraction(self) -> float:
         """The part of the current section inside the mask (tests)."""
         shape, g = self.shape(), self.geometry()
+        assert shape is not None and g is not None, "no tomogram shown"
         nx, ny, nz = shape
         z = min(max(self.viewer.z if self.viewer is not None else nz // 2, 0), nz - 1)
         return float(np.frombuffer(M.Raster(shape, g).plane(z), np.uint8).mean())
@@ -568,7 +582,8 @@ class TomoMaskView(QWidget):
             self._changed()
             return
         done, data = result
-        self.data["files"] = data["files"]
+        if self.data is not None:
+            self.data["files"] = data["files"]
         self.saved = {n: (data["files"].get(n) or {}).get("key", "") for n in data["tomograms"]}
         self._stamp = _stamp(self.job_dir / M.GEOMETRY)
         for i, n in enumerate(self.names()):

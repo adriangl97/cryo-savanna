@@ -59,7 +59,7 @@ class AngdistSurface(SurfaceView):
         self.update()
 
     def paint_layer(self, p: QPainter, target: QRectF, front: bool) -> None:
-        if self.cylinders is None or self.shown is None:
+        if self.cylinders is None or self.shown is None or self.image is None:
             return
         start, end, radius, colors = self.cylinders
         (a, da, scale), (b, db, _) = self.project(start, target), self.project(end, target)
@@ -105,13 +105,13 @@ class AngdistPanel(QWidget):
         self.combo = QComboBox()
         self.combo.setToolTip("Map and .bild file (RELION writes one per class and iteration)")
         self.combo.currentIndexChanged.connect(lambda _: self.load())
+        self.surface = AngdistSurface()
         self.level = QDoubleSpinBox()
         self.level.setDecimals(4)
         self.level.setRange(-1e9, 1e9)
         self.level.setPrefix("Level ")
         self.level.setKeyboardTracking(False)
         self.level.valueChanged.connect(lambda v: self.surface.set_threshold(v, reframe=False))
-        self.surface = AngdistSurface()
         bar = QHBoxLayout()
         bar.setContentsMargins(0, 0, 0, 0)
         bar.addWidget(self.combo, 1)

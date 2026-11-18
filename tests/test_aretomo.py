@@ -189,10 +189,11 @@ def test_names_and_main_input(tomo_project):
     assert CTF_SET in (o["in_mov"], o["in_mic"], o["in_part"], o["in_coords"], o["in_3dref"], o["in_mask"])
 
 
-def test_install_puts_both_runners(tmp_path):
+def test_install_puts_the_runner_and_its_helpers(tmp_path):
+    from cryo_savanna import runner_common
     install_runner(tmp_path)
     assert (tmp_path / ".cryo-savanna/aretomo_runner.py").read_bytes() == open(A.__file__, "rb").read()
-    assert (tmp_path / ".cryo-savanna/pytom_runner.py").read_bytes() == open(P.__file__, "rb").read()
+    assert (tmp_path / ".cryo-savanna/runner_common.py").read_bytes() == open(runner_common.__file__, "rb").read()
 
 
 # ---------------------------------------------------------------------------- files
@@ -490,3 +491,15 @@ def test_options_tab_shows_the_aretomo_form(qtbot):
     rows = {tree.topLevelItem(i).child(j).text(0): tree.topLevelItem(i).child(j)
             for i in range(tree.topLevelItemCount()) for j in range(tree.topLevelItem(i).childCount())}
     assert rows["Binning"].text(1) == "6" and rows["Binning"].font(1).bold()
+
+
+def test_picking_warnings():
+    """-FlipVol 2 and -TiltCor 1 give tomograms outside RELION's frame: the log says not to pick in them."""
+    assert A.picking_warnings({}) == []
+    assert A.picking_warnings({"flip_vol": "xyz, flipped (-FlipVol 1)",
+                               "tilt_cor": "Measure, use it for the alignment only (0)"}) == []
+    flip = A.picking_warnings({"flip_vol": "xyz, rotated (-FlipVol 2)"})
+    assert len(flip) == 1 and flip[0].startswith("-FlipVol 2") and "-FlipVol 1" in flip[0]
+    level = {"tilt_cor": "Measure, also level the tomogram (1)"}
+    assert len(A.picking_warnings(level)) == 1 and A.picking_warnings(level)[0].startswith("-TiltCor 1")
+    assert A.picking_warnings(dict(level, alignment=A.ALIGN_INPUT)) == []  # -TiltCor is not used then

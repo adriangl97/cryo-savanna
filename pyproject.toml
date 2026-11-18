@@ -68,10 +68,13 @@ extend-immutable-calls = ["qtpy.QtCore.QModelIndex"]  # Qt's own signature: pare
 python_version = "3.11"
 files = ["cryo_savanna"]
 ignore_missing_imports = true  # mrcfile, pyqtgraph, tifffile: no type information
+check_untyped_defs = true  # also the bodies of functions without annotations (the workers the windows start)
 
 [[tool.mypy.overrides]]
-# The windows are not checked yet: Qt's enums through qtpy and the widgets made in a later step
-# (self.viewer: X | None) are most of what mypy says there, not defects.
-module = ["cryo_savanna.ui.*", "cryo_savanna.viewers.*"]
-ignore_errors = true
+# Qt and pyqtgraph are taken as untyped (Any): conda-forge's PySide6 has no py.typed, so mypy cannot read
+# its stubs, and qtpy's `from PySide6.QtCore import *` then gives mypy no names at all. Everything else in
+# the windows (ui/, viewers/) is checked.
+module = ["qtpy", "qtpy.*", "pyqtgraph", "pyqtgraph.*"]
+follow_imports = "skip"
+follow_imports_for_stubs = true
 

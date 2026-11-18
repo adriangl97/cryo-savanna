@@ -246,6 +246,42 @@ def test_napari_button_reports_a_failed_start(qtbot, tmp_path):
     assert not b.isEnabled()
 
 
+def test_napari_button_reports_a_failure_after_the_first_look(qtbot, tmp_path):
+    """A napari that is slow to fail (busy node, network file system) is still reported: the button keeps
+    looking until the process stops, not only once."""
+    from cryo_savanna.viewers.tomo_viewer import NapariButton
+    exe = tmp_path / "relion_python_tomo_view"
+    exe.write_text("#!/bin/sh\nsleep 1\necho 'slow failure' >&2\nexit 4\n")
+    exe.chmod(exe.stat().st_mode | stat.S_IXUSR)
+    seen = []
+    b = NapariButton(tmp_path, seen.append)
+    qtbot.addWidget(b)
+    b.set_command([str(exe), "tomograms", "--tilt-series-star-file", "t.star"])
+    b._watch.setInterval(100)  # several looks while the process still runs
+    b.click()
+    qtbot.waitUntil(lambda: any("stopped" in s for s in seen), timeout=10000)
+    assert "exit 4" in seen[-1] and "slow failure" in seen[-1]
+    assert not b._watch.isActive()
+
+
+def test_napari_button_stops_looking_at_a_napari_that_runs(qtbot, tmp_path):
+    from cryo_savanna.viewers.tomo_viewer import NapariButton
+    exe = tmp_path / "relion_python_tomo_view"
+    exe.write_text("#!/bin/sh\nsleep 5\n")
+    exe.chmod(exe.stat().st_mode | stat.S_IXUSR)
+    seen = []
+    b = NapariButton(tmp_path, seen.append)
+    qtbot.addWidget(b)
+    b.WATCH_S = 0.3
+    b.set_command([str(exe), "tomograms"])
+    b._watch.setInterval(100)
+    b.click()
+    qtbot.waitUntil(lambda: not b._watch.isActive(), timeout=5000)
+    assert not any("stopped" in s for s in seen)
+    b.proc.kill()
+    b.proc.wait()
+
+
 def test_window_picks_the_tomo_job_menu(qtbot, tmp_path, tomo_project, spa_project):
     from qtpy.QtCore import QSettings
     from cryo_savanna.env.relion_env import RelionEnv

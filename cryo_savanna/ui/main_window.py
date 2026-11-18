@@ -174,6 +174,7 @@ class MainWindow(QMainWindow):
         self.snapshot: ProjectSnapshot | None = None
         self.current: str | None = None
         self._busy = False
+        self._again: bool | None = None  # a refresh asked while one was reading (forced or not), done after it
         self._thread: QThread | None = None
         self._worker: LoaderWorker | None = None
         self._summary_thread: QThread | None = None
@@ -254,6 +255,8 @@ class MainWindow(QMainWindow):
         self.info.forms = self.actions.forms  # the editor's forms, also read-only
         self.actions.changed.connect(self._force_refresh)
         self.actions.select.connect(self._select_soon)
+        self.actions.runs.connect(self.tree.set_runs)
+        self.actions.runs.connect(self.info.set_runs)
         self.actions.message.connect(lambda m: self.statusBar().showMessage(m, 6000))
         self.actions.star.connect(self.set_star)
 
@@ -300,7 +303,8 @@ class MainWindow(QMainWindow):
 
         mb = self.menuBar()
         project = mb.addMenu("Project")
-        for a in (self.act_open, self.act_refresh, None, self.actions.act_import, self.actions.act_undelete, None,
+        for a in (self.act_open, self.act_refresh, None, self.actions.act_import, self.actions.act_undelete,
+                  self.actions.act_disk, None,
                   self.act_prefs, None, act_quit):
             project.addSeparator() if a is None else project.addAction(a)
         mb.addMenu(self.actions.job_menu)
@@ -329,6 +333,8 @@ class MainWindow(QMainWindow):
             lambda pos: self.actions.context_menu(self.tree._name(self.tree.indexAt(pos)) if self.tree.indexAt(pos).isValid()
                                                   else None, self.tree.viewport().mapToGlobal(pos)))
         self.graph.context_requested.connect(self.actions.context_menu)
+        for view in (self.tree, self.graph):  # the jobs the open job editor takes inputs from
+            self.actions.editor_inputs.connect(view.set_inputs)
 
         self.status_project = QLabel()
         self.status_state = QLabel()
@@ -340,6 +346,7 @@ class MainWindow(QMainWindow):
         self.info.job_link.connect(self.select_job)
         self.info.tool_requested.connect(self.actions.request_tool)
         self.info.main_input_requested.connect(self.set_main_input)
+        self.info.log_requested.connect(self.logs.show_log)
 
     def _action(self, tb: QToolBar | None, text: str, shortcut, slot) -> QAction:
         a = QAction(text, self)
@@ -462,6 +469,7 @@ class MainWindow(QMainWindow):
     def load_summaries_now(self) -> None:
         """Read all job summaries synchronously (tests and screenshots)."""
         reader = SummaryReader(self.loader.project_dir)
+        assert self.snapshot is not None, "no project read yet"
         self._on_summaries(self.loader.project_dir,
                            {n: reader.summarize(i, self.snapshot.pipeline) for n, i in self.snapshot.jobs.items()})
 
@@ -470,7 +478,10 @@ class MainWindow(QMainWindow):
         self.refresh(force=True)
 
     def refresh(self, force: bool = False) -> None:
-        if self._busy or self._worker is None:
+        if self._worker is None:
+            return
+        if self._busy:  # the read going may have looked before a change: read again after it, not never
+            self._again = force or bool(self._again)
             return
         self._busy = True
         self.request_refresh.emit(force)
@@ -493,7 +504,8 @@ class MainWindow(QMainWindow):
         self.tree.set_snapshot(snap)
         self.graph.set_snapshot(snap)
         self.actions.set_snapshot(snap)
-        self._apply_filter()
+        if self.tree.proxy.is_active():  # what the filter shows may have changed; without one, all is shown
+            self._apply_filter()
         if self._summary_worker is not None:
             self._generation += 1
             self._summary_worker.generation = self._generation
@@ -556,6 +568,7 @@ class MainWindow(QMainWindow):
 
     def queue_now(self) -> QueueState:
         """Look at the queue synchronously (tests)."""
+        assert self.slurm_monitor is not None and self.snapshot is not None, "no project read yet"
         state = self.slurm_monitor.poll({n: j.status for n, j in self.snapshot.jobs.items()})
         self._show_queue(state)
         return state
@@ -574,6 +587,7 @@ class MainWindow(QMainWindow):
         self._start(_Call(("history", monitor, job), history))
 
     def history_now(self, job: str) -> None:
+        assert self.slurm_monitor is not None, "no project read yet"
         self.info.set_history(job, self.slurm_monitor.history(job))
 
     def _start(self, call: _Call) -> None:
@@ -634,7 +648,12 @@ class MainWindow(QMainWindow):
 
     @Slot()
     def _on_finished(self) -> None:
+        if self.sender() is not self._worker:  # the loader of the project open before
+            return
         self._busy = False
+        again, self._again = self._again, None
+        if again is not None:
+            self.refresh(again)
 
     def _stop_worker(self, wait_ms: int = 3000) -> None:
         """Stop the loader and summary threads of the project open now. A thread still reading after
@@ -659,7 +678,7 @@ class MainWindow(QMainWindow):
             self._retire(self._thread, self._worker, wait_ms)
             self._thread = None
             self._worker = None
-            self._busy = False
+            self._busy, self._again = False, None
 
     def _retire(self, thread: QThread, worker: QObject | None, wait_ms: int) -> None:
         thread.quit()
@@ -717,6 +736,8 @@ class MainWindow(QMainWindow):
     def set_main_input(self, job: str, node: str) -> None:
         """Place ``job`` under the producer of ``node`` in the list and the tree ("": the default again)."""
         try:
+            if self.loader.main_inputs is None:  # not kept for this project
+                return
             self.loader.main_inputs.set(job, node or None)
         except OSError as e:
             QMessageBox.warning(self, "Main input", f"Cannot save the choice: {e}")
@@ -726,6 +747,8 @@ class MainWindow(QMainWindow):
 
     def set_star(self, job: str, on: bool) -> None:
         try:
+            if self.loader.stars is None:
+                return
             self.loader.stars.set(job, on)
         except OSError as e:
             QMessageBox.warning(self, "Star", f"Cannot save the star: {e}")

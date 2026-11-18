@@ -20,7 +20,9 @@ import sys
 import threading
 import time
 import traceback
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 from qtpy.QtCore import QObject, Signal
 
@@ -37,7 +39,7 @@ def error_log() -> Path:
 
 
 def one_line(exc: BaseException) -> str:
-    """"TypeError: … (job_actions.py:812 in clean)": the error and where it was raised."""
+    """"TypeError: … (running.py:195 in clean)": the error and where it was raised."""
     text = f"{type(exc).__name__}: {exc}".splitlines()[0][:300] if str(exc) else type(exc).__name__
     tb = traceback.extract_tb(exc.__traceback__)
     if tb:
@@ -53,8 +55,8 @@ class ErrorReporter(QObject):
         super().__init__(parent)
         self.log = log if log is not None else error_log()
         self._lock = threading.Lock()
-        self._previous = None
-        self._previous_thread = None
+        self._previous: Callable[..., Any] | None = None
+        self._previous_thread: Callable[..., Any] | None = None
 
     def install(self) -> None:
         self._previous, sys.excepthook = sys.excepthook, self._hook

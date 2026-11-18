@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import numpy as np
 import pyqtgraph as pg
@@ -51,6 +52,9 @@ from cryo_savanna.viewers.image_canvas import ImageCanvas
 from cryo_savanna.viewers.plots import FigureGrid
 from cryo_savanna.viewers.tasks import TaskError, Tasks
 from cryo_savanna.stamps import stamp as _stamp
+
+if TYPE_CHECKING:  # imported when first needed: the tomogram viewer is large
+    from cryo_savanna.viewers.tomo_viewer import TomogramViewer
 
 STATUS_COLORS = {"done": (0, 158, 115), "running": (0, 114, 178), "failed": (213, 94, 0), "aborted": (213, 94, 0)}
 
@@ -96,8 +100,8 @@ class PytomScoresView(QWidget):
         self.summary: R.MatchSummary | None = None
         self.stats: dict[str, dict] = {}
         self.current: str | None = None
-        self._stamp = None
-        self._map_stamp = None
+        self._stamp: object = None
+        self._map_stamp: object = None
 
         self.table = _table(self.COLUMNS)
         self.table.itemSelectionChanged.connect(self._on_row)
@@ -182,7 +186,7 @@ class PytomScoresView(QWidget):
         template, mask = s.general.get(P.P + "Template", ""), s.general.get(P.P + "Mask", "")
         self.info.setText(f"{len(s.names)} tomograms: " + ", ".join(parts) +
                           (f"   ·   template {template}, mask {mask}" if template else ""))
-        row = s.names.index(keep) if keep in s.names else 0
+        row = s.names.index(keep) if keep is not None and keep in s.names else 0
         if s.names:
             self.table.selectRow(row)
             if keep == s.names[row]:
@@ -203,10 +207,13 @@ class PytomScoresView(QWidget):
         return self.project_dir / rel if rel else None
 
     def _show_map(self) -> None:
-        name, path = self.current, self._map_path(self.current)
+        name, s = self.current, self.summary
+        if name is None or s is None:
+            return
+        path = self._map_path(name)
         self._map_stamp = _stamp(path) if path is not None else None
-        i = self.summary.names.index(name)
-        status = self.summary.value(i, P.COL_STATUS)
+        i = s.names.index(name)
+        status = s.value(i, P.COL_STATUS)
         if path is None or self._map_stamp is None or status != "done":
             self.mip.set_array(np.zeros((2, 2), np.float32))
             self.mip_label.setText(f"{name}: {status or 'no score map'} (the score map comes when it is done)")
@@ -270,9 +277,9 @@ class PytomThresholdView(QWidget):
         self.current: str | None = None
         self.dirty = False  # thresholds not saved
         self.settings_dirty = False  # extraction settings not saved
-        self._stamp = None
+        self._stamp: object = None
         self._syncing = False
-        self.viewer = None
+        self.viewer: TomogramViewer | None = None
 
         self.same = QCheckBox("Same threshold for all tomograms")
         self.same.toggled.connect(self._on_same)
@@ -362,6 +369,12 @@ class PytomThresholdView(QWidget):
         lay.addWidget(self.info)
         self.load()
 
+    @property
+    def _loaded(self) -> R.Selection:
+        """The selection read: what the table, the plot and the thresholds show (asked once it is read)."""
+        assert self.sel is not None, "no selection read yet"
+        return self.sel
+
     # -- loading -------------------------------------------------------------------------------
     def _files(self):
         d = self.project_dir / self.job
@@ -372,8 +385,8 @@ class PytomThresholdView(QWidget):
             self.load()
 
     def load(self) -> None:
-        self._stamp = self._files()
-        if self._stamp[0] is None:
+        self._stamp = files = self._files()
+        if files[0] is None:
             self.info.setText("The candidates come when the job has extracted every tomogram (candidates.star).")
             return
         project, job, summary, diameter = self.project_dir, self.job, self.summary_rel, self.diameter
@@ -425,7 +438,7 @@ class PytomThresholdView(QWidget):
         self._update_info()
 
     def _fill_table(self) -> None:
-        sel = self.sel
+        sel = self._loaded
         self.table.blockSignals(True)
         self.table.setRowCount(len(sel.names))
         for i, n in enumerate(sel.names):
@@ -442,7 +455,7 @@ class PytomThresholdView(QWidget):
         st = self.settings
         if st is None:
             return
-        i = self.sel.names.index(name) if row is None else row
+        i = self._loaded.names.index(name) if row is None else row
         used, want = st.used.get(name), st.max_particles(name)
         text = str(want) if used in (None, want) else f"{used} → {want}"
         self.table.item(i, 5).setText(text)
@@ -469,9 +482,10 @@ class PytomThresholdView(QWidget):
         self.max_spin.setEnabled(on)
 
     def _update_row(self, name: str, row: int | None = None) -> None:
-        i = self.sel.names.index(name) if row is None else row
-        cand, chosen = self.sel.counts(name)
-        t = self.sel.threshold.get(name)
+        sel = self._loaded
+        i = sel.names.index(name) if row is None else row
+        cand, chosen = sel.counts(name)
+        t = sel.threshold.get(name)
         self.table.item(i, 2).setText(_fmt(t))
         self.table.item(i, 4).setText(str(chosen))
 
@@ -495,11 +509,15 @@ class PytomThresholdView(QWidget):
             self.viewer.select_name(self.current)
 
     def _shown_lcc(self) -> np.ndarray:
+        sel = self._loaded
         if self.same.isChecked():
-            return np.concatenate(list(self.sel.lcc.values())) if self.sel.lcc else np.empty(0)
-        return self.sel.lcc.get(self.current, np.empty(0))
+            return np.concatenate(list(sel.lcc.values())) if sel.lcc else np.empty(0)
+        return sel.lcc.get(self.current, np.empty(0)) if self.current is not None else np.empty(0)
 
     def _show_current(self) -> None:
+        sel, name = self.sel, self.current
+        if sel is None or name is None:  # nothing read, or no tomogram chosen (none listed)
+            return
         lcc = self._shown_lcc()
         lcc = lcc[np.isfinite(lcc)]
         if len(lcc):
@@ -507,16 +525,16 @@ class PytomThresholdView(QWidget):
             self.bars.setOpts(x=(edges[:-1] + edges[1:]) / 2, height=counts, width=float(edges[1] - edges[0]))
         else:
             self.bars.setOpts(x=[], height=[], width=1)
-        thr = self.sel.threshold.get(self.current)
-        auto = self.sel.auto.get(self.current)
-        self.plot.setTitle(("All tomograms" if self.same.isChecked() else self.current) +
-                           f"   ·   {self.sel.counts(self.current)[1] if not self.same.isChecked() else ''}")
+        thr = sel.threshold.get(name)
+        auto = sel.auto.get(name)
+        self.plot.setTitle(("All tomograms" if self.same.isChecked() else name) +
+                           f"   ·   {sel.counts(name)[1] if not self.same.isChecked() else ''}")
         self._syncing = True
         if thr is not None:
             self.spin.setValue(thr)
             self.line.setValue(thr)
-        if self.settings is not None and self.current is not None:
-            self.max_spin.setValue(self.settings.max_particles(self.current))
+        if self.settings is not None:
+            self.max_spin.setValue(self.settings.max_particles(name))
         self.auto_line.setVisible(auto is not None and not self.same.isChecked())
         if auto is not None:
             self.auto_line.setValue(auto)
@@ -524,12 +542,13 @@ class PytomThresholdView(QWidget):
         self._update_title()
 
     def _update_title(self) -> None:
+        sel = self._loaded
         if self.same.isChecked():
-            n = sum(self.sel.counts(k)[1] for k in self.sel.names)
+            n = sum(sel.counts(k)[1] for k in sel.names)
             self.plot.setTitle(f"All tomograms: {n} selected")
-        else:
-            self.plot.setTitle(f"{self.current}: {self.sel.counts(self.current)[1]} of "
-                               f"{self.sel.counts(self.current)[0]} selected")
+        elif self.current is not None:
+            cand, chosen = sel.counts(self.current)
+            self.plot.setTitle(f"{self.current}: {chosen} of {cand} selected")
 
     def _on_line(self) -> None:
         if not self._syncing:
@@ -542,8 +561,9 @@ class PytomThresholdView(QWidget):
     def _on_same(self, on: bool) -> None:
         if self.sel is None:
             return
-        if on and self.current is not None and self.sel.threshold.get(self.current) is not None:
-            self.set_threshold(self.sel.threshold[self.current])
+        thr = self.sel.threshold.get(self.current) if self.current is not None else None
+        if on and thr is not None:
+            self.set_threshold(thr)
         self._show_current()
 
     def set_threshold(self, value: float) -> None:
@@ -686,7 +706,7 @@ class SvgPlotsView(QWidget):
         from qtpy.QtSvgWidgets import QSvgWidget
         self.project_dir, self.job, self.folder = Path(project_dir), job, folder
         self.files: list[str] = []
-        self._stamp = None
+        self._stamp: object = None
         self.list = QListWidget()
         self.list.currentRowChanged.connect(self._show)
         self.svg = QSvgWidget()

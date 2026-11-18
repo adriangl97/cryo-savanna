@@ -104,7 +104,7 @@ def parse(argv):
 
 def _star_blocks(path, limit=200):
     """Names of the data blocks and labels in the first lines of a STAR file."""
-    blocks, labels = [], set()
+    blocks, labels = [], set()  # type: list[str], set[str]
     try:
         with open(path, "r", errors="replace") as fh:
             for n, line in enumerate(fh):
@@ -312,8 +312,8 @@ def run(argv):
         return 1
 
     aborted_at = None
-    sent = []
-    stopped = []  # (signal, time) once the runner was told to stop
+    sent = []  # type: list[int]
+    stopped = []  # type: list[tuple[int, float]]  # (signal, time) once the runner was told to stop
     killed = False
 
     def stop_now(signum):
@@ -359,9 +359,13 @@ def run(argv):
     if stopped:
         _touch(os.path.join(job_dir, ABORTED))
         return 128 + stopped[0][0]
-    if aborted_at is not None:
+    if aborted_at is not None or (rc == 0 and os.path.exists(os.path.join(control, ABORTED))):
         _touch(os.path.join(job_dir, ABORTED))
         return rc or 1
+    if rc == 0 and os.path.exists(os.path.join(control, FAILURE)):  # it said so, whatever its exit code (mpirun's)
+        print("ERROR: %s ended with an error (%s)" % (program, FAILURE), file=sys.stderr, flush=True)
+        _touch(os.path.join(job_dir, FAILURE))
+        return 1
     if rc != 0:
         print("ERROR: %s exited with %s" % (program, rc), file=sys.stderr, flush=True)
         _touch(os.path.join(job_dir, FAILURE))

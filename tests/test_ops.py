@@ -322,6 +322,62 @@ def test_relink_after_overwrite(spa_copy):
     assert all("Class2D/job006/" in Pipeline.read(spa_copy).parents(u) for u in users)
 
 
+def _overwrite_keeping_order(spa_copy, monkeypatch, job, fail=False):
+    """Overwrite ``job`` with a stand-in for relion_pipeliner --addJobFromStar (a Scheduled job of that name,
+    added at the end of the pipeline), and every process order the pipeline file had meanwhile."""
+    from cryo_savanna.project.pipeline import Process
+    pl = Pipeliner(spa_copy, exe="relion_pipeliner", environ={})
+    ops = PipelineOps(spa_copy)
+    written: list[list[str]] = []
+    write = Pipeline.write
+
+    def recorded(self, *args, **kwargs):
+        write(self, *args, **kwargs)
+        written.append(list(self.processes))
+    monkeypatch.setattr(Pipeline, "write", recorded)
+
+    def add_job(js, alias=None):
+        if fail:
+            raise subprocess.TimeoutExpired("relion_pipeliner", 600)
+        with ops._lock("addJobFromStar") as lock:
+            p = Pipeline.read(spa_copy)
+            p.processes[job] = Process(job, "None", js.type_label, "Scheduled")
+            p.write(spa_copy, "default", lock)
+        (spa_copy / job).mkdir()
+        return AddResult(job)
+    monkeypatch.setattr(pl, "add_job", add_job)
+    return pl, written
+
+
+def test_an_overwrite_moves_no_job_in_the_pipeline(spa_copy, monkeypatch):
+    """RELION's pipeliners keep the jobs they wait for by their place in the pipeline (processList[i]): a job
+    that moves up when an earlier one is overwritten is taken for another one, so the wrong job is marked as
+    finished (shown Succeeded while it runs) and the one that ended stays Running. Not in any write."""
+    job = "Class2D/job006/"
+    before = list(Pipeline.read(spa_copy).processes)
+    assert before.index(job) < len(before) - 3  # jobs after it would move up
+    pl, written = _overwrite_keeping_order(spa_copy, monkeypatch, job)
+    res = pl.overwrite_job(job, JobStar(type_label="relion.class2d", is_continue=False, is_tomo=False, options={}))
+    assert res.job == job
+    after = Pipeline.read(spa_copy)
+    assert list(after.processes) == before
+    assert after.processes[job].status == "Scheduled"
+    assert written
+    for order in written:  # also while relion_pipeliner adds the new job: a placeholder keeps the place
+        for i, name in enumerate(before):
+            if name != job:
+                assert order[i] == name, order
+
+
+def test_a_failed_overwrite_leaves_no_placeholder(spa_copy, monkeypatch):
+    job = "Class2D/job006/"
+    pl, _ = _overwrite_keeping_order(spa_copy, monkeypatch, job, fail=True)
+    with pytest.raises(PipelinerError, match="Undelete"):
+        pl.overwrite_job(job, JobStar(type_label="relion.class2d", is_continue=False, is_tomo=False, options={}))
+    names = list(Pipeline.read(spa_copy).processes)
+    assert job not in names and not any(".overwriting" in n for n in names)
+
+
 # ---------------------------------------------------------------------------- failed overwrites
 
 def _files(d: Path) -> dict[str, bytes]:

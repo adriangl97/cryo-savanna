@@ -1,7 +1,7 @@
 # Copyright (C) 2026 Adrián González-López
 # SPDX-License-Identifier: GPL-2.0-or-later
 """Short per-job summaries for the job cards and the tree: counts, resolution, key settings,
-data quality and progress.
+data quality and progress, and for failed jobs the likely cause (project/failure_hints.py).
 
 Everything comes from files RELION writes: the job's output nodes in the pipeline (counted by
 node type), the last model.star of iterative jobs, postprocess.star, job.star and note.txt.
@@ -22,11 +22,12 @@ import traceback
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from cryo_savanna.project.failure_hints import Diagnosis, diagnose
 from cryo_savanna.project.jobstar import JobStar
 from cryo_savanna.project.pipeline import Pipeline, Process
 from cryo_savanna.project.snapshot import JobInfo, stamp
 from cryo_savanna.project.star import StarError, loop_rows, read_star_head
-from cryo_savanna.relion_consts import STATUS_RUNNING, job_type_for_label
+from cryo_savanna.relion_consts import STATUS_FAILED, STATUS_RUNNING, job_type_for_label
 
 ITERATIVE = {"relion.class2d", "relion.class3d", "relion.initialmodel", "relion.refine3d", "relion.multibody"}
 SHOWS_RESOLUTION = {"relion.class3d", "relion.initialmodel", "relion.refine3d", "relion.multibody"}
@@ -96,6 +97,7 @@ class JobSummary:
     iteration: int | None = None
     total_iterations: int | None = None
     started: float | None = None  # start of the latest run (note.txt)
+    failure: list[Diagnosis] = field(default_factory=list)  # a failed job: what its logs say, most likely first
 
     def lines(self) -> list[str]:
         return [" · ".join(x) for x in (self.result, self.settings, self.quality) if x]
@@ -197,6 +199,8 @@ class SummaryReader:
             return hit[1]
         try:
             s = self._summarize(info.process, pipeline, info.status == STATUS_RUNNING)
+            if info.status == STATUS_FAILED:
+                s.failure = diagnose(self.project_dir / info.name)
         except (OSError, ValueError, KeyError, IndexError, StarError):
             s = JobSummary()  # half-written or unexpected files: try again on the next change
             key = None

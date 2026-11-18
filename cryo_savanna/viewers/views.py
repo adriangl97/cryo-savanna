@@ -108,7 +108,7 @@ class ClassesView(QWidget):
         lay.setContentsMargins(0, 0, 0, 0)
         lay.addWidget(self.gallery)
         self._its: list = []
-        self._stamp = None
+        self._stamp: object = None
         self.set_iterations()
 
     def tool_source(self) -> str:
@@ -211,7 +211,7 @@ class ParticlesView(QWidget):
         lay = QVBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
         lay.addWidget(self.gallery)
-        self._stamp = None
+        self._stamp: object = None
         self._load()
 
     def refresh(self) -> None:
@@ -255,7 +255,7 @@ def particle_items(ps) -> list[GalleryItem]:
         path = paths.get(ref.path)
         if path is None:
             path = paths[ref.path] = ref.resolve(ps.project_dir).path
-        keys = {k: (v[i] if v is not None else None) for k, v in cols.items()}
+        keys = {k: v[i] for k, v in cols.items() if v is not None}  # a missing column: no key (sorted last)
         label = str(i + 1) + (f" · c{int(classes[i])}" if classes is not None and classes[i] == classes[i] else "")
         items.append(GalleryItem(ImageRef(path, ref.index), label, "", keys, payload=i))
     return items
@@ -274,7 +274,7 @@ class FiguresView(QWidget):
         lay.setContentsMargins(0, 0, 0, 0)
         lay.addWidget(self.grid, 1)
         lay.addWidget(self.info)
-        self._stamp = None
+        self._stamp: object = None
         self._load()
 
     def _watch(self):
@@ -328,7 +328,7 @@ class TablePlotView(QWidget):
         lay = QVBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
         lay.addWidget(self.plot)
-        self._stamp = None
+        self._stamp: object = None
         self._load()
 
     def refresh(self) -> None:
@@ -364,7 +364,7 @@ class AnglesView(QWidget):
         lay = QVBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
         lay.addWidget(split)
-        self._stamp = None
+        self._stamp: object = None
         self._load()
 
     def _data_star(self) -> Path | None:
@@ -480,7 +480,7 @@ class FilesView(QWidget):
         lay.setContentsMargins(0, 0, 0, 0)
         lay.addWidget(split, 1)
         self._path: Path | None = None
-        self._stamp = None
+        self._stamp: object = None
         self._dirs: list[Path] = []
         self.tasks = Tasks(self)
         self._listing = False
@@ -609,7 +609,7 @@ class FilesView(QWidget):
             self.other_label.setText(f"{self._path.name}\n{opener}: {e}")
 
 
-def _size(n: int) -> str:
+def _size(n: float) -> str:
     for unit in ("B", "KB", "MB", "GB"):
         if n < 1024 or unit == "GB":
             return f"{n:.0f} {unit}" if unit == "B" else f"{n:.1f} {unit}"
@@ -677,12 +677,12 @@ def build_view(spec: R.ViewSpec, ctx: R.JobContext, cache: ThumbCache | None, re
             return V.CtfChangesView(project, a["star"], a.get("input", ""))
         return V.AberrationsView(project, a["job"], a.get("star", ""))
     if spec.kind in (R.PYTOM_SCORES, R.PYTOM_THRESHOLDS, R.SVG_PLOTS):
-        from cryo_savanna.viewers import pytom_view as V
+        from cryo_savanna.viewers import pytom_view as PV
         if spec.kind == R.PYTOM_SCORES:
-            return V.PytomScoresView(project, a["job"])
+            return PV.PytomScoresView(project, a["job"])
         if spec.kind == R.PYTOM_THRESHOLDS:
-            return V.PytomThresholdView(project, a["job"], a.get("summary", ""), a.get("diameter"), cache)
-        return V.SvgPlotsView(project, a["job"], a.get("folder", "plots"))
+            return PV.PytomThresholdView(project, a["job"], a.get("summary", ""), a.get("diameter"), cache)
+        return PV.SvgPlotsView(project, a["job"], a.get("folder", "plots"))
     if spec.kind == R.TOMO_MASKS:
         from cryo_savanna.viewers.tomo_mask_view import TomoMaskView
         return TomoMaskView(project, a["job"], cache)

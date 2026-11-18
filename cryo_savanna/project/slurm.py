@@ -554,7 +554,7 @@ class SlurmMonitor:
             except SlurmError as e:
                 state.error = str(e)
                 break
-            if last is not None and self._lost(last, state.checked_at) and not self._before_submission(job, last):
+            if last is not None and self._lost(last, state.checked_at) and not self.ended_before_submission(job, last):
                 state.lost[job] = last
         return state
 
@@ -563,7 +563,7 @@ class SlurmMonitor:
         end = last.end_time() if last is not None else None
         return last is not None and not last.active and (end is None or now - end > LOST_GRACE_S)
 
-    def _before_submission(self, job: str, last: AcctJob) -> bool:
+    def ended_before_submission(self, job: str, last: AcctJob) -> bool:
         """Whether that SLURM job ended before the job was last sent to the queue (RELION writes
         run_submit.script on every submission): an earlier run's, not the one RELION waits for."""
         end = last.end_time()

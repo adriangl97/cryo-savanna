@@ -41,6 +41,7 @@ from cryo_savanna.project.selection import (
     read_class_input,
     read_tilt_exclusion,
     read_tilt_input,
+    regroup_count,
     selected_numbers,
 )
 from cryo_savanna.results.classes import read_model_classes
@@ -285,13 +286,13 @@ class TiltExclusion(QWidget):
             original(name, tilts)
             if not isinstance(tilts, TaskError):
                 self._decorate(name, tilts)
-        self.viewer._on_tilts = on_tilts
+        self.viewer._on_tilts = on_tilts  # type: ignore[method-assign]  # decorated, as the viewer calls it
         original_loaded = self.viewer._on_loaded
 
         def on_loaded(result):
             original_loaded(result)
             self._update_series_counts()
-        self.viewer._on_loaded = on_loaded
+        self.viewer._on_loaded = on_loaded  # type: ignore[method-assign]
 
     def _name(self) -> str | None:
         v = self.viewer
@@ -329,8 +330,9 @@ class TiltExclusion(QWidget):
         model.dataChanged.emit(model.index(0, 0), model.index(model.rowCount() - 1, model.columnCount() - 1))
         # and in the plots: a red line at each excluded tilt angle
         t = model.table
-        if t.has("rlnTomoNominalStageTiltAngle"):
-            angles = t.numeric("rlnTomoNominalStageTiltAngle")[~m]
+        all_angles = t.numeric("rlnTomoNominalStageTiltAngle") if t.has("rlnTomoNominalStageTiltAngle") else None
+        if all_angles is not None:
+            angles = all_angles[~m]
             figs = tilt_figures(t, name)
             for f in figs:
                 f.vlines = [(float(a), "") for a in angles]
@@ -446,7 +448,7 @@ class SelectionView(QWidget):
         self.lay = QVBoxLayout(self)
         self.lay.setContentsMargins(0, 0, 0, 0)
         self.lay.addLayout(top)
-        self._stamp = None
+        self._stamp: object = None
         self._build()
 
     @property
@@ -465,7 +467,7 @@ class SelectionView(QWidget):
             self.note.setText(f"⚠ Cannot read {self.job}job.star: {e}")
             return
         if self.kind == "classes":
-            regroup = int(float(o.get("nr_groups", "0") or 0)) if o.get("do_regroup") == "Yes" else 0
+            regroup = regroup_count(o)
             self.panel = ClassSelection(self.project_dir, o.get("fn_model", ""), recenter=o.get("do_recenter") == "Yes",
                                         regroup=regroup, editable=False)
             self.panel.loaded.connect(self._on_classes)
@@ -487,13 +489,16 @@ class SelectionView(QWidget):
         if error:
             self.note.setText(f"⚠ {error}")
             return
-        n = len(self.panel.input.classes)
+        panel = self.panel
+        if not isinstance(panel, ClassSelection) or panel.input is None:
+            return
+        n = len(panel.input.classes)
         try:
             flags = read_backup_selection(self.project_dir, self.job, n)
         except (OSError, ValueError) as e:
             self.note.setText(f"⚠ {self.job}backup_selection.star: {e}")
             return
-        self.panel.set_selected(selected_numbers(self.panel.input, flags))
+        panel.set_selected(selected_numbers(panel.input, flags))
         self._note(flags is not None, "Classes selected by this job are highlighted.")
 
     def _note(self, saved: bool, text: str) -> None:
