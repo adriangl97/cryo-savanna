@@ -93,6 +93,7 @@ class ActionsBase(QObject):
     message = Signal(str)  # short status message
     star = Signal(str, bool)  # star or unstar this job
     editor_inputs = Signal(object)  # {job: [field labels]} the shown job editor takes inputs from ({}: none, or closed)
+    runs = Signal(object)  # {job: Held}: the jobs runs still going are to run (Pipeliner.held_jobs), at each look
 
     def __init__(self, window: QMainWindow, defs: JobDefs, env: RelionEnv, type_names: dict[str, str],
                  tomo: bool, readonly: bool, flag_source=None):
@@ -110,7 +111,7 @@ class ActionsBase(QObject):
         self._structure: object = None  # snapshot.structure_key() of the last snapshot
         self._nodes: object = None  # the pipeline's nodes (name, type, producer) when the input lists were filled
         self._has_trash = False  # looked at when the project changes, not on every selection
-        self._has_repeating = False
+        self._has_stoppable = False  # a run that Stop runs can stop is going
         self._look_pool = QThreadPool(self)  # those looks read Trash/ and the run records: off the GUI thread
         self._look_pool.setMaxThreadCount(1)
         self._look_signals = _Signals()
@@ -195,7 +196,8 @@ class ActionsBase(QObject):
         self.update_state()
 
     def _look_at_project(self) -> None:
-        """What Undelete and Stop repeating runs need: once per snapshot (a change), not per click.
+        """What Undelete and Stop runs need, and the jobs runs still going hold: once per snapshot (a change),
+        not per click.
 
         Read in the background (a big Trash/ over a slow file system); a change while a look is
         going is looked at again once it is done."""
@@ -204,24 +206,40 @@ class ActionsBase(QObject):
             return
         self._looking, self._look_again = True, False
         project, ops, pl = self.project_dir, self.ops, self.pipeliner
-        self._look_pool.start(_Task(lambda: (project, *self._project_state(ops, pl)), self._look_signals))
+        pipeline = self.snapshot.pipeline if self.snapshot is not None else None  # not changed once made
+        self._look_pool.start(_Task(lambda: (project, *self._project_state(ops, pl, pipeline)), self._look_signals))
 
     @staticmethod
-    def _project_state(ops: PipelineOps | None, pl: Pipeliner | None) -> tuple[bool, bool]:
-        """(anything to undelete, any repeating run going)."""
-        return ops is not None and bool(ops.trash()), pl is not None and bool(pl.repeating_runs())
+    def _project_state(ops: PipelineOps | None, pl: Pipeliner | None, pipeline=None) -> tuple[bool, bool, dict]:
+        """(anything to undelete, any run Stop runs can stop, the jobs runs still going hold)."""
+        held = pl.held_jobs(pipeline) if pl is not None else {}
+        stoppable = pl is not None and (bool(pl.repeating_runs()) or any(h.waiting for h in held.values()))
+        return ops is not None and bool(ops.trash()), stoppable, held
 
     def look_at_project_now(self) -> None:
         """_look_at_project, done at once (tests)."""
-        self._has_trash, self._has_repeating = self._project_state(self.ops, self.pipeliner)
+        pipeline = self.snapshot.pipeline if self.snapshot is not None else None
+        self._has_trash, self._has_stoppable, held = self._project_state(self.ops, self.pipeliner, pipeline)
+        self.runs.emit(held)
         self.update_state()
 
+    def _held_now(self) -> dict:
+        """Pipeliner.held_jobs for the latest snapshot, looked at now ({} when it cannot be told)."""
+        pl, snap = self.pipeliner, self.snapshot
+        if pl is None or snap is None:
+            return {}
+        try:
+            return pl.held_jobs(snap.pipeline)
+        except (OSError, ValueError, RuntimeError):
+            return {}
+
     def _on_look(self, result) -> None:
-        """``result``: (project, has_trash, has_repeating), or None when the look failed (kept as it was)."""
+        """``result``: (project, has_trash, has_stoppable, held), or None when the look failed (kept as it was)."""
         self._looking = False
-        project, has_trash, has_repeating = result if result is not None else (None, False, False)
+        project, has_trash, has_stoppable, held = result if result is not None else (None, False, False, {})
         if result is not None and project == self.project_dir:  # not one of the project open before
-            self._has_trash, self._has_repeating = has_trash, has_repeating
+            self._has_trash, self._has_stoppable = has_trash, has_stoppable
+            self.runs.emit(held)
             self.update_state()
         if self._look_again or (result is not None and project != self.project_dir):
             self._look_at_project()

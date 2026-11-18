@@ -255,6 +255,8 @@ class MainWindow(QMainWindow):
         self.info.forms = self.actions.forms  # the editor's forms, also read-only
         self.actions.changed.connect(self._force_refresh)
         self.actions.select.connect(self._select_soon)
+        self.actions.runs.connect(self.tree.set_runs)
+        self.actions.runs.connect(self.info.set_runs)
         self.actions.message.connect(lambda m: self.statusBar().showMessage(m, 6000))
         self.actions.star.connect(self.set_star)
 

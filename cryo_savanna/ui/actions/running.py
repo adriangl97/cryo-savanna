@@ -90,7 +90,12 @@ class RunActions(_Base):
         snap, pl = self.snapshot, self._ready()[1]
         if snap is None:
             return
-        jobs = [(n, self._label(n)) for n, i in snap.jobs.items() if i.status == "Scheduled"]
+        held = self._held_now()  # a job a run still going is to run cannot be run by a second one
+        jobs = [(n, self._label(n)) for n, i in snap.jobs.items() if i.status == "Scheduled" and n not in held]
+        if not jobs:
+            QMessageBox.information(self.window, "Run scheduled jobs", "Every scheduled job is already in a run "
+                                    "that is still going (Job → Stop runs… stops one that waits for its inputs).")
+            return
         dlg = RunScheduledDialog(self.window, jobs, self.current if self.current in dict(jobs) else None)
         if dlg.exec() != QDialog.Accepted or not dlg.selected():
             return
@@ -98,22 +103,30 @@ class RunActions(_Base):
         self._run("Run scheduled jobs", lambda: pl.run(selected, **args))
 
     def stop_runs(self) -> None:
-        """Stop a repeating run after the job it is running (RELION's pipeliner checks its flag file)."""
-        pl = self._ready()[1]
-        runs = pl.repeating_runs()
+        """Stop a run: a repeating one after the job it runs (RELION's pipeliner checks its flag file), one that
+        waits for the input files of its next job now (its relion_pipeliner is ended; the job stays Scheduled)."""
+        pl, snap = self._ready()[1], self.snapshot
+        runs = pl.stoppable_runs(snap.pipeline if snap is not None else None)
         if not runs:
             self._look_at_project()
             self.update_state()
-            self.message.emit("No repeating run is going.")
+            self.message.emit("No run that can be stopped is going.")
             return
-        labels = [f"{time.strftime('%d %b %H:%M', time.localtime(r.started))} · {r.repeat}× · "
-                  + ", ".join(self._label(j) for j in r.jobs) for r in runs]
-        label, ok = QInputDialog.getItem(self.window, "Stop repeating runs",
-                                         "Stop this run after its current job:", labels, 0, False)
+
+        def label(rec, kind) -> str:
+            what = (f"{rec.repeat}× · stops after its current job" if kind == "repeating"
+                    else "waits for its inputs · stops now")
+            return (f"{time.strftime('%d %b %H:%M', time.localtime(rec.started))} · {what} · "
+                    + ", ".join(self._label(j) for j in rec.jobs))
+        labels = [label(r, k) for r, k in runs]
+        choice, ok = QInputDialog.getItem(self.window, "Stop runs", "Stop this run:", labels, 0, False)
         if not ok:
             return
-        rec = runs[labels.index(label)]
-        self._run("Stop repeating run", lambda: pl.stop_schedule(rec))
+        rec, kind = runs[labels.index(choice)]
+        if kind == "repeating":
+            self._run("Stop repeating run", lambda: pl.stop_schedule(rec))
+        else:
+            self._run("Stop run", lambda: pl.end_run(rec))
 
     def abort_job(self) -> None:
         job = self.current

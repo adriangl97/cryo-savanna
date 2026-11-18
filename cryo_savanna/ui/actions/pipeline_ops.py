@@ -59,6 +59,12 @@ class PipelineActions(_Base):
         running = [p for p in procs if snap.jobs[p].status == "Running"]
         if running:
             text += "\n\nStill running: " + ", ".join(self._label(p) for p in running)
+        held = {p: h for p, h in self._held_now().items() if p in procs}
+        if held:
+            text += ("\n\nWARNING: in a run that is still going: " + "; ".join(
+                f"{self._label(p)} ({h.describe()})" for p, h in held.items()) + ". RELION's pipeliner looks its "
+                "jobs up by name when the run ends and crashes if one is gone, which can leave default_pipeline.star "
+                "empty and locked. Stop that run first (Job → Stop runs…, or abort its running job).")
         moved = moved_running(snap, procs)
         if moved:
             text += ("\n\nWARNING: these running jobs come after it in the pipeline: "
@@ -66,7 +72,8 @@ class PipelineActions(_Base):
                      "their place in the pipeline, and deleting moves them up, so it may mark the wrong job as "
                      "finished (or never mark the one that ended). Better delete once they have finished.")
         text += self._trash_warning(procs)
-        if QMessageBox.question(self.window, "Delete", text) != QMessageBox.Yes:
+        default = QMessageBox.No if held or moved else QMessageBox.Yes
+        if QMessageBox.question(self.window, "Delete", text, QMessageBox.Yes | QMessageBox.No, default) != QMessageBox.Yes:
             return
         self._run(f"Delete {self._label(job)}", lambda: ops.delete(job, recursive))
 

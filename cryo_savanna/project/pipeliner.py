@@ -27,6 +27,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import signal
 import socket
 import subprocess
 import time
@@ -38,9 +39,16 @@ from cryo_savanna.env.child import external_environ
 from cryo_savanna.jobdefs import external_jobs
 from cryo_savanna.project import processes
 from cryo_savanna.project.jobstar import JobStar
+from cryo_savanna.project.lock import PipelineLock
 from cryo_savanna.project.ops import TRASH_DIR, PipelineOps, placeholder
 from cryo_savanna.project.pipeline import Pipeline
-from cryo_savanna.relion_consts import RELION_JOB_ABORT_NOW, RELION_JOB_EXIT_SUCCESS, STATUS_RUNNING, job_type_for_label
+from cryo_savanna.relion_consts import (
+    RELION_JOB_ABORT_NOW,
+    RELION_JOB_EXIT_SUCCESS,
+    STATUS_RUNNING,
+    STATUS_SCHEDULED,
+    job_type_for_label,
+)
 
 GUI_DIR = ".cryo-savanna"
 SCHEDULE = "cryo-savanna"  # one pipeline_cryo-savanna.log for all single runs (RELION writes it in the project)
@@ -86,8 +94,36 @@ class RunRecord:
         that cannot be told (no /proc and no ps)."""
         args = _command_line(self.pid)
         if args is None:
+            try:  # gone meanwhile (reaped by another look at it, in another thread), or cannot be told
+                os.kill(self.pid, 0)
+            except ProcessLookupError:
+                return False
+            except PermissionError:
+                pass
             return True
         return "--RunJobs" in args and self.schedule in args
+
+
+@dataclass
+class Held:
+    """A job that a relion_pipeliner started here and still going is to run (or runs): see Pipeliner.held_jobs."""
+    run: RunRecord
+    current: bool  # the job the run is at now (not one after it)
+    waiting_for: list[str] = field(default_factory=list)  # its input files not there yet (RELION waits for them)
+
+    @property
+    def waiting(self) -> bool:
+        """The run waits for this job's input files: it has not started it, and nothing of it runs."""
+        return self.current and bool(self.waiting_for)
+
+    def describe(self) -> str:
+        started = time.strftime("%d %b %H:%M", time.localtime(self.run.started))
+        text = f"in a run started {started} (relion_pipeliner {self.run.pid} on {self.run.host})"
+        if self.waiting:
+            text += ", waiting for " + ", ".join(self.waiting_for)
+        elif not self.current:
+            text += ", after the job it runs now"
+        return text
 
 
 @dataclass
@@ -163,6 +199,7 @@ class Pipeliner:
             raise PipelinerError(f"no such job: {job}")
         if pr.status == STATUS_RUNNING:
             raise PipelinerError(f"{job.rstrip('/')} is running: abort it first.")
+        self._check_free([job])  # the run would run the new job, and looks it up by name meanwhile
         ops = PipelineOps(self.project_dir)
         # the old job's place is kept, and the new job (added at the end) is put there: as in RELION's GUI,
         # which runs it where it was, no job moves (RELION's pipeliners keep running jobs by their place)
@@ -266,6 +303,7 @@ class Pipeliner:
         """Run these jobs, in this order, in a detached relion_pipeliner."""
         if not jobs:
             raise PipelinerError("no jobs to run")
+        self._check_free(jobs)
         for job in jobs:  # scheduled earlier, perhaps by another cryo-savanna (or the project's copy was removed)
             try:
                 self._runner_for(JobStar.read(self.project_dir / job / "job.star"))
@@ -290,10 +328,78 @@ class Pipeliner:
 
     def continue_job(self, job: str, jobstar: JobStar, **run_args) -> RunRecord:
         """Continue an existing job with these (continue-mode) options."""
+        self._check_free([job])
         jobstar.is_continue = True
         self._runner_for(jobstar)
         jobstar.write(self.project_dir / job / "job.star")
         return self.run([job], **run_args)
+
+    # ------------------------------------------------------------------ runs still going
+    def held_jobs(self, pipeline: Pipeline | None = None) -> dict[str, Held]:
+        """The jobs that a relion_pipeliner started on this host, and still going, is to run or runs: those of
+        its jobs the pipeline has as Scheduled or Running (it goes through them in order and stops at the first
+        that fails, so one that ended is done). Runs on other hosts cannot be told apart from ended ones.
+
+        Such a job must stay in the pipeline under its name (at the end of a run, RELION's pipeliner looks each
+        of its jobs up by name, and does not check that it found it: it corrupts its memory, and can leave
+        default_pipeline.star empty with the lock taken), and must not be run by a second pipeliner."""
+        p = pipeline if pipeline is not None else Pipeline.read(self.project_dir)
+        out: dict[str, Held] = {}
+        for rec in sorted(self.runs(), key=lambda r: r.started):  # a newer run of a job wins
+            ahead = [j for j in rec.jobs if j in p.processes and p.processes[j].status in (STATUS_SCHEDULED,
+                                                                                             STATUS_RUNNING)]
+            if not ahead or rec.is_alive() is not True:
+                continue
+            for k, job in enumerate(ahead):
+                pr = p.processes[job]
+                missing = ([n for n in pr.inputs if not (self.project_dir / n).exists()]
+                           if k == 0 and pr.status == STATUS_SCHEDULED else [])
+                out[job] = Held(rec, k == 0, missing)
+        return out
+
+    def _check_free(self, jobs: list[str]) -> None:
+        """Refuse to run jobs that a run still going is to run already (two pipeliners for one job: both
+        would run it, in the same directory, and both would set its status)."""
+        try:
+            held = self.held_jobs()
+        except (OSError, ValueError, RuntimeError):
+            return  # the pipeline cannot be read now: relion_pipeliner tells
+        taken = [j for j in jobs if j in held]
+        if taken:
+            raise PipelinerError("Already in a run that is still going:\n" + "\n".join(
+                f"  {j.rstrip('/')}: {held[j].describe()}" for j in taken)
+                + "\n\nWait for it, or stop that run first (Job → Stop runs…).")
+
+    def stoppable_runs(self, pipeline: Pipeline | None = None) -> list[tuple[RunRecord, str]]:
+        """Runs that can be stopped, newest first: (run, "repeating") for a repeating run (it stops after its
+        current job), (run, "waiting") for a run on this host that waits for the input files of its next job
+        (its relion_pipeliner can be ended now: nothing of the job has started)."""
+        out: dict[str, tuple[RunRecord, str]] = {r.id: (r, "repeating") for r in self.repeating_runs()}
+        for held in self.held_jobs(pipeline).values():
+            if held.waiting and held.run.id not in out:
+                out[held.run.id] = (held.run, "waiting")
+        return sorted(out.values(), key=lambda x: x[0].started, reverse=True)
+
+    def end_run(self, rec: RunRecord) -> None:
+        """End the relion_pipeliner of a run that waits for input files (stoppable_runs). It is ended while
+        cryo-savanna holds RELION's pipeline lock, so it is not in the middle of writing the pipeline (RELION
+        writes the file in place: a pipeliner ended there leaves it empty). The jobs it was to run stay
+        Scheduled."""
+        if rec.host != socket.gethostname():
+            raise PipelinerError(f"That run was started on {rec.host}: stop it from a cryo-savanna there.")
+        args = _command_line(rec.pid)
+        if rec.is_alive() is not True or (args is not None and "--RunJobs" not in args):
+            return  # it ended meanwhile
+        with PipelineLock(self.project_dir, message="cryo-savanna: stopping a run that waits for its inputs"):
+            try:
+                os.kill(rec.pid, signal.SIGTERM)
+            except ProcessLookupError:
+                return
+            deadline = time.monotonic() + 10
+            while rec.is_alive() and time.monotonic() < deadline:
+                time.sleep(0.2)
+        if rec.is_alive():
+            raise PipelinerError(f"relion_pipeliner {rec.pid} did not stop.")
 
     def stop_schedule(self, rec: RunRecord) -> bool:
         """Stop a repeating run after the current job (RELION checks RUNNING_PIPELINER_<schedule>)."""

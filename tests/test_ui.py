@@ -677,3 +677,34 @@ def test_a_change_made_while_a_poll_reads_is_read_after_it(qtbot, window, spa_co
     go.set()
     qtbot.waitUntil(lambda: "Class2D/job019/" in w.snapshot.jobs, timeout=5000)
     assert calls == [False, True]
+
+
+def test_a_run_still_going_shows_and_guards_its_jobs(window, spa_copy, monkeypatch):
+    """A scheduled job a live run waits to run: shown as such, Stop runs offers that run, and Delete warns (RELION's
+    pipeliner looks its jobs up by name at the end of the run, and crashes if one is gone)."""
+    from qtpy.QtWidgets import QMessageBox
+
+    from cryo_savanna.ui.job_tree import COL_STATUS
+    from tests.test_pipeliner import _live_run
+    proc = _live_run(spa_copy, "a", ["Refine3D/job016/"])
+    try:
+        w = window(spa_copy)
+        w.actions.look_at_project_now()
+        job = "Refine3D/job016/"
+        assert w.tree._items[job][COL_STATUS].text() == "Scheduled · waiting for input"
+        assert w.actions.act_stop_runs.isEnabled()
+        w.select_job(job)
+        assert "waiting for Polish/job015/shiny.star" in w.info.overview.toPlainText()
+        asked = []
+        monkeypatch.setattr(QMessageBox, "question", lambda parent, title, text, *a: asked.append(text)
+                            or QMessageBox.No)
+        w.actions.delete(False)
+        assert "in a run that is still going" in asked[0]
+        proc.kill()
+        proc.wait()
+        w.actions.look_at_project_now()
+        assert w.tree._items[job][COL_STATUS].text() == "Scheduled"
+        assert not w.actions.act_stop_runs.isEnabled()
+    finally:
+        proc.kill()
+        proc.wait()

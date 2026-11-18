@@ -72,8 +72,9 @@ class JobActions(FormActions, SelectionActions, RunActions, PipelineActions, Act
                                        tip="Run the selected job again with new settings in its own directory "
                                            "(the current one goes to Trash/)")
         self.act_run = self._act("Run scheduled…", self.run_scheduled, "Ctrl+R", "Run scheduled jobs")
-        self.act_stop_runs = self._act("Stop repeating runs…", self.stop_runs,
-                                       tip="Stop a repeating run of scheduled jobs after its current job")
+        self.act_stop_runs = self._act("Stop runs…", self.stop_runs,
+                                       tip="Stop a repeating run after its current job, or a run that waits for "
+                                           "the input files of its next job")
         self.act_abort = self._act("Abort…", self.abort_job,
                                    tip="Ask the selected running job to stop; a job run on this machine (not in a "
                                        "queue) can also be killed (force abort)")
@@ -165,7 +166,7 @@ class JobActions(FormActions, SelectionActions, RunActions, PipelineActions, Act
         self.act_overwrite.setEnabled(self.act_continue.isEnabled())
         scheduled = snap is not None and any(j.status == "Scheduled" for j in snap.jobs.values())
         self.act_run.setEnabled(writable and has_pipeliner and scheduled)
-        self.act_stop_runs.setEnabled(writable and self._has_repeating)
+        self.act_stop_runs.setEnabled(writable and self._has_stoppable)
         self.act_abort.setEnabled(writable and status == "Running")
         for a in (self.act_alias, self.act_finished, self.act_failed, self.act_delete, self.act_delete_all):
             a.setEnabled(writable and info is not None)

@@ -113,6 +113,7 @@ class JobTreeView(QTreeView):
             h.setSectionResizeMode(c, QHeaderView.ResizeToContents)
         self.setColumnHidden(COL_QUEUE, True)  # shown once SLURM is found
         self.queue = None  # slurm.QueueState
+        self.held: dict = {}  # job -> pipeliner.Held: the jobs runs still going are to run
         self._items: dict[str, list[QStandardItem]] = {}
         self._structure: tuple | None = None
         self._collapsed: set[str] = set()
@@ -185,6 +186,14 @@ class JobTreeView(QTreeView):
         if selected and selected in self._items:
             self.select_job(selected, scroll=False)
         self.verticalScrollBar().setValue(scroll)
+
+    def set_runs(self, held: dict) -> None:
+        """The jobs runs still going are to run (Pipeliner.held_jobs): shown with their status."""
+        old, self.held = self.held, held
+        with self._many_changes():
+            for name in old.keys() | held.keys():
+                if name in self._items and self._snapshot is not None and name in self._snapshot.jobs:
+                    self._fill_summary(self._items[name], self._snapshot.jobs[name], self.summaries.get(name))
 
     def set_queue(self, state) -> None:
         """Show each job's place in the SLURM queue (a slurm.QueueState)."""
@@ -341,6 +350,9 @@ class JobTreeView(QTreeView):
 
     def _status_text(self, info: JobInfo, now: float | None = None) -> str:
         text = info.status + ("*" if info.pending_update else "")
+        held = self.held.get(info.name)
+        if info.status == "Scheduled" and held is not None:
+            text += " · waiting for input" if held.waiting else " · in a run"
         s = self.summaries.get(info.name)
         if info.status == "Running" and s is not None and s.progress(now):
             text += " · " + s.progress(now)

@@ -88,8 +88,9 @@ polling interval (Preferences, or `--poll`), and views of running jobs read new 
   scheduled jobs; *Run all now* starts each in its own `relion_pipeliner`, so they run side by side (it
   asks first when several would run on this machine rather than the queue). Above 20 jobs it asks again as a safety measure.
 - **Clone** (Ctrl+D), **Continue**, **Overwrite** (the job goes to Trash/ and runs again in the same
-  directory with new settings), **Schedule**, **Run scheduled** (Ctrl+R), **Stop repeating runs** (a repeating run stops after its
-  current job), **Abort** (see below), **Clean**,
+  directory with new settings), **Schedule**, **Run scheduled** (Ctrl+R), **Stop runs** (a repeating run stops after its
+  current job. A run that waits for the input files of its next job stops now, and the job stays
+  Scheduled), **Abort** (see below), **Clean**,
   **Set alias** (F2), **Star** (Ctrl+B), **Mark as finished / failed**, **Delete** (Del, to Trash/), **Undelete**.
   Trash/ keeps one copy per job directory: overwriting or deleting a job whose earlier version is
   already there (after an overwrite) deletes that version for good, and the confirmation says so.

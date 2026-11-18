@@ -89,6 +89,7 @@ class JobInfoPanel(QTabWidget):
         self._flags_pool = QThreadPool(self)
         self._flag_tasks: set[FlagsTask] = set()
         self.queue = None  # slurm.QueueState
+        self.held: dict = {}  # job -> pipeliner.Held: the jobs runs still going are to run
         self.history: dict[str, list | str] = {}  # job -> its SLURM jobs (slurm.AcctJob), or an error
         self.main_inputs: MainInputs | None = None  # the main inputs chosen in cryo-savanna
         self.overview.setHtml("<p>Select a job.</p>")
@@ -121,6 +122,17 @@ class JobInfoPanel(QTabWidget):
         self.queue = state
         if self._job and self._snap is not None and style.queue_entry(state, self._job) != old:
             self._refresh_overview()
+
+    def set_runs(self, held: dict) -> None:
+        """The jobs runs still going are to run (Pipeliner.held_jobs)."""
+        old = self._held_text(self._job)
+        self.held = held
+        if self._job and self._snap is not None and self._held_text(self._job) != old:
+            self._refresh_overview()
+
+    def _held_text(self, job: str | None) -> str:
+        h = self.held.get(job) if job else None
+        return h.describe() if h is not None else ""
 
     def set_history(self, job: str, rows) -> None:
         self.history[job] = rows
@@ -280,6 +292,9 @@ class JobInfoPanel(QTabWidget):
         if q_text:
             rows.insert(2, ("Queue", f"<b style='color:{style.QUEUE_COLORS[q_kind].name()}'>{html.escape(q_text)}"
                                      f"</b><br><span style='color:gray'>{html.escape(q_details)}</span>"))
+        run = self._held_text(name)
+        if run:
+            rows.insert(2, ("Run", html.escape(run)))
         if pr.has_alias:
             rows.insert(0, ("Alias", html.escape(pr.alias)))
         summary = self.summaries.get(name)
