@@ -11,7 +11,8 @@ from cryo_savanna.env.relion_env import RelionEnv
 from cryo_savanna.jobdefs.flags import (
     JOB_PROGRAMS,
     FlagSource,
-    command_flags,
+    job_flags,
+    option_flags,
     parse_args,
     parse_help,
     program_for,
@@ -87,16 +88,24 @@ def test_editing_the_arguments_text():
     assert parse_args(set_arg("", "--sym", "it's"))["--sym"] == ["it's"]  # an open quote is quoted too
 
 
-def test_command_flags_from_note():
-    note = (" ++++ Executing new job on Tue Oct 28 10:00:00 2026\n ++++ with the following command(s):\n"
-            "`which relion_refine_mpi` --o Class2D/job001/run --iter 25 --K 50 --ctf --skip_gridding --pad 2 "
-            "--pipeline_control Class2D/job001/\n ++++ \n"
-            " ++++ Executing new job on Wed Oct 29 10:00:00 2026\n ++++ with the following command(s):\n"
-            "`which relion_refine_mpi` --o Class2D/job001/run --iter 30 --K 50 --ctf --iter 40\n"
-            "`which relion_align_symmetry` --sym C2\n ++++ \n")
-    flags = command_flags(note, other_args="--iter 40", program="relion_refine")
-    assert flags == {"--o": "Class2D/job001/run", "--iter": "30", "--K": "50", "--ctf": ""}  # the last run only
-    assert "--sym" in command_flags(note)
+def test_flags_the_jobs_write_themselves():
+    """From RELION's command builders (tools/extract_jobdefs/command_flags.py): every job type, its flags and
+    the options behind them."""
+    defs = JobDefs.load()
+    labels = {v.label for v in defs.variants.values()}
+    c3d = job_flags("relion.class3d")
+    assert c3d["--tau2_fudge"].options == ("tau_fudge",) and c3d["--K"].options == ("nr_classes",)
+    assert c3d["--firstiter_cc"].options == ("ref_correct_greyscale",) and "fn_ref" in c3d["--firstiter_cc"].under
+    assert c3d["--sigma_psi"].options == ("do_local_ang_searches", "dont_skip_align", "range_psi")  # via a variable
+    assert c3d["--norm"].options == () and c3d["--o"].options == ()  # always written
+    assert c3d["--ios"].options == ("in_optimisation",)  # from getTomoInputCommmand, for the tomo variant
+    assert "--pad" in job_flags("relion.class3d.helical")  # a label RELION extends
+    assert job_flags("relion.no_such_job") == {}
+    for label in labels:  # every option a flag names is one of the job type's own
+        own = {k for v in defs.variants.values() if v.label == label for k in v.options}
+        for f in job_flags(label).values():
+            assert set(f.under) <= own, (label, f)
+    assert option_flags("relion.class3d")["sym_name"] == ["--sym"]
 
 
 def test_live_help_is_used_and_cached(tmp_path):

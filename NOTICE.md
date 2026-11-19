@@ -29,6 +29,7 @@ under the BSD 3-Clause License (see below):
 | In cryo-savanna | Derived from (RELION source) |
 |---|---|
 | `cryo_savanna/jobdefs/relion-5.1.1.json`: job options, defaults, help texts, tabs and job menus | `src/pipeline_jobs.cpp`, `src/gui_jobwindow.cpp`, `src/gui_mainwindow.cpp` (extracted by `tools/extract_jobdefs/`, which compiles these functions against `stubs.h`) |
+| `cryo_savanna/jobdefs/command-flags-5.1.1.json`: the flags each job type writes on its command line, and the options behind them | `src/pipeline_jobs.cpp` (`RelionJob::getCommands*Job`, `getTomoInputCommmand`; read by `tools/extract_jobdefs/command_flags.py`) |
 | `cryo_savanna/jobdefs/help/5.1.1/*.txt`, `tests/data/help-5.1.1/`: the `--help` output of RELION's programs (RELION 5.1.1, see above) | the programs' sources in `src/` and `src/apps/` |
 | `cryo_savanna/project/pipeline.py`, `lock.py`, `ops.py`, `jobstar.py`, `cryo_savanna/relion_consts.py`: reading and writing `default_pipeline.star` and `job.star`, the pipeline lock, alias / mark finished / delete / undelete, job types and node labels | `src/pipeliner.cpp`, `src/pipeliner.h`, `src/pipeline_jobs.cpp`, `src/pipeline_jobs.h`, `src/pipeline_control.h`; for `ops.py` also `src/filename.cpp` (`decomposePipelineFileName`, `FileName::beforeNthOf`) |
 | `cryo_savanna/project/star.py`: reading and writing STAR files | `src/strings.cpp`, `src/metadata_table.cpp` |
@@ -82,8 +83,8 @@ Biotecnologia, CSIC" (GPL version 2 or later).
 Each cryo-savanna file ported from these sources carries this notice in its header too, with
 the XMIPP authors in `cryo_savanna/project/star.py`, `cryo_savanna/project/ops.py`,
 `cryo_savanna/project/selection.py`, `cryo_savanna/ui/job_editor.py` and
-`tools/extract_jobdefs/stubs.h`; `cryo_savanna/jobdefs/relion-5.1.1.json` carries it in its `notice`
-field.
+`tools/extract_jobdefs/stubs.h`; `cryo_savanna/jobdefs/relion-5.1.1.json` and
+`cryo_savanna/jobdefs/command-flags-5.1.1.json` carry it in their `notice` field.
 
 RELION's tomography Python programs (`src/tomography_python_programs/`, by Alister Burt) carry no
 notice in their files; RELION's `pyproject.toml` declares them as "BSD 3-Clause License". Their

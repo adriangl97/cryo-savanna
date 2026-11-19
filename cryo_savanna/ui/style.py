@@ -151,6 +151,12 @@ def queue_entry(state, job: str) -> tuple[str, str, str]:
     return "", "", ""
 
 
+def slurm_elapsed(state, job: str) -> float | None:
+    """How long a job running in SLURM has run (its SLURM job's time used), else None."""
+    q = state.live.get(job) if state is not None else None
+    return q.elapsed_seconds() if q is not None else None
+
+
 def lost_details(a) -> str:
     bits = [f"exit code {a.exit_code}"] if a.exit_code else []
     if a.elapsed:

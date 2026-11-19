@@ -102,6 +102,12 @@ class QueueJob:
     def pending(self) -> bool:
         return self.state == "PENDING"
 
+    def elapsed_seconds(self) -> float | None:
+        """How long the SLURM job has run (squeue's time used: 5:06, 1:02:03, 2-03:04:05); None while queued or not
+        readable. The job's real run time: RELION's note.txt has when it was sent to the queue."""
+        from cryo_savanna.project.submit_script import slurm_seconds
+        return slurm_seconds(self.elapsed) if self.state == "RUNNING" and self.elapsed else None
+
     def short(self) -> str:
         """For the tree and the cards: "queued (Priority)", "running 1:02:03 on node12"."""
         if self.pending:

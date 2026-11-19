@@ -25,7 +25,8 @@ from cryo_savanna.project.snapshot import job_type_names  # noqa: E402
 from cryo_savanna.project.star import write_star  # noqa: E402
 from cryo_savanna.tools.validate import EXTERNAL_SCRIPT, pipeliner_version  # noqa: E402
 from cryo_savanna.ui import preferences as P  # noqa: E402
-from cryo_savanna.ui.flag_panel import COL_DEFAULT, COL_FLAG, COL_VALUE  # noqa: E402
+from cryo_savanna.jobdefs.flags import ADVANCED_TAB  # noqa: E402
+from cryo_savanna.project import references  # noqa: E402
 from cryo_savanna.ui.job_editor import JobEditor, NodeWidget, node_matches, qt_file_filter  # noqa: E402
 from cryo_savanna.ui.main_window import MainWindow  # noqa: E402
 
@@ -163,52 +164,143 @@ def test_search_filters_rows(editor):
     assert ("sym_name",) in visible and ("nr_classes",) not in visible
 
 
-def test_all_flags_under_additional_arguments(editor):
+def _tab(editor, label):
+    return next(i for i in range(editor.tabs.count()) if editor.tabs.tabText(i).split("  (")[0] == label)
+
+
+def test_advanced_parameters_tab(editor):
     editor.new_job(DEFS.variant("relion.class3d"))
-    panel, box = editor.flag_panel, editor.widgets["other_args"]
-    assert panel.program == "relion_refine" and len(panel.items) == 150
-    # ticking a switch and typing a value write the box
-    panel.items["--dont_skip_gridding"].setCheckState(COL_FLAG, Qt.Checked)
-    panel.items["--pad"].setText(COL_VALUE, "1")
-    assert box.value() == "--dont_skip_gridding --pad 1"
-    assert panel.items["--pad"].checkState(COL_FLAG) == Qt.Checked
-    assert editor.changed_options()["other_args"] == ("", "--dont_skip_gridding --pad 1")
-    # typing in the box ticks the flags, and names the ones the program does not have
-    box.set_value("--pad 2 my_note --nonsense")
-    assert panel.items["--pad"].text(COL_VALUE) == "2"
-    assert panel.items["--dont_skip_gridding"].checkState(COL_FLAG) == Qt.Unchecked
-    assert not panel.notice.isHidden() and "--nonsense" in panel.notice.text()
-    panel.items["--pad"].setCheckState(COL_FLAG, Qt.Unchecked)
-    assert box.value() == "my_note --nonsense"
-    assert editor.jobstar().options["other_args"] == "my_note --nonsense"
+    adv, box = editor.advanced, editor.widgets["other_args"]
+    tabs = [editor.tabs.tabText(i) for i in range(editor.tabs.count())]
+    assert tabs[-2:] == ["Running", ADVANCED_TAB] and editor.advanced_tab == len(tabs) - 1
+    running = [row.keys for ti, row, _ in editor.rows if ti == _tab(editor, "Running")]
+    assert ("other_args",) not in running  # the box moved to the new tab, at its top
+    assert box.parent() is adv and adv.program == "relion_refine"
+    # the flags the job writes itself are left out: from its options (other tabs) and those it always writes
+    hidden = set(adv.hidden())
+    assert {"--iter", "--K", "--tau2_fudge", "--ref", "--firstiter_cc", "--norm", "--o", "--j", "--gpu"} <= hidden
+    assert not hidden & adv.rows.keys() and len(adv.rows) + len(hidden) == 150
+    assert "--iter: Number of iterations" in adv.header.toolTip()
+    assert [s.name for s in adv.sections][:2] == ["General options", "Initialisation"]  # as in --help
+    # a switch is Yes/No, a value a field with the program's default; changing one writes the box
+    adv.rows["--dont_skip_gridding"].widget.set_value("Yes")
+    adv.rows["--maskedge"].widget.set_value("7")
+    assert box.value() == "--dont_skip_gridding --maskedge 7"
+    assert adv.rows["--maskedge"].label.font().bold() and not adv.rows["--verb"].label.font().bold()
+    assert editor.changed_options()["other_args"] == ("", "--dont_skip_gridding --maskedge 7")
+    adv.rows["--maskedge"].widget.set_value("5")  # back to the default: not passed
+    assert box.value() == "--dont_skip_gridding"
+    # typing in the box fills in the rows, and names what is not one of them
+    box.set_value("--pad 1 my_note --nonsense --maskedge 9")
+    assert adv.rows["--maskedge"].widget.value() == "9" and adv.rows["--dont_skip_gridding"].widget.value() == "No"
+    assert not adv.notice.isHidden() and "--nonsense" in adv.notice.text() and "--pad" in adv.notice.text()
+    adv.rows["--maskedge"].widget.set_value("5")
+    assert box.value() == "--pad 1 my_note --nonsense"
+    assert editor.jobstar().options["other_args"] == "--pad 1 my_note --nonsense"
+    assert "command line: --tau2_fudge" in (editor.show_help("tau_fudge") or editor.help.toPlainText())
 
 
-def test_flags_follow_the_program_and_the_search(editor):
+def test_advanced_parameters_follow_the_program_and_the_search(editor):
     editor.new_job(DEFS.variant("relion.autopick"))
-    assert editor.flag_panel.program == "relion_autopick"
+    assert editor.advanced.program == "relion_autopick"
     editor.widgets["do_amyloid"].set_value("Yes")
-    assert editor.flag_panel.program == "relion_find_amyloid"
+    assert editor.advanced.program == "relion_find_amyloid"
     editor.new_job(DEFS.variant("relion.external"))
-    assert editor.flag_panel.flags is None and "your program" in editor.flag_panel.header.text()
+    assert editor.advanced.flags is None and "your program" in editor.advanced.header.text()
     editor.new_job(DEFS.variant("relion.refine3d"))
     editor.search.setText("skip_gridding")  # a flag, not a job option
-    running = [i for i in range(editor.tabs.count()) if editor.tabs.tabText(i).startswith("Running")][0]
-    assert editor.tabs.isTabEnabled(running) and editor.flag_panel.isVisibleTo(editor)
-    shown = [n for n, it in editor.flag_panel.items.items() if not it.isHidden()]
-    assert shown == ["--dont_skip_gridding"]
+    adv = _tab(editor, ADVANCED_TAB)
+    assert editor.tabs.isTabEnabled(adv) and editor.tabs.tabText(adv) == f"{ADVANCED_TAB}  (2)"  # it and the box
+    shown = [n for n, r in editor.advanced.rows.items() if not r.label.isHidden()]
+    assert shown == ["--dont_skip_gridding"] and editor.tabs.currentIndex() == adv
+    editor.search.clear()
+    editor.advanced.rows["--verb"].widget.set_value("0")
+    editor.only_changed.setChecked(True)
+    assert [n for n, r in editor.advanced.rows.items() if not r.label.isHidden()] == ["--verb"]
+    assert editor.tabs.tabText(adv) == f"{ADVANCED_TAB}  (2)"
+    editor.widgets["other_args"].set_value("")
+    assert editor.tabs.tabText(adv) == f"{ADVANCED_TAB}  (0)"
 
 
-def test_flags_set_by_the_job_show_its_value(editor, spa_copy):
-    editor.set_project(spa_copy, Pipeline.read(spa_copy))
-    note = spa_copy / "Class3D/job009/note.txt"
-    note.write_text(note.read_text().replace("`which relion_class3d` --o Class3D/job009/",
-                                             "`which relion_refine_mpi` --o Class3D/job009/run --iter 25 --ctf"))
-    editor.new_job(DEFS.variant("relion.class3d"))  # the newest Class3D job's command
-    panel = editor.flag_panel
-    assert panel.job_flags_from == "Class3D/job009"
-    assert panel.items["--iter"].text(COL_DEFAULT) == "job: 25" and panel.items["--ctf"].text(COL_DEFAULT) == "job: on"
-    panel.items["--iter"].setCheckState(COL_FLAG, Qt.Checked)
-    assert editor.widgets["other_args"].value() == "--iter 25"  # starts from the job's value, to override
+def test_advanced_parameters_in_continue_mode(editor, spa_project):
+    js = JobStar.read(spa_project / "Class3D/job009/job.star")
+    editor.continue_job("Class3D/job009/", js, DEFS.variant("relion.class3d"))
+    row = editor.advanced.rows["--maskedge"]
+    assert row.widget.isEnabled() == editor.widgets["other_args"].isEnabled()
+    editor.set_permissions(readonly=True, can_run=False)
+    assert not row.widget.isEnabled()
+
+
+def test_cli_tools_keep_their_box_on_running(editor):
+    from cryo_savanna.jobdefs.cli_tools import CliCatalog
+    v = CliCatalog(DEFS, ENV, FLAGS).variant("relion_image_handler")
+    editor.new_job(v)
+    assert editor.advanced is None and ADVANCED_TAB not in [editor.tabs.tabText(i) for i in range(editor.tabs.count())]
+
+
+def test_several_reference_maps(editor, spa_copy, tmp_path):
+    editor.set_project(spa_copy, Pipeline.read(spa_copy))  # (a list is written into a job's directory below)
+    editor.new_job(DEFS.variant("relion.class3d"))
+    maps = ["Refine3D/job011/run_class001.mrc", "InitialModel/job008/initial_model.mrc", "External/job099/my_map.mrc"]
+    seen = {}
+
+    def hook(dlg):
+        seen["nodes"] = [dlg.list.item(i).data(Qt.UserRole + 1) for i in range(dlg.list.count())]
+        for m in reversed(maps):
+            dlg.tick(m)
+        assert dlg.maps() == maps[::-1]  # in the order ticked, at the top of the list, numbered
+        assert [dlg.list.item(i).text() for i in range(3)][0].startswith("1.  External/job099/my_map.mrc")
+        dlg.list.setCurrentRow(0)
+        dlg.move(1)
+        dlg.list.setCurrentRow(1)
+        dlg.move(1)  # the first map is now the last class
+        dlg.tick("Refine3D/job011/run_class001.mrc", False)
+        dlg.tick("Refine3D/job011/run_class001.mrc")
+        assert dlg.maps() == ["InitialModel/job008/initial_model.mrc", "External/job099/my_map.mrc",
+                              "Refine3D/job011/run_class001.mrc"]
+        dlg.tick("InitialModel/job008/initial_model.mrc", False)
+        dlg.tick("InitialModel/job008/initial_model.mrc")
+        assert dlg.maps() == ["External/job099/my_map.mrc", "Refine3D/job011/run_class001.mrc",
+                              "InitialModel/job008/initial_model.mrc"]
+        dlg.list.setCurrentRow(0)
+        dlg.move(1)
+        dlg.move(1)  # (the map moved stays selected)
+        assert dlg.maps() == maps and "3 classes" in dlg.summary.text()
+        return True
+    assert editor.open_references(dialog_hook=hook)
+    assert "Refine3D/job011/run_class001.mrc" in seen["nodes"]  # the pipeline's maps are offered
+    own = references.path_in(editor.job_dir())
+    ref, k = editor.widgets["fn_ref"], editor.widgets["nr_classes"]
+    assert ref.value() == own and k.value() == "3" and not ref.combo.isEnabled() and not k.isEnabled()
+    assert editor.refs_button.isEnabled() and "Change…" in editor.refs_line.text()
+    assert editor.reference_maps() == maps and not editor.refs_line.isHidden()
+    assert "3 reference maps" in editor.refs_line.text() and "initial_model.mrc" in editor.refs_line.text()
+    assert {j: v for j, v in editor.input_jobs().items() if "Reference map" in v}.keys() >= {
+        "Refine3D/job011/", "InitialModel/job008/"}
+    js = editor.jobstar("Class3D/job042/", values={**editor.values(), "nr_classes": "5"})  # Variations…
+    assert js.options["fn_ref"] == "Class3D/job042/references.star" and js.options["nr_classes"] == "3"
+    from cryo_savanna.project.presets import PresetStore
+    editor.presets = PresetStore(tmp_path / "presets")
+    editor.presets.save(editor.variant.key, "K8", {"nr_classes": "8", "tau_fudge": "2"}, "5.1.1")
+    assert editor.load_preset("K8")  # keeps the inputs (the list), and so its number of classes
+    assert editor.references == maps and editor.widgets["nr_classes"].value() == "3"
+    assert editor.widgets["tau_fudge"].value() == "2"
+    # a clone of a job with a list: its maps, and a list of its own
+    job = "Class3D/job009/"
+    references.write(spa_copy, job, maps[:2])
+    vals = dict(JobStar.read(spa_copy / job / "job.star").options, fn_ref=references.path_in(job), nr_classes="2")
+    editor.new_job(DEFS.variant("relion.class3d"), vals, source_job=job)
+    assert editor.references == maps[:2] and editor.widgets["fn_ref"].value() == references.path_in(editor.job_dir())
+    editor.set_references(maps[:1])  # one map: as RELION has it
+    assert editor.widgets["fn_ref"].value() == maps[0] and editor.reference_maps() == []
+    assert editor.widgets["nr_classes"].isEnabled() and editor.refs_line.isHidden()
+    editor.widgets["fn_ref"].set_value(references.path_in(job))  # a list typed in the field
+    assert editor.references == maps[:2] and editor.widgets["nr_classes"].value() == "2"
+    editor._reset_defaults()
+    assert editor.references == [] and editor.widgets["fn_ref"].value() == ""
+    # only the 3D classification has it
+    editor.new_job(DEFS.variant("relion.refine3d"))
+    assert editor.refs_button is None
 
 
 def test_cli_tools_menu_and_form(window, spa_project):
@@ -219,7 +311,7 @@ def test_cli_tools_menu_and_form(window, spa_project):
     assert categories[0] == "Maps and images" and "Tomography" in categories
     a.new_cli_job("relion_image_handler")
     ed = a.editor
-    assert ed.is_cli and ed.flag_panel is None and "relion_image_handler" in ed.title.text()
+    assert ed.is_cli and ed.advanced is None and "relion_image_handler" in ed.title.text()
     assert [ed.tabs.tabText(i) for i in range(ed.tabs.count())][-1] == "Running"
     ed.widgets["--i"].set_value("Refine3D/job011/run_class001.mrc")
     ed.widgets["--o"].set_value("flipped.mrc")
@@ -330,7 +422,7 @@ def scratch_job(window, spa_copy, tmp_path, monkeypatch):
     class FakePipeliner:
         available = True
 
-        def add_job(self, js, alias):
+        def add_job(self, js, alias, refs=None):
             added.append(js)
             raise RuntimeError("not run")
     monkeypatch.setattr(w.actions, "pipeliner", FakePipeliner())

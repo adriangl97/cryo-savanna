@@ -286,3 +286,32 @@ def test_without_the_preference_the_continue_form_has_the_last_iteration(window,
     w.select_job("Class3D/job009/")
     w.actions.continue_job()
     assert w.actions.editor.values()["fn_cont"] == "Class3D/job009/run_it025_optimiser.star"
+
+
+def test_a_running_slurm_jobs_card_shows_its_run_time_once(window, spa_copy, slurm):
+    """The time it has run is on the card's times line, as SLURM counts it (note.txt has when it was sent to the
+    queue); the status line only says where it runs."""
+    from cryo_savanna.project.lock import PipelineLock
+    from cryo_savanna.project.pipeline import Pipeline
+    state, _ = slurm
+    job = "Refine3D/job011/"
+    with PipelineLock(spa_copy) as lock:
+        p = Pipeline.read(spa_copy)
+        p.processes[job].status = "Running"
+        p.write(spa_copy, lock=lock)
+    (spa_copy / job / "RELION_JOB_EXIT_SUCCESS").unlink()
+    state.add(name=job, workdir=str(spa_copy), state="RUNNING", reason="None", nodes="node09", elapsed="1:02:03")
+    w = window(spa_copy)
+    from qtpy.QtWidgets import QApplication
+    w.queue_now()
+    card = w.graph.nodes[job]
+    deadline = time.time() + 10
+    while card.summary is None and time.time() < deadline:  # the summaries come from their worker
+        QApplication.processEvents()
+        time.sleep(0.05)
+    line, lines = card.job_line(), card.progress_lines()
+    assert line.endswith("Running · on node09") and "1:02:03" not in line
+    assert lines[1].startswith("1 h 02 min"), lines  # SLURM's time used, not the time since it was queued
+    assert sum("1 h 02 min" in x for x in [line] + lines) == 1
+    assert "Running · " in w.tree._status_text(w.snapshot.jobs[job]) and "1 h 02 min" in w.tree._status_text(
+        w.snapshot.jobs[job])

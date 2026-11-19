@@ -212,6 +212,9 @@ class JobTreeView(QTreeView):
         with self._many_changes():
             for name, row in self._items.items():
                 self._fill_queue(row, name)
+                info = self._snapshot.jobs.get(name) if self._snapshot is not None else None
+                if info is not None and info.status == "Running":  # its run time: the SLURM job's
+                    self._fill_summary(row, info, self.summaries.get(name))
         if self.proxy.is_active():
             self.proxy.refilter()
 
@@ -364,8 +367,9 @@ class JobTreeView(QTreeView):
         if style.held_text(info.status, held):
             text += " · " + style.held_text(info.status, held)
         s = self.summaries.get(info.name)
-        if info.status == "Running" and s is not None and s.progress(now):
-            text += " · " + s.progress(now)
+        progress = s.progress(now, style.slurm_elapsed(self.queue, info.name)) if s is not None else ""
+        if info.status == "Running" and progress:
+            text += " · " + progress
         if info.status == "Succeeded" and info.name in self.stale:
             text += " · out of date"
         return text

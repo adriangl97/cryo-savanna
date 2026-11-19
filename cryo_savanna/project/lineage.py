@@ -86,7 +86,7 @@ def _own_main_input(
         return None
 
 
-def _job_holding(pipeline: Pipeline, path: str) -> str | None:
+def job_holding(pipeline: Pipeline, path: str) -> str | None:
     """The job whose directory holds ``path`` (``Type/jobNNN/...``), if it is in the pipeline."""
     parts = path.split("/")
     if len(parts) < 3:
@@ -131,7 +131,7 @@ def primary_parent(
         own = _own_main_input(process_name, project_dir, read_jobstar)
         if own is not None and own not in pr.inputs:  # a pytom job whose main input RELION did not link
             node = pipeline.nodes.get(own)
-            job = node.producer if node is not None and node.producer else _job_holding(pipeline, own)
+            job = node.producer if node is not None and node.producer else job_holding(pipeline, own)
             if job is not None:
                 return job
     main = primary_input(pipeline, process_name, project_dir, defs, read_jobstar, main_inputs)

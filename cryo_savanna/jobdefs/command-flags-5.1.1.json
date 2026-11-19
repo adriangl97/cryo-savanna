@@ -1,0 +1,6904 @@
+{
+ "format": 1,
+ "relion_version": "5.1.1",
+ "generated_by": "tools/extract_jobdefs/command_flags.py",
+ "notice": "Derived from RELION (src/pipeline_jobs.cpp; Author: Sjors H.W. Scheres, MRC Laboratory of Molecular Biology), free software under the GNU General Public License version 2 or (at your option) any later version. See NOTICE.md.\nRELION's notice, kept as it asks:\nAuthor: \"Sjors H.W. Scheres\"\nMRC Laboratory of Molecular Biology\n\nThis program is free software; you can redistribute it and/or modify\nit under the terms of the GNU General Public License as published by\nthe Free Software Foundation; either version 2 of the License, or\n(at your option) any later version.\n\nThis program is distributed in the hope that it will be useful,\nbut WITHOUT ANY WARRANTY; without even the implied warranty of\nMERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the\nGNU General Public License for more details.\n\nThis complete copyright notice must be included in any revised version of the\nsource code. Additional authorship citations may be added, but existing\nauthor citations must be preserved.",
+ "jobs": {
+  "dynamight": {
+   "--batch-size": {
+    "direct": [
+     "backproject_batchsize",
+     "do_inverse",
+     "do_reconstruct",
+     "do_visualize"
+    ],
+    "all": [
+     "backproject_batchsize",
+     "do_inverse",
+     "do_reconstruct",
+     "do_visualize"
+    ]
+   },
+   "--checkpoint-file": {
+    "direct": [
+     "fn_checkpoint"
+    ],
+    "all": [
+     "do_inverse",
+     "do_reconstruct",
+     "do_visualize",
+     "fn_checkpoint"
+    ]
+   },
+   "--gpu-id": {
+    "direct": [
+     "gpu_id"
+    ],
+    "all": [
+     "gpu_id"
+    ]
+   },
+   "--half-set": {
+    "direct": [
+     "do_inverse",
+     "do_reconstruct",
+     "do_visualize",
+     "halfset"
+    ],
+    "all": [
+     "do_inverse",
+     "do_reconstruct",
+     "do_visualize",
+     "halfset"
+    ]
+   },
+   "--initial-model": {
+    "direct": [
+     "do_inverse",
+     "do_reconstruct",
+     "do_visualize",
+     "fn_map"
+    ],
+    "all": [
+     "do_inverse",
+     "do_reconstruct",
+     "do_visualize",
+     "fn_map"
+    ]
+   },
+   "--initial-threshold": {
+    "direct": [
+     "initial_threshold"
+    ],
+    "all": [
+     "do_inverse",
+     "do_reconstruct",
+     "do_visualize",
+     "initial_threshold"
+    ]
+   },
+   "--n-epochs": {
+    "direct": [
+     "do_inverse",
+     "do_reconstruct",
+     "do_visualize",
+     "nr_epochs"
+    ],
+    "all": [
+     "do_inverse",
+     "do_reconstruct",
+     "do_visualize",
+     "nr_epochs"
+    ]
+   },
+   "--n-gaussians": {
+    "direct": [
+     "do_inverse",
+     "do_reconstruct",
+     "do_visualize",
+     "nr_gaussians"
+    ],
+    "all": [
+     "do_inverse",
+     "do_reconstruct",
+     "do_visualize",
+     "nr_gaussians"
+    ]
+   },
+   "--n-threads": {
+    "direct": [
+     "do_inverse",
+     "do_reconstruct",
+     "do_visualize",
+     "nr_threads"
+    ],
+    "all": [
+     "do_inverse",
+     "do_reconstruct",
+     "do_visualize",
+     "nr_threads"
+    ]
+   },
+   "--output-directory": {
+    "direct": [
+     "do_inverse",
+     "do_reconstruct",
+     "do_visualize"
+    ],
+    "all": [
+     "do_inverse",
+     "do_reconstruct",
+     "do_visualize"
+    ]
+   },
+   "--preload-images": {
+    "direct": [
+     "do_preload"
+    ],
+    "all": [
+     "do_inverse",
+     "do_preload",
+     "do_reconstruct",
+     "do_visualize"
+    ]
+   },
+   "--refinement-star-file": {
+    "direct": [
+     "do_inverse",
+     "do_reconstruct",
+     "do_visualize",
+     "fn_star"
+    ],
+    "all": [
+     "do_inverse",
+     "do_reconstruct",
+     "do_visualize",
+     "fn_star"
+    ]
+   },
+   "--regularization-factor": {
+    "direct": [
+     "do_inverse",
+     "do_reconstruct",
+     "do_visualize",
+     "reg_factor"
+    ],
+    "all": [
+     "do_inverse",
+     "do_reconstruct",
+     "do_visualize",
+     "reg_factor"
+    ]
+   },
+   "--save-deformations": {
+    "direct": [
+     "do_store_deform"
+    ],
+    "all": [
+     "do_inverse",
+     "do_reconstruct",
+     "do_store_deform",
+     "do_visualize"
+    ]
+   }
+  },
+  "modelangelo": {
+   "--E": {
+    "direct": [
+     "E",
+     "do_hhmer"
+    ],
+    "all": [
+     "E",
+     "do_hhmer"
+    ]
+   },
+   "--F1": {
+    "direct": [
+     "F1",
+     "do_hhmer"
+    ],
+    "all": [
+     "F1",
+     "do_hhmer"
+    ]
+   },
+   "--F2": {
+    "direct": [
+     "F2",
+     "do_hhmer"
+    ],
+    "all": [
+     "F2",
+     "do_hhmer"
+    ]
+   },
+   "--F3": {
+    "direct": [
+     "F3",
+     "do_hhmer"
+    ],
+    "all": [
+     "F3",
+     "do_hhmer"
+    ]
+   }
+  },
+  "relion.aligntiltseries": {
+   "--aretomo2": {
+    "direct": [
+     "do_aretomo2",
+     "do_imod_fiducials",
+     "do_imod_patchtrack"
+    ],
+    "all": [
+     "do_aretomo2",
+     "do_imod_fiducials",
+     "do_imod_patchtrack"
+    ]
+   },
+   "--aretomo_OutBin": {
+    "direct": [
+     "aretomo_OutBin",
+     "do_aretomo_reconstruct"
+    ],
+    "all": [
+     "aretomo_OutBin",
+     "do_aretomo2",
+     "do_aretomo_reconstruct",
+     "do_imod_fiducials",
+     "do_imod_patchtrack"
+    ]
+   },
+   "--aretomo_VolZ": {
+    "direct": [
+     "aretomo_VolZ",
+     "do_aretomo_reconstruct"
+    ],
+    "all": [
+     "aretomo_VolZ",
+     "do_aretomo2",
+     "do_aretomo_reconstruct",
+     "do_imod_fiducials",
+     "do_imod_patchtrack"
+    ]
+   },
+   "--aretomo_ctf": {
+    "direct": [
+     "do_aretomo_ctf"
+    ],
+    "all": [
+     "do_aretomo2",
+     "do_aretomo_ctf",
+     "do_imod_fiducials",
+     "do_imod_patchtrack"
+    ]
+   },
+   "--aretomo_exe": {
+    "direct": [
+     "do_aretomo2",
+     "do_imod_fiducials",
+     "do_imod_patchtrack",
+     "fn_aretomo_exe"
+    ],
+    "all": [
+     "do_aretomo2",
+     "do_imod_fiducials",
+     "do_imod_patchtrack",
+     "fn_aretomo_exe"
+    ]
+   },
+   "--aretomo_only_reconstruct": {
+    "direct": [
+     "do_skip_aretomo_align"
+    ],
+    "all": [
+     "do_aretomo2",
+     "do_aretomo_reconstruct",
+     "do_imod_fiducials",
+     "do_imod_patchtrack",
+     "do_skip_aretomo_align"
+    ]
+   },
+   "--aretomo_phaseshift": {
+    "direct": [
+     "do_aretomo_phaseshift"
+    ],
+    "all": [
+     "do_aretomo2",
+     "do_aretomo_ctf",
+     "do_aretomo_phaseshift",
+     "do_imod_fiducials",
+     "do_imod_patchtrack"
+    ]
+   },
+   "--aretomo_reconstruct": {
+    "direct": [
+     "do_aretomo_reconstruct"
+    ],
+    "all": [
+     "do_aretomo2",
+     "do_aretomo_reconstruct",
+     "do_imod_fiducials",
+     "do_imod_patchtrack"
+    ]
+   },
+   "--aretomo_tiltcorrect": {
+    "direct": [
+     "do_aretomo_tiltcorrect"
+    ],
+    "all": [
+     "do_aretomo2",
+     "do_aretomo_tiltcorrect",
+     "do_imod_fiducials",
+     "do_imod_patchtrack"
+    ]
+   },
+   "--aretomo_tiltcorrect_angle": {
+    "direct": [
+     "aretomo_tiltcorrect_angle",
+     "do_aretomo_tiltcorrect"
+    ],
+    "all": [
+     "aretomo_tiltcorrect_angle",
+     "do_aretomo2",
+     "do_aretomo_tiltcorrect",
+     "do_imod_fiducials",
+     "do_imod_patchtrack"
+    ]
+   },
+   "--batchtomo_exe": {
+    "direct": [
+     "do_imod_fiducials",
+     "do_imod_patchtrack",
+     "fn_batchtomo_exe"
+    ],
+    "all": [
+     "do_imod_fiducials",
+     "do_imod_patchtrack",
+     "fn_batchtomo_exe"
+    ]
+   },
+   "--fiducial_diameter": {
+    "direct": [
+     "do_imod_fiducials",
+     "fiducial_diameter"
+    ],
+    "all": [
+     "do_imod_fiducials",
+     "fiducial_diameter"
+    ]
+   },
+   "--gpu": {
+    "direct": [
+     "do_aretomo2",
+     "do_imod_fiducials",
+     "do_imod_patchtrack",
+     "gpu_ids"
+    ],
+    "all": [
+     "do_aretomo2",
+     "do_imod_fiducials",
+     "do_imod_patchtrack",
+     "gpu_ids"
+    ]
+   },
+   "--i": {
+    "direct": [
+     "in_tiltseries"
+    ],
+    "all": [
+     "in_tiltseries"
+    ]
+   },
+   "--imod_fiducials": {
+    "direct": [
+     "do_imod_fiducials"
+    ],
+    "all": [
+     "do_imod_fiducials"
+    ]
+   },
+   "--imod_patchtrack": {
+    "direct": [
+     "do_imod_fiducials",
+     "do_imod_patchtrack"
+    ],
+    "all": [
+     "do_imod_fiducials",
+     "do_imod_patchtrack"
+    ]
+   },
+   "--o": {
+    "direct": [],
+    "all": []
+   },
+   "--only_do_unfinished": {
+    "direct": [],
+    "all": []
+   },
+   "--other_wrapper_args": {
+    "direct": [
+     "do_aretomo2",
+     "do_imod_fiducials",
+     "do_imod_patchtrack",
+     "other_aretomo_args"
+    ],
+    "all": [
+     "do_aretomo2",
+     "do_imod_fiducials",
+     "do_imod_patchtrack",
+     "other_aretomo_args"
+    ]
+   },
+   "--patch_overlap": {
+    "direct": [
+     "do_imod_fiducials",
+     "do_imod_patchtrack",
+     "patch_overlap"
+    ],
+    "all": [
+     "do_imod_fiducials",
+     "do_imod_patchtrack",
+     "patch_overlap"
+    ]
+   },
+   "--patch_size": {
+    "direct": [
+     "do_imod_fiducials",
+     "do_imod_patchtrack",
+     "patch_size"
+    ],
+    "all": [
+     "do_imod_fiducials",
+     "do_imod_patchtrack",
+     "patch_size"
+    ]
+   },
+   "--tomogram_thickness": {
+    "direct": [
+     "tomogram_thickness"
+    ],
+    "all": [
+     "tomogram_thickness"
+    ]
+   }
+  },
+  "relion.autopick": {
+   "--LoG": {
+    "direct": [
+     "do_log",
+     "do_topaz"
+    ],
+    "all": [
+     "continue_manual",
+     "do_amyloid",
+     "do_log",
+     "do_topaz"
+    ]
+   },
+   "--LoG_adjust_threshold": {
+    "direct": [
+     "do_log",
+     "do_topaz",
+     "log_adjust_thr"
+    ],
+    "all": [
+     "continue_manual",
+     "do_amyloid",
+     "do_log",
+     "do_topaz",
+     "log_adjust_thr"
+    ]
+   },
+   "--LoG_diam_max": {
+    "direct": [
+     "do_log",
+     "do_topaz",
+     "log_diam_max"
+    ],
+    "all": [
+     "continue_manual",
+     "do_amyloid",
+     "do_log",
+     "do_topaz",
+     "log_diam_max"
+    ]
+   },
+   "--LoG_diam_min": {
+    "direct": [
+     "do_log",
+     "do_topaz",
+     "log_diam_min"
+    ],
+    "all": [
+     "continue_manual",
+     "do_amyloid",
+     "do_log",
+     "do_topaz",
+     "log_diam_min"
+    ]
+   },
+   "--LoG_upper_threshold": {
+    "direct": [
+     "log_upper_thr"
+    ],
+    "all": [
+     "continue_manual",
+     "do_amyloid",
+     "do_log",
+     "do_topaz",
+     "log_upper_thr"
+    ]
+   },
+   "--Log_invert": {
+    "direct": [
+     "log_invert"
+    ],
+    "all": [
+     "continue_manual",
+     "do_amyloid",
+     "do_log",
+     "do_topaz",
+     "log_invert"
+    ]
+   },
+   "--allow_save": {
+    "direct": [
+     "continue_manual"
+    ],
+    "all": [
+     "continue_manual"
+    ]
+   },
+   "--amyloid": {
+    "direct": [
+     "do_amyloid"
+    ],
+    "all": [
+     "continue_manual",
+     "do_amyloid",
+     "do_log",
+     "do_pick_helical_segments",
+     "do_refs",
+     "do_topaz"
+    ]
+   },
+   "--ang": {
+    "direct": [
+     "do_log",
+     "do_refs",
+     "do_topaz",
+     "psi_sampling_autopick"
+    ],
+    "all": [
+     "continue_manual",
+     "do_amyloid",
+     "do_log",
+     "do_refs",
+     "do_topaz",
+     "psi_sampling_autopick"
+    ]
+   },
+   "--angpix": {
+    "direct": [
+     "angpix"
+    ],
+    "all": [
+     "angpix",
+     "continue_manual",
+     "do_amyloid",
+     "do_log",
+     "do_refs",
+     "do_topaz"
+    ]
+   },
+   "--angpix_ref": {
+    "direct": [
+     "angpix_ref"
+    ],
+    "all": [
+     "angpix_ref",
+     "continue_manual",
+     "do_amyloid",
+     "do_log",
+     "do_refs",
+     "do_topaz"
+    ]
+   },
+   "--black": {
+    "direct": [],
+    "all": [
+     "continue_manual"
+    ]
+   },
+   "--blue": {
+    "direct": [],
+    "all": [
+     "continue_manual"
+    ]
+   },
+   "--carbon_threshold": {
+    "direct": [
+     "amyloid_carbon_threshold",
+     "do_amyloid_carbon"
+    ],
+    "all": [
+     "amyloid_carbon_threshold",
+     "continue_manual",
+     "do_amyloid",
+     "do_amyloid_carbon",
+     "do_amyloid_tracing"
+    ]
+   },
+   "--color_label": {
+    "direct": [],
+    "all": [
+     "continue_manual"
+    ]
+   },
+   "--color_star": {
+    "direct": [],
+    "all": [
+     "continue_manual"
+    ]
+   },
+   "--ctf": {
+    "direct": [
+     "do_ctf_autopick"
+    ],
+    "all": [
+     "continue_manual",
+     "do_amyloid",
+     "do_ctf_autopick",
+     "do_log",
+     "do_refs",
+     "do_topaz"
+    ]
+   },
+   "--ctf_intact_first_peak": {
+    "direct": [
+     "do_ignore_first_ctfpeak_autopick"
+    ],
+    "all": [
+     "continue_manual",
+     "do_amyloid",
+     "do_ctf_autopick",
+     "do_ignore_first_ctfpeak_autopick",
+     "do_log",
+     "do_refs",
+     "do_topaz"
+    ]
+   },
+   "--detect_carbon": {
+    "direct": [
+     "amyloid_carbon_threshold",
+     "do_amyloid_carbon"
+    ],
+    "all": [
+     "amyloid_carbon_threshold",
+     "continue_manual",
+     "do_amyloid",
+     "do_amyloid_carbon",
+     "do_amyloid_tracing"
+    ]
+   },
+   "--fn_topaz_exe": {
+    "direct": [
+     "continue_manual",
+     "do_amyloid",
+     "fn_topaz_exe"
+    ],
+    "all": [
+     "continue_manual",
+     "do_amyloid",
+     "fn_topaz_exe"
+    ]
+   },
+   "--gpu": {
+    "direct": [
+     "amyloid_gpu_ids",
+     "do_amyloid_tracing",
+     "gpu_ids",
+     "use_gpu"
+    ],
+    "all": [
+     "amyloid_gpu_ids",
+     "continue_manual",
+     "do_amyloid",
+     "do_amyloid_tracing",
+     "do_log",
+     "do_refs",
+     "do_topaz",
+     "gpu_ids",
+     "use_gpu"
+    ]
+   },
+   "--healpix_order": {
+    "direct": [
+     "do_ref3d",
+     "ref3d_sampling"
+    ],
+    "all": [
+     "continue_manual",
+     "do_amyloid",
+     "do_log",
+     "do_ref3d",
+     "do_refs",
+     "do_topaz",
+     "ref3d_sampling"
+    ]
+   },
+   "--helical_tube_kappa_max": {
+    "direct": [
+     "do_pick_helical_segments",
+     "helical_tube_kappa_max"
+    ],
+    "all": [
+     "continue_manual",
+     "do_amyloid",
+     "do_log",
+     "do_pick_helical_segments",
+     "do_refs",
+     "do_topaz",
+     "helical_tube_kappa_max"
+    ]
+   },
+   "--helical_tube_length_min": {
+    "direct": [
+     "do_pick_helical_segments",
+     "helical_tube_length_min",
+     "topaz_hough_length"
+    ],
+    "all": [
+     "continue_manual",
+     "do_amyloid",
+     "do_log",
+     "do_pick_helical_segments",
+     "do_refs",
+     "do_topaz",
+     "do_topaz_filaments",
+     "do_topaz_pick",
+     "do_topaz_train",
+     "helical_tube_length_min",
+     "topaz_hough_length"
+    ]
+   },
+   "--helical_tube_outer_diameter": {
+    "direct": [
+     "do_pick_helical_segments",
+     "helical_tube_outer_diameter"
+    ],
+    "all": [
+     "continue_manual",
+     "do_amyloid",
+     "do_log",
+     "do_pick_helical_segments",
+     "do_refs",
+     "do_topaz",
+     "helical_tube_outer_diameter"
+    ]
+   },
+   "--helix": {
+    "direct": [
+     "do_pick_helical_segments",
+     "do_topaz_filaments"
+    ],
+    "all": [
+     "continue_manual",
+     "do_amyloid",
+     "do_log",
+     "do_pick_helical_segments",
+     "do_refs",
+     "do_topaz",
+     "do_topaz_filaments",
+     "do_topaz_pick",
+     "do_topaz_train"
+    ]
+   },
+   "--highpass": {
+    "direct": [
+     "highpass"
+    ],
+    "all": [
+     "continue_manual",
+     "do_amyloid",
+     "do_log",
+     "do_refs",
+     "do_topaz",
+     "highpass"
+    ]
+   },
+   "--i": {
+    "direct": [
+     "continue_manual",
+     "do_amyloid",
+     "fn_input_autopick"
+    ],
+    "all": [
+     "continue_manual",
+     "do_amyloid",
+     "fn_input_autopick"
+    ]
+   },
+   "--invert": {
+    "direct": [
+     "do_invert_refs"
+    ],
+    "all": [
+     "continue_manual",
+     "do_amyloid",
+     "do_invert_refs",
+     "do_log",
+     "do_refs",
+     "do_topaz"
+    ]
+   },
+   "--j": {
+    "direct": [
+     "do_amyloid_fom",
+     "nr_threads"
+    ],
+    "all": [
+     "continue_manual",
+     "do_amyloid",
+     "do_amyloid_fom",
+     "nr_threads"
+    ]
+   },
+   "--lowpass": {
+    "direct": [
+     "do_log",
+     "do_topaz",
+     "log_maxres",
+     "lowpass"
+    ],
+    "all": [
+     "continue_manual",
+     "do_amyloid",
+     "do_log",
+     "do_refs",
+     "do_topaz",
+     "log_maxres",
+     "lowpass"
+    ]
+   },
+   "--max_stddev_noise": {
+    "direct": [
+     "do_log",
+     "do_refs",
+     "do_topaz",
+     "maxstddevnoise_autopick"
+    ],
+    "all": [
+     "continue_manual",
+     "do_amyloid",
+     "do_log",
+     "do_refs",
+     "do_topaz",
+     "maxstddevnoise_autopick"
+    ]
+   },
+   "--min_avg_noise": {
+    "direct": [
+     "minavgnoise_autopick"
+    ],
+    "all": [
+     "continue_manual",
+     "do_amyloid",
+     "do_log",
+     "do_refs",
+     "do_topaz",
+     "minavgnoise_autopick"
+    ]
+   },
+   "--min_distance": {
+    "direct": [
+     "do_pick_helical_segments",
+     "helical_nr_asu",
+     "helical_rise",
+     "mindist_autopick"
+    ],
+    "all": [
+     "continue_manual",
+     "do_amyloid",
+     "do_log",
+     "do_pick_helical_segments",
+     "do_refs",
+     "do_topaz",
+     "helical_nr_asu",
+     "helical_rise",
+     "mindist_autopick"
+    ]
+   },
+   "--minimum_pick_fom": {
+    "direct": [],
+    "all": [
+     "continue_manual"
+    ]
+   },
+   "--odir": {
+    "direct": [
+     "continue_manual",
+     "do_amyloid"
+    ],
+    "all": [
+     "continue_manual",
+     "do_amyloid"
+    ]
+   },
+   "--only_do_unfinished": {
+    "direct": [
+     "do_read_fom_maps",
+     "do_write_fom_maps"
+    ],
+    "all": [
+     "continue_manual",
+     "do_amyloid",
+     "do_log",
+     "do_read_fom_maps",
+     "do_refs",
+     "do_topaz",
+     "do_write_fom_maps"
+    ]
+   },
+   "--particle_diameter": {
+    "direct": [
+     "topaz_particle_diameter"
+    ],
+    "all": [
+     "continue_manual",
+     "do_amyloid",
+     "do_topaz",
+     "topaz_particle_diameter"
+    ]
+   },
+   "--pick_start_end": {
+    "direct": [],
+    "all": [
+     "continue_manual"
+    ]
+   },
+   "--pickname": {
+    "direct": [
+     "continue_manual",
+     "do_amyloid"
+    ],
+    "all": [
+     "continue_manual",
+     "do_amyloid"
+    ]
+   },
+   "--plot": {
+    "direct": [
+     "do_amyloid_plot"
+    ],
+    "all": [
+     "continue_manual",
+     "do_amyloid",
+     "do_amyloid_plot",
+     "do_amyloid_tracing"
+    ]
+   },
+   "--read_fom_maps": {
+    "direct": [
+     "do_read_fom_maps"
+    ],
+    "all": [
+     "continue_manual",
+     "do_amyloid",
+     "do_log",
+     "do_read_fom_maps",
+     "do_refs"
+    ]
+   },
+   "--red": {
+    "direct": [],
+    "all": [
+     "continue_manual"
+    ]
+   },
+   "--ref": {
+    "direct": [
+     "do_ref3d",
+     "fn_ref3d_autopick",
+     "fn_refs_autopick"
+    ],
+    "all": [
+     "continue_manual",
+     "do_amyloid",
+     "do_log",
+     "do_ref3d",
+     "do_refs",
+     "do_topaz",
+     "fn_ref3d_autopick",
+     "fn_refs_autopick"
+    ]
+   },
+   "--scale": {
+    "direct": [],
+    "all": [
+     "continue_manual"
+    ]
+   },
+   "--selection": {
+    "direct": [
+     "continue_manual"
+    ],
+    "all": [
+     "continue_manual"
+    ]
+   },
+   "--shrink": {
+    "direct": [
+     "do_log",
+     "do_refs",
+     "do_topaz",
+     "log_maxres",
+     "shrink"
+    ],
+    "all": [
+     "continue_manual",
+     "do_amyloid",
+     "do_log",
+     "do_refs",
+     "do_topaz",
+     "log_maxres",
+     "shrink"
+    ]
+   },
+   "--sigma_contrast": {
+    "direct": [],
+    "all": [
+     "continue_manual"
+    ]
+   },
+   "--skip_fom": {
+    "direct": [
+     "do_amyloid_fom"
+    ],
+    "all": [
+     "continue_manual",
+     "do_amyloid",
+     "do_amyloid_fom"
+    ]
+   },
+   "--skip_tracing": {
+    "direct": [
+     "do_amyloid_tracing"
+    ],
+    "all": [
+     "continue_manual",
+     "do_amyloid",
+     "do_amyloid_tracing"
+    ]
+   },
+   "--sym": {
+    "direct": [
+     "do_ref3d",
+     "ref3d_symmetry"
+    ],
+    "all": [
+     "continue_manual",
+     "do_amyloid",
+     "do_log",
+     "do_ref3d",
+     "do_refs",
+     "do_topaz",
+     "ref3d_symmetry"
+    ]
+   },
+   "--threshold": {
+    "direct": [
+     "amyloid_threshold",
+     "do_amyloid_tracing",
+     "do_log",
+     "do_refs",
+     "do_topaz",
+     "threshold_autopick"
+    ],
+    "all": [
+     "amyloid_threshold",
+     "continue_manual",
+     "do_amyloid",
+     "do_amyloid_tracing",
+     "do_log",
+     "do_refs",
+     "do_topaz",
+     "threshold_autopick"
+    ]
+   },
+   "--topaz_args": {
+    "direct": [
+     "topaz_other_args"
+    ],
+    "all": [
+     "continue_manual",
+     "do_amyloid",
+     "do_topaz",
+     "topaz_other_args"
+    ]
+   },
+   "--topaz_denoise": {
+    "direct": [],
+    "all": [
+     "continue_manual"
+    ]
+   },
+   "--topaz_extract": {
+    "direct": [
+     "do_topaz_pick",
+     "do_topaz_train"
+    ],
+    "all": [
+     "continue_manual",
+     "do_amyloid",
+     "do_topaz",
+     "do_topaz_pick",
+     "do_topaz_train"
+    ]
+   },
+   "--topaz_model": {
+    "direct": [
+     "topaz_model"
+    ],
+    "all": [
+     "continue_manual",
+     "do_amyloid",
+     "do_topaz",
+     "do_topaz_pick",
+     "do_topaz_train",
+     "topaz_model"
+    ]
+   },
+   "--topaz_nr_particles": {
+    "direct": [
+     "topaz_nr_particles"
+    ],
+    "all": [
+     "continue_manual",
+     "do_amyloid",
+     "do_topaz",
+     "do_topaz_train",
+     "topaz_nr_particles"
+    ]
+   },
+   "--topaz_threshold": {
+    "direct": [
+     "do_topaz_filaments",
+     "topaz_filament_threshold"
+    ],
+    "all": [
+     "continue_manual",
+     "do_amyloid",
+     "do_topaz",
+     "do_topaz_filaments",
+     "do_topaz_pick",
+     "do_topaz_train",
+     "topaz_filament_threshold"
+    ]
+   },
+   "--topaz_train": {
+    "direct": [
+     "do_topaz_train"
+    ],
+    "all": [
+     "continue_manual",
+     "do_amyloid",
+     "do_topaz",
+     "do_topaz_train"
+    ]
+   },
+   "--topaz_train_parts": {
+    "direct": [
+     "do_topaz_train_parts",
+     "topaz_train_parts"
+    ],
+    "all": [
+     "continue_manual",
+     "do_amyloid",
+     "do_topaz",
+     "do_topaz_train",
+     "do_topaz_train_parts",
+     "topaz_train_parts"
+    ]
+   },
+   "--topaz_train_picks": {
+    "direct": [
+     "do_topaz_train_parts",
+     "topaz_train_picks"
+    ],
+    "all": [
+     "continue_manual",
+     "do_amyloid",
+     "do_topaz",
+     "do_topaz_train",
+     "do_topaz_train_parts",
+     "topaz_train_picks"
+    ]
+   },
+   "--trace_filament_length": {
+    "direct": [
+     "amyloid_length",
+     "do_amyloid_tracing"
+    ],
+    "all": [
+     "amyloid_length",
+     "continue_manual",
+     "do_amyloid",
+     "do_amyloid_tracing"
+    ]
+   },
+   "--trace_filament_width": {
+    "direct": [
+     "amyloid_width",
+     "do_amyloid_tracing"
+    ],
+    "all": [
+     "amyloid_width",
+     "continue_manual",
+     "do_amyloid",
+     "do_amyloid_tracing"
+    ]
+   },
+   "--white": {
+    "direct": [],
+    "all": [
+     "continue_manual"
+    ]
+   },
+   "--write_fom_maps": {
+    "direct": [
+     "do_write_fom_maps"
+    ],
+    "all": [
+     "continue_manual",
+     "do_amyloid",
+     "do_log",
+     "do_refs",
+     "do_write_fom_maps"
+    ]
+   }
+  },
+  "relion.class2d": {
+   "--K": {
+    "direct": [
+     "nr_classes"
+    ],
+    "all": [
+     "nr_classes"
+    ]
+   },
+   "--allow_coarser_sampling": {
+    "direct": [
+     "allow_coarser"
+    ],
+    "all": [
+     "allow_coarser",
+     "dont_skip_align"
+    ]
+   },
+   "--bimodal_psi": {
+    "direct": [
+     "do_bimodal_psi"
+    ],
+    "all": [
+     "do_bimodal_psi",
+     "do_helix",
+     "dont_skip_align"
+    ]
+   },
+   "--center_classes": {
+    "direct": [
+     "do_center"
+    ],
+    "all": [
+     "do_center"
+    ]
+   },
+   "--class_inactivity_threshold": {
+    "direct": [
+     "do_em",
+     "do_grad"
+    ],
+    "all": [
+     "do_em",
+     "do_grad"
+    ]
+   },
+   "--continue": {
+    "direct": [
+     "fn_cont"
+    ],
+    "all": [
+     "fn_cont"
+    ]
+   },
+   "--ctf": {
+    "direct": [
+     "do_ctf_correction"
+    ],
+    "all": [
+     "do_ctf_correction"
+    ]
+   },
+   "--ctf_intact_first_peak": {
+    "direct": [
+     "ctf_intact_first_peak"
+    ],
+    "all": [
+     "ctf_intact_first_peak",
+     "do_ctf_correction"
+    ]
+   },
+   "--dont_combine_weights_via_disc": {
+    "direct": [
+     "do_combine_thru_disc"
+    ],
+    "all": [
+     "do_combine_thru_disc"
+    ]
+   },
+   "--flatten_solvent": {
+    "direct": [],
+    "all": []
+   },
+   "--gpu": {
+    "direct": [
+     "gpu_ids",
+     "use_gpu"
+    ],
+    "all": [
+     "gpu_ids",
+     "use_gpu"
+    ]
+   },
+   "--grad": {
+    "direct": [
+     "do_em",
+     "do_grad"
+    ],
+    "all": [
+     "do_em",
+     "do_grad"
+    ]
+   },
+   "--grad_write_iter": {
+    "direct": [
+     "do_em",
+     "do_grad"
+    ],
+    "all": [
+     "do_em",
+     "do_grad"
+    ]
+   },
+   "--helical_outer_diameter": {
+    "direct": [
+     "do_helix",
+     "helical_tube_outer_diameter"
+    ],
+    "all": [
+     "do_helix",
+     "helical_tube_outer_diameter"
+    ]
+   },
+   "--helical_rise_initial": {
+    "direct": [
+     "do_restrict_xoff",
+     "helical_rise"
+    ],
+    "all": [
+     "do_helix",
+     "do_restrict_xoff",
+     "dont_skip_align",
+     "helical_rise"
+    ]
+   },
+   "--helix": {
+    "direct": [
+     "do_restrict_xoff",
+     "helical_rise"
+    ],
+    "all": [
+     "do_helix",
+     "do_restrict_xoff",
+     "dont_skip_align",
+     "helical_rise"
+    ]
+   },
+   "--i": {
+    "direct": [
+     "fn_img"
+    ],
+    "all": [
+     "fn_img"
+    ]
+   },
+   "--iter": {
+    "direct": [
+     "do_em",
+     "do_grad",
+     "nr_iter_em",
+     "nr_iter_grad"
+    ],
+    "all": [
+     "do_em",
+     "do_grad",
+     "nr_iter_em",
+     "nr_iter_grad"
+    ]
+   },
+   "--j": {
+    "direct": [
+     "nr_threads"
+    ],
+    "all": [
+     "nr_threads"
+    ]
+   },
+   "--no_init_blobs": {
+    "direct": [
+     "do_helix"
+    ],
+    "all": [
+     "do_helix"
+    ]
+   },
+   "--no_parallel_disc_io": {
+    "direct": [
+     "do_parallel_discio"
+    ],
+    "all": [
+     "do_parallel_discio"
+    ]
+   },
+   "--norm": {
+    "direct": [],
+    "all": []
+   },
+   "--o": {
+    "direct": [],
+    "all": []
+   },
+   "--offset_range": {
+    "direct": [
+     "dont_skip_align",
+     "offset_range"
+    ],
+    "all": [
+     "dont_skip_align",
+     "offset_range"
+    ]
+   },
+   "--offset_step": {
+    "direct": [
+     "dont_skip_align",
+     "offset_step"
+    ],
+    "all": [
+     "dont_skip_align",
+     "offset_step"
+    ]
+   },
+   "--oversampling": {
+    "direct": [],
+    "all": []
+   },
+   "--pad": {
+    "direct": [],
+    "all": []
+   },
+   "--particle_diameter": {
+    "direct": [
+     "particle_diameter"
+    ],
+    "all": [
+     "particle_diameter"
+    ]
+   },
+   "--pool": {
+    "direct": [
+     "nr_pool"
+    ],
+    "all": [
+     "nr_pool"
+    ]
+   },
+   "--preread_images": {
+    "direct": [
+     "do_preread_images"
+    ],
+    "all": [
+     "do_preread_images"
+    ]
+   },
+   "--psi_step": {
+    "direct": [
+     "dont_skip_align",
+     "psi_sampling"
+    ],
+    "all": [
+     "dont_skip_align",
+     "psi_sampling"
+    ]
+   },
+   "--scale": {
+    "direct": [],
+    "all": []
+   },
+   "--scratch_dir": {
+    "direct": [
+     "do_preread_images",
+     "scratch_dir"
+    ],
+    "all": [
+     "do_preread_images",
+     "scratch_dir"
+    ]
+   },
+   "--sigma_psi": {
+    "direct": [
+     "dont_skip_align",
+     "range_psi"
+    ],
+    "all": [
+     "do_helix",
+     "dont_skip_align",
+     "range_psi"
+    ]
+   },
+   "--skip_align": {
+    "direct": [
+     "dont_skip_align"
+    ],
+    "all": [
+     "dont_skip_align"
+    ]
+   },
+   "--strict_highres_exp": {
+    "direct": [
+     "highres_limit"
+    ],
+    "all": [
+     "highres_limit"
+    ]
+   },
+   "--tau2_fudge": {
+    "direct": [
+     "tau_fudge"
+    ],
+    "all": [
+     "tau_fudge"
+    ]
+   },
+   "--zero_mask": {
+    "direct": [
+     "do_zero_mask"
+    ],
+    "all": [
+     "do_zero_mask"
+    ]
+   }
+  },
+  "relion.class3d": {
+   "--K": {
+    "direct": [
+     "nr_classes"
+    ],
+    "all": [
+     "nr_classes"
+    ]
+   },
+   "--allow_coarser_sampling": {
+    "direct": [
+     "allow_coarser"
+    ],
+    "all": [
+     "allow_coarser",
+     "dont_skip_align"
+    ]
+   },
+   "--blush": {
+    "direct": [
+     "do_blush"
+    ],
+    "all": [
+     "do_blush"
+    ]
+   },
+   "--blush_model": {
+    "direct": [
+     "blush_version",
+     "do_blush"
+    ],
+    "all": [
+     "blush_version",
+     "do_blush"
+    ]
+   },
+   "--continue": {
+    "direct": [
+     "fn_cont"
+    ],
+    "all": [
+     "fn_cont"
+    ]
+   },
+   "--ctf": {
+    "direct": [
+     "do_ctf_correction"
+    ],
+    "all": [
+     "do_ctf_correction"
+    ]
+   },
+   "--ctf_intact_first_peak": {
+    "direct": [
+     "ctf_intact_first_peak"
+    ],
+    "all": [
+     "ctf_intact_first_peak",
+     "do_ctf_correction"
+    ]
+   },
+   "--dont_combine_weights_via_disc": {
+    "direct": [
+     "do_combine_thru_disc"
+    ],
+    "all": [
+     "do_combine_thru_disc"
+    ]
+   },
+   "--fast_subsets": {
+    "direct": [
+     "do_fast_subsets"
+    ],
+    "all": [
+     "do_fast_subsets"
+    ]
+   },
+   "--firstiter_cc": {
+    "direct": [
+     "ref_correct_greyscale"
+    ],
+    "all": [
+     "fn_ref",
+     "ref_correct_greyscale"
+    ]
+   },
+   "--flatten_solvent": {
+    "direct": [],
+    "all": []
+   },
+   "--gpu": {
+    "direct": [
+     "gpu_ids",
+     "use_gpu"
+    ],
+    "all": [
+     "gpu_ids",
+     "use_gpu"
+    ]
+   },
+   "--healpix_order": {
+    "direct": [
+     "dont_skip_align",
+     "sampling"
+    ],
+    "all": [
+     "dont_skip_align",
+     "sampling"
+    ]
+   },
+   "--helical_inner_diameter": {
+    "direct": [
+     "helical_tube_inner_diameter"
+    ],
+    "all": [
+     "do_helix",
+     "helical_tube_inner_diameter"
+    ]
+   },
+   "--helical_keep_tilt_prior_fixed": {
+    "direct": [
+     "keep_tilt_prior_fixed"
+    ],
+    "all": [
+     "do_helix",
+     "keep_tilt_prior_fixed"
+    ]
+   },
+   "--helical_nr_asu": {
+    "direct": [
+     "do_helix",
+     "helical_nr_asu"
+    ],
+    "all": [
+     "do_helix",
+     "helical_nr_asu"
+    ]
+   },
+   "--helical_nstart": {
+    "direct": [
+     "helical_nstart",
+     "helical_range_distance"
+    ],
+    "all": [
+     "do_helix",
+     "do_local_ang_searches",
+     "dont_skip_align",
+     "helical_nstart",
+     "helical_range_distance"
+    ]
+   },
+   "--helical_outer_diameter": {
+    "direct": [
+     "do_helix",
+     "helical_tube_outer_diameter"
+    ],
+    "all": [
+     "do_helix",
+     "helical_tube_outer_diameter"
+    ]
+   },
+   "--helical_rise_inistep": {
+    "direct": [
+     "helical_rise_inistep"
+    ],
+    "all": [
+     "do_helix",
+     "do_local_search_helical_symmetry",
+     "helical_rise_inistep"
+    ]
+   },
+   "--helical_rise_initial": {
+    "direct": [
+     "do_helix",
+     "helical_rise_initial"
+    ],
+    "all": [
+     "do_helix",
+     "helical_rise_initial"
+    ]
+   },
+   "--helical_rise_max": {
+    "direct": [
+     "do_local_search_helical_symmetry",
+     "helical_rise_max"
+    ],
+    "all": [
+     "do_helix",
+     "do_local_search_helical_symmetry",
+     "helical_rise_max"
+    ]
+   },
+   "--helical_rise_min": {
+    "direct": [
+     "do_local_search_helical_symmetry",
+     "helical_rise_min"
+    ],
+    "all": [
+     "do_helix",
+     "do_local_search_helical_symmetry",
+     "helical_rise_min"
+    ]
+   },
+   "--helical_sigma_distance": {
+    "direct": [
+     "helical_range_distance"
+    ],
+    "all": [
+     "do_helix",
+     "do_local_ang_searches",
+     "dont_skip_align",
+     "helical_range_distance"
+    ]
+   },
+   "--helical_symmetry_search": {
+    "direct": [
+     "do_local_search_helical_symmetry"
+    ],
+    "all": [
+     "do_helix",
+     "do_local_search_helical_symmetry"
+    ]
+   },
+   "--helical_twist_inistep": {
+    "direct": [
+     "helical_twist_inistep"
+    ],
+    "all": [
+     "do_helix",
+     "do_local_search_helical_symmetry",
+     "helical_twist_inistep"
+    ]
+   },
+   "--helical_twist_initial": {
+    "direct": [
+     "do_helix",
+     "helical_twist_initial"
+    ],
+    "all": [
+     "do_helix",
+     "helical_twist_initial"
+    ]
+   },
+   "--helical_twist_max": {
+    "direct": [
+     "do_local_search_helical_symmetry",
+     "helical_twist_max"
+    ],
+    "all": [
+     "do_helix",
+     "do_local_search_helical_symmetry",
+     "helical_twist_max"
+    ]
+   },
+   "--helical_twist_min": {
+    "direct": [
+     "do_local_search_helical_symmetry",
+     "helical_twist_min"
+    ],
+    "all": [
+     "do_helix",
+     "do_local_search_helical_symmetry",
+     "helical_twist_min"
+    ]
+   },
+   "--helical_z_percentage": {
+    "direct": [
+     "do_helix",
+     "helical_z_percentage"
+    ],
+    "all": [
+     "do_helix",
+     "helical_z_percentage"
+    ]
+   },
+   "--helix": {
+    "direct": [
+     "do_helix"
+    ],
+    "all": [
+     "do_helix"
+    ]
+   },
+   "--i": {
+    "direct": [
+     "fn_img",
+     "in_optimisation",
+     "in_particles"
+    ],
+    "all": [
+     "fn_img",
+     "in_optimisation",
+     "in_particles",
+     "use_direct_entries"
+    ]
+   },
+   "--ini_high": {
+    "direct": [
+     "ini_high"
+    ],
+    "all": [
+     "ini_high"
+    ]
+   },
+   "--ios": {
+    "direct": [
+     "in_optimisation"
+    ],
+    "all": [
+     "in_optimisation",
+     "use_direct_entries"
+    ]
+   },
+   "--iter": {
+    "direct": [
+     "nr_iter"
+    ],
+    "all": [
+     "nr_iter"
+    ]
+   },
+   "--j": {
+    "direct": [
+     "nr_threads"
+    ],
+    "all": [
+     "nr_threads"
+    ]
+   },
+   "--mot": {
+    "direct": [
+     "in_trajectories"
+    ],
+    "all": [
+     "in_trajectories",
+     "use_direct_entries"
+    ]
+   },
+   "--no_parallel_disc_io": {
+    "direct": [
+     "do_parallel_discio"
+    ],
+    "all": [
+     "do_parallel_discio"
+    ]
+   },
+   "--norm": {
+    "direct": [],
+    "all": []
+   },
+   "--o": {
+    "direct": [],
+    "all": []
+   },
+   "--offset_range": {
+    "direct": [
+     "dont_skip_align",
+     "offset_range"
+    ],
+    "all": [
+     "dont_skip_align",
+     "offset_range"
+    ]
+   },
+   "--offset_step": {
+    "direct": [
+     "dont_skip_align",
+     "offset_step"
+    ],
+    "all": [
+     "dont_skip_align",
+     "offset_step"
+    ]
+   },
+   "--oversampling": {
+    "direct": [
+     "dont_skip_align"
+    ],
+    "all": [
+     "dont_skip_align"
+    ]
+   },
+   "--p": {
+    "direct": [
+     "in_particles"
+    ],
+    "all": [
+     "in_particles",
+     "use_direct_entries"
+    ]
+   },
+   "--pad": {
+    "direct": [
+     "do_pad1"
+    ],
+    "all": [
+     "do_pad1"
+    ]
+   },
+   "--particle_diameter": {
+    "direct": [
+     "particle_diameter"
+    ],
+    "all": [
+     "particle_diameter"
+    ]
+   },
+   "--pool": {
+    "direct": [
+     "nr_pool"
+    ],
+    "all": [
+     "nr_pool"
+    ]
+   },
+   "--preread_images": {
+    "direct": [
+     "do_preread_images"
+    ],
+    "all": [
+     "do_preread_images"
+    ]
+   },
+   "--ref": {
+    "direct": [
+     "fn_ref"
+    ],
+    "all": [
+     "fn_ref"
+    ]
+   },
+   "--relax_sym": {
+    "direct": [
+     "relax_sym"
+    ],
+    "all": [
+     "do_local_ang_searches",
+     "dont_skip_align",
+     "relax_sym"
+    ]
+   },
+   "--scale": {
+    "direct": [],
+    "all": []
+   },
+   "--scratch_dir": {
+    "direct": [
+     "do_preread_images",
+     "scratch_dir"
+    ],
+    "all": [
+     "do_preread_images",
+     "scratch_dir"
+    ]
+   },
+   "--sigma_ang": {
+    "direct": [
+     "do_local_ang_searches",
+     "sigma_angles"
+    ],
+    "all": [
+     "do_local_ang_searches",
+     "dont_skip_align",
+     "sigma_angles"
+    ]
+   },
+   "--sigma_psi": {
+    "direct": [
+     "do_local_ang_searches",
+     "dont_skip_align",
+     "range_psi"
+    ],
+    "all": [
+     "do_helix",
+     "do_local_ang_searches",
+     "dont_skip_align",
+     "range_psi"
+    ]
+   },
+   "--sigma_rot": {
+    "direct": [
+     "do_local_ang_searches",
+     "dont_skip_align",
+     "range_rot"
+    ],
+    "all": [
+     "do_helix",
+     "do_local_ang_searches",
+     "dont_skip_align",
+     "range_rot"
+    ]
+   },
+   "--sigma_tilt": {
+    "direct": [
+     "do_local_ang_searches",
+     "dont_skip_align",
+     "range_tilt",
+     "sigma_tilt"
+    ],
+    "all": [
+     "do_helix",
+     "do_local_ang_searches",
+     "dont_skip_align",
+     "range_tilt",
+     "sigma_tilt"
+    ]
+   },
+   "--skip_align": {
+    "direct": [
+     "dont_skip_align"
+    ],
+    "all": [
+     "dont_skip_align"
+    ]
+   },
+   "--solvent_mask": {
+    "direct": [
+     "fn_mask"
+    ],
+    "all": [
+     "fn_mask"
+    ]
+   },
+   "--strict_highres_exp": {
+    "direct": [
+     "highres_limit"
+    ],
+    "all": [
+     "highres_limit"
+    ]
+   },
+   "--sym": {
+    "direct": [
+     "sym_name"
+    ],
+    "all": [
+     "sym_name"
+    ]
+   },
+   "--t": {
+    "direct": [
+     "in_tomograms"
+    ],
+    "all": [
+     "in_tomograms",
+     "use_direct_entries"
+    ]
+   },
+   "--tau2_fudge": {
+    "direct": [
+     "tau_fudge"
+    ],
+    "all": [
+     "tau_fudge"
+    ]
+   },
+   "--tomograms": {
+    "direct": [
+     "in_tomograms"
+    ],
+    "all": [
+     "in_tomograms",
+     "use_direct_entries"
+    ]
+   },
+   "--trajectories": {
+    "direct": [
+     "in_trajectories"
+    ],
+    "all": [
+     "in_trajectories",
+     "use_direct_entries"
+    ]
+   },
+   "--trust_ref_size": {
+    "direct": [
+     "trust_ref_size"
+    ],
+    "all": [
+     "fn_ref",
+     "trust_ref_size"
+    ]
+   },
+   "--zero_mask": {
+    "direct": [
+     "do_zero_mask"
+    ],
+    "all": [
+     "do_zero_mask"
+    ]
+   }
+  },
+  "relion.ctffind": {
+   "--Box": {
+    "direct": [
+     "box"
+    ],
+    "all": [
+     "box"
+    ]
+   },
+   "--FStep": {
+    "direct": [
+     "dfstep"
+    ],
+    "all": [
+     "dfstep"
+    ]
+   },
+   "--ResMax": {
+    "direct": [
+     "resmax"
+    ],
+    "all": [
+     "resmax"
+    ]
+   },
+   "--ResMin": {
+    "direct": [
+     "resmin"
+    ],
+    "all": [
+     "resmin"
+    ]
+   },
+   "--ctfWin": {
+    "direct": [
+     "ctf_win"
+    ],
+    "all": [
+     "ctf_win"
+    ]
+   },
+   "--ctffind_exe": {
+    "direct": [
+     "fn_ctffind_exe"
+    ],
+    "all": [
+     "fn_ctffind_exe"
+    ]
+   },
+   "--dAst": {
+    "direct": [
+     "dast"
+    ],
+    "all": [
+     "dast"
+    ]
+   },
+   "--dFMax": {
+    "direct": [
+     "dfmax"
+    ],
+    "all": [
+     "dfmax"
+    ]
+   },
+   "--dFMin": {
+    "direct": [
+     "dfmin"
+    ],
+    "all": [
+     "dfmin"
+    ]
+   },
+   "--do_phaseshift": {
+    "direct": [
+     "do_phaseshift"
+    ],
+    "all": [
+     "do_phaseshift"
+    ]
+   },
+   "--exp_factor_dose": {
+    "direct": [
+     "exp_factor_dose"
+    ],
+    "all": [
+     "exp_factor_dose"
+    ]
+   },
+   "--fast_search": {
+    "direct": [
+     "slow_search"
+    ],
+    "all": [
+     "slow_search"
+    ]
+   },
+   "--i": {
+    "direct": [
+     "input_star_mics"
+    ],
+    "all": [
+     "input_star_mics"
+    ]
+   },
+   "--is_ctffind4": {
+    "direct": [],
+    "all": []
+   },
+   "--localsearch_nominal_defocus": {
+    "direct": [
+     "localsearch_nominal_defocus"
+    ],
+    "all": [
+     "localsearch_nominal_defocus"
+    ]
+   },
+   "--o": {
+    "direct": [],
+    "all": []
+   },
+   "--only_do_unfinished": {
+    "direct": [],
+    "all": []
+   },
+   "--phase_max": {
+    "direct": [
+     "do_phaseshift",
+     "phase_max"
+    ],
+    "all": [
+     "do_phaseshift",
+     "phase_max"
+    ]
+   },
+   "--phase_min": {
+    "direct": [
+     "do_phaseshift",
+     "phase_min"
+    ],
+    "all": [
+     "do_phaseshift",
+     "phase_min"
+    ]
+   },
+   "--phase_step": {
+    "direct": [
+     "do_phaseshift",
+     "phase_step"
+    ],
+    "all": [
+     "do_phaseshift",
+     "phase_step"
+    ]
+   },
+   "--use_given_ps": {
+    "direct": [
+     "use_given_ps"
+    ],
+    "all": [
+     "use_given_ps"
+    ]
+   },
+   "--use_noDW": {
+    "direct": [
+     "use_noDW"
+    ],
+    "all": [
+     "use_noDW"
+    ]
+   }
+  },
+  "relion.ctfrefine": {
+   "--f": {
+    "direct": [
+     "fn_post"
+    ],
+    "all": [
+     "fn_post"
+    ]
+   },
+   "--fit_aberr": {
+    "direct": [
+     "do_4thorder"
+    ],
+    "all": [
+     "do_4thorder",
+     "do_aniso_mag"
+    ]
+   },
+   "--fit_aniso": {
+    "direct": [
+     "do_aniso_mag"
+    ],
+    "all": [
+     "do_aniso_mag"
+    ]
+   },
+   "--fit_beamtilt": {
+    "direct": [
+     "do_tilt"
+    ],
+    "all": [
+     "do_aniso_mag",
+     "do_tilt"
+    ]
+   },
+   "--fit_defocus": {
+    "direct": [
+     "do_ctf",
+     "minres"
+    ],
+    "all": [
+     "do_aniso_mag",
+     "do_ctf",
+     "minres"
+    ]
+   },
+   "--fit_mode": {
+    "direct": [
+     "do_astig",
+     "do_bfactor",
+     "do_ctf",
+     "do_defocus",
+     "do_phase"
+    ],
+    "all": [
+     "do_aniso_mag",
+     "do_astig",
+     "do_bfactor",
+     "do_ctf",
+     "do_defocus",
+     "do_phase"
+    ]
+   },
+   "--i": {
+    "direct": [
+     "fn_data"
+    ],
+    "all": [
+     "fn_data"
+    ]
+   },
+   "--j": {
+    "direct": [
+     "nr_threads"
+    ],
+    "all": [
+     "nr_threads"
+    ]
+   },
+   "--kmin_defocus": {
+    "direct": [
+     "do_ctf",
+     "minres"
+    ],
+    "all": [
+     "do_aniso_mag",
+     "do_ctf",
+     "minres"
+    ]
+   },
+   "--kmin_mag": {
+    "direct": [
+     "do_aniso_mag",
+     "minres"
+    ],
+    "all": [
+     "do_aniso_mag",
+     "minres"
+    ]
+   },
+   "--kmin_tilt": {
+    "direct": [
+     "do_tilt",
+     "minres"
+    ],
+    "all": [
+     "do_aniso_mag",
+     "do_tilt",
+     "minres"
+    ]
+   },
+   "--o": {
+    "direct": [],
+    "all": []
+   },
+   "--odd_aberr_max_n": {
+    "direct": [
+     "do_trefoil"
+    ],
+    "all": [
+     "do_aniso_mag",
+     "do_tilt",
+     "do_trefoil"
+    ]
+   },
+   "--only_do_unfinished": {
+    "direct": [],
+    "all": []
+   }
+  },
+  "relion.ctfrefinetomo": {
+   "--b": {
+    "direct": [
+     "box_size"
+    ],
+    "all": [
+     "box_size"
+    ]
+   },
+   "--d0": {
+    "direct": [
+     "do_defocus",
+     "focus_range"
+    ],
+    "all": [
+     "do_defocus",
+     "focus_range"
+    ]
+   },
+   "--d1": {
+    "direct": [
+     "do_defocus",
+     "focus_range"
+    ],
+    "all": [
+     "do_defocus",
+     "focus_range"
+    ]
+   },
+   "--do_defocus": {
+    "direct": [
+     "do_defocus"
+    ],
+    "all": [
+     "do_defocus"
+    ]
+   },
+   "--do_reg_defocus": {
+    "direct": [
+     "do_reg_def",
+     "lambda"
+    ],
+    "all": [
+     "do_defocus",
+     "do_reg_def",
+     "lambda"
+    ]
+   },
+   "--do_scale": {
+    "direct": [
+     "do_scale"
+    ],
+    "all": [
+     "do_scale"
+    ]
+   },
+   "--fsc": {
+    "direct": [
+     "in_post"
+    ],
+    "all": [
+     "in_post"
+    ]
+   },
+   "--i": {
+    "direct": [
+     "in_optimisation",
+     "in_particles"
+    ],
+    "all": [
+     "in_optimisation",
+     "in_particles",
+     "use_direct_entries"
+    ]
+   },
+   "--ios": {
+    "direct": [
+     "in_optimisation"
+    ],
+    "all": [
+     "in_optimisation",
+     "use_direct_entries"
+    ]
+   },
+   "--j": {
+    "direct": [
+     "nr_threads"
+    ],
+    "all": [
+     "nr_threads"
+    ]
+   },
+   "--lambda": {
+    "direct": [
+     "do_reg_def",
+     "lambda"
+    ],
+    "all": [
+     "do_defocus",
+     "do_reg_def",
+     "lambda"
+    ]
+   },
+   "--mask": {
+    "direct": [
+     "in_refmask"
+    ],
+    "all": [
+     "in_refmask"
+    ]
+   },
+   "--mot": {
+    "direct": [
+     "in_trajectories"
+    ],
+    "all": [
+     "in_trajectories",
+     "use_direct_entries"
+    ]
+   },
+   "--o": {
+    "direct": [],
+    "all": []
+   },
+   "--only_do_unfinished": {
+    "direct": [],
+    "all": []
+   },
+   "--p": {
+    "direct": [
+     "in_particles"
+    ],
+    "all": [
+     "in_particles",
+     "use_direct_entries"
+    ]
+   },
+   "--per_frame_scale": {
+    "direct": [
+     "do_frame_scale"
+    ],
+    "all": [
+     "do_frame_scale",
+     "do_scale"
+    ]
+   },
+   "--per_tomo_scale": {
+    "direct": [
+     "do_tomo_scale"
+    ],
+    "all": [
+     "do_scale",
+     "do_tomo_scale"
+    ]
+   },
+   "--ref1": {
+    "direct": [
+     "in_halfmaps"
+    ],
+    "all": [
+     "in_halfmaps"
+    ]
+   },
+   "--ref2": {
+    "direct": [
+     "in_halfmaps"
+    ],
+    "all": [
+     "in_halfmaps"
+    ]
+   },
+   "--t": {
+    "direct": [
+     "in_tomograms"
+    ],
+    "all": [
+     "in_tomograms",
+     "use_direct_entries"
+    ]
+   },
+   "--theme": {
+    "direct": [],
+    "all": []
+   },
+   "--tomograms": {
+    "direct": [
+     "in_tomograms"
+    ],
+    "all": [
+     "in_tomograms",
+     "use_direct_entries"
+    ]
+   },
+   "--trajectories": {
+    "direct": [
+     "in_trajectories"
+    ],
+    "all": [
+     "in_trajectories",
+     "use_direct_entries"
+    ]
+   }
+  },
+  "relion.denoisetomo": {
+   "--cryocare-path": {
+    "direct": [
+     "cryocare_path"
+    ],
+    "all": [
+     "cryocare_path"
+    ]
+   },
+   "--gpu": {
+    "direct": [
+     "gpu_ids"
+    ],
+    "all": [
+     "gpu_ids"
+    ]
+   },
+   "--model-file": {
+    "direct": [
+     "care_denoising_model",
+     "do_cryocare_predict"
+    ],
+    "all": [
+     "care_denoising_model",
+     "do_cryocare_predict"
+    ]
+   },
+   "--n-tiles": {
+    "direct": [
+     "do_cryocare_predict",
+     "ntiles_x",
+     "ntiles_y",
+     "ntiles_z"
+    ],
+    "all": [
+     "do_cryocare_predict",
+     "ntiles_x",
+     "ntiles_y",
+     "ntiles_z"
+    ]
+   },
+   "--number-training-subvolumes": {
+    "direct": [
+     "do_cryocare_train",
+     "number_training_subvolumes",
+     "tomograms_for_training"
+    ],
+    "all": [
+     "do_cryocare_train",
+     "number_training_subvolumes",
+     "tomograms_for_training"
+    ]
+   },
+   "--output-directory": {
+    "direct": [],
+    "all": []
+   },
+   "--subvolume-sidelength": {
+    "direct": [
+     "do_cryocare_train",
+     "subvolume_dimensions",
+     "tomograms_for_training"
+    ],
+    "all": [
+     "do_cryocare_train",
+     "subvolume_dimensions",
+     "tomograms_for_training"
+    ]
+   },
+   "--tomogram-name": {
+    "direct": [
+     "denoising_tomo_name",
+     "do_cryocare_predict"
+    ],
+    "all": [
+     "denoising_tomo_name",
+     "do_cryocare_predict"
+    ]
+   },
+   "--tomogram-star-file": {
+    "direct": [
+     "in_tomoset"
+    ],
+    "all": [
+     "in_tomoset"
+    ]
+   },
+   "--training-tomograms": {
+    "direct": [
+     "do_cryocare_train",
+     "tomograms_for_training"
+    ],
+    "all": [
+     "do_cryocare_train",
+     "tomograms_for_training"
+    ]
+   }
+  },
+  "relion.excludetilts": {
+   "--cache-size": {
+    "direct": [
+     "cache_size"
+    ],
+    "all": [
+     "cache_size"
+    ]
+   },
+   "--output-directory": {
+    "direct": [],
+    "all": []
+   },
+   "--tilt-series-star-file": {
+    "direct": [
+     "in_tiltseries"
+    ],
+    "all": [
+     "in_tiltseries"
+    ]
+   }
+  },
+  "relion.external": {
+   "--in_3dref": {
+    "direct": [
+     "in_3dref"
+    ],
+    "all": [
+     "in_3dref"
+    ]
+   },
+   "--in_coords": {
+    "direct": [
+     "in_coords"
+    ],
+    "all": [
+     "in_coords"
+    ]
+   },
+   "--in_mask": {
+    "direct": [
+     "in_mask"
+    ],
+    "all": [
+     "in_mask"
+    ]
+   },
+   "--in_mics": {
+    "direct": [
+     "in_mic"
+    ],
+    "all": [
+     "in_mic"
+    ]
+   },
+   "--in_movies": {
+    "direct": [
+     "in_mov"
+    ],
+    "all": [
+     "in_mov"
+    ]
+   },
+   "--in_parts": {
+    "direct": [
+     "in_part"
+    ],
+    "all": [
+     "in_part"
+    ]
+   },
+   "--j": {
+    "direct": [
+     "nr_threads"
+    ],
+    "all": [
+     "nr_threads"
+    ]
+   },
+   "--o": {
+    "direct": [],
+    "all": []
+   }
+  },
+  "relion.extract": {
+   "--bg_radius": {
+    "direct": [
+     "do_norm",
+     "extract_size"
+    ],
+    "all": [
+     "do_norm",
+     "extract_size"
+    ]
+   },
+   "--black_dust": {
+    "direct": [
+     "black_dust",
+     "do_norm"
+    ],
+    "all": [
+     "black_dust",
+     "do_norm"
+    ]
+   },
+   "--coord_dir": {
+    "direct": [
+     "coords_suffix"
+    ],
+    "all": [
+     "coords_suffix",
+     "do_reextract"
+    ]
+   },
+   "--coord_list": {
+    "direct": [
+     "coords_suffix"
+    ],
+    "all": [
+     "coords_suffix",
+     "do_reextract"
+    ]
+   },
+   "--coord_suffix": {
+    "direct": [
+     "coords_suffix"
+    ],
+    "all": [
+     "coords_suffix",
+     "do_reextract"
+    ]
+   },
+   "--extract": {
+    "direct": [],
+    "all": []
+   },
+   "--extract_size": {
+    "direct": [
+     "extract_size"
+    ],
+    "all": [
+     "extract_size"
+    ]
+   },
+   "--float16": {
+    "direct": [
+     "do_float16"
+    ],
+    "all": [
+     "do_float16"
+    ]
+   },
+   "--helical_bimodal_angular_priors": {
+    "direct": [
+     "helical_bimodal_angular_priors"
+    ],
+    "all": [
+     "do_extract_helix",
+     "helical_bimodal_angular_priors"
+    ]
+   },
+   "--helical_cut_into_segments": {
+    "direct": [
+     "do_extract_helix"
+    ],
+    "all": [
+     "do_extract_helix"
+    ]
+   },
+   "--helical_nr_asu": {
+    "direct": [
+     "do_extract_helix",
+     "helical_nr_asu"
+    ],
+    "all": [
+     "do_extract_helix",
+     "helical_nr_asu"
+    ]
+   },
+   "--helical_outer_diameter": {
+    "direct": [
+     "do_extract_helix",
+     "helical_tube_outer_diameter"
+    ],
+    "all": [
+     "do_extract_helix",
+     "helical_tube_outer_diameter"
+    ]
+   },
+   "--helical_rise": {
+    "direct": [
+     "do_extract_helix",
+     "helical_rise"
+    ],
+    "all": [
+     "do_extract_helix",
+     "helical_rise"
+    ]
+   },
+   "--helix": {
+    "direct": [
+     "do_extract_helix"
+    ],
+    "all": [
+     "do_extract_helix"
+    ]
+   },
+   "--i": {
+    "direct": [
+     "star_mics"
+    ],
+    "all": [
+     "star_mics"
+    ]
+   },
+   "--invert_contrast": {
+    "direct": [
+     "do_invert"
+    ],
+    "all": [
+     "do_invert"
+    ]
+   },
+   "--minimum_pick_fom": {
+    "direct": [
+     "do_fom_threshold",
+     "minimum_pick_fom"
+    ],
+    "all": [
+     "do_fom_threshold",
+     "minimum_pick_fom"
+    ]
+   },
+   "--norm": {
+    "direct": [
+     "do_norm",
+     "extract_size"
+    ],
+    "all": [
+     "do_norm",
+     "extract_size"
+    ]
+   },
+   "--only_do_unfinished": {
+    "direct": [],
+    "all": []
+   },
+   "--part_dir": {
+    "direct": [],
+    "all": []
+   },
+   "--part_star": {
+    "direct": [],
+    "all": []
+   },
+   "--pick_star": {
+    "direct": [
+     "do_extract_helix",
+     "do_reextract"
+    ],
+    "all": [
+     "do_extract_helix",
+     "do_reextract"
+    ]
+   },
+   "--recenter": {
+    "direct": [
+     "do_recenter",
+     "do_reset_offsets"
+    ],
+    "all": [
+     "do_recenter",
+     "do_reextract",
+     "do_reset_offsets"
+    ]
+   },
+   "--recenter_x": {
+    "direct": [
+     "do_recenter",
+     "do_reset_offsets",
+     "recenter_x"
+    ],
+    "all": [
+     "do_recenter",
+     "do_reextract",
+     "do_reset_offsets",
+     "recenter_x"
+    ]
+   },
+   "--recenter_y": {
+    "direct": [
+     "do_recenter",
+     "do_reset_offsets",
+     "recenter_y"
+    ],
+    "all": [
+     "do_recenter",
+     "do_reextract",
+     "do_reset_offsets",
+     "recenter_y"
+    ]
+   },
+   "--recenter_z": {
+    "direct": [
+     "do_recenter",
+     "do_reset_offsets",
+     "recenter_z"
+    ],
+    "all": [
+     "do_recenter",
+     "do_reextract",
+     "do_reset_offsets",
+     "recenter_z"
+    ]
+   },
+   "--reextract_data_star": {
+    "direct": [
+     "do_reextract",
+     "fndata_reextract"
+    ],
+    "all": [
+     "do_reextract",
+     "fndata_reextract"
+    ]
+   },
+   "--reset_offsets": {
+    "direct": [
+     "do_reset_offsets"
+    ],
+    "all": [
+     "do_reextract",
+     "do_reset_offsets"
+    ]
+   },
+   "--scale": {
+    "direct": [
+     "do_rescale",
+     "rescale"
+    ],
+    "all": [
+     "do_rescale",
+     "rescale"
+    ]
+   },
+   "--white_dust": {
+    "direct": [
+     "do_norm",
+     "white_dust"
+    ],
+    "all": [
+     "do_norm",
+     "white_dust"
+    ]
+   }
+  },
+  "relion.framealigntomo": {
+   "--b": {
+    "direct": [
+     "box_size"
+    ],
+    "all": [
+     "box_size"
+    ]
+   },
+   "--fsc": {
+    "direct": [
+     "in_post"
+    ],
+    "all": [
+     "in_post"
+    ]
+   },
+   "--i": {
+    "direct": [
+     "in_optimisation",
+     "in_particles"
+    ],
+    "all": [
+     "in_optimisation",
+     "in_particles",
+     "use_direct_entries"
+    ]
+   },
+   "--ios": {
+    "direct": [
+     "in_optimisation"
+    ],
+    "all": [
+     "in_optimisation",
+     "use_direct_entries"
+    ]
+   },
+   "--j": {
+    "direct": [
+     "nr_threads"
+    ],
+    "all": [
+     "nr_threads"
+    ]
+   },
+   "--mask": {
+    "direct": [
+     "in_refmask"
+    ],
+    "all": [
+     "in_refmask"
+    ]
+   },
+   "--mot": {
+    "direct": [
+     "in_trajectories"
+    ],
+    "all": [
+     "in_trajectories",
+     "use_direct_entries"
+    ]
+   },
+   "--motion": {
+    "direct": [
+     "do_motion"
+    ],
+    "all": [
+     "do_motion"
+    ]
+   },
+   "--o": {
+    "direct": [],
+    "all": []
+   },
+   "--only_do_unfinished": {
+    "direct": [],
+    "all": []
+   },
+   "--p": {
+    "direct": [
+     "in_particles"
+    ],
+    "all": [
+     "in_particles",
+     "use_direct_entries"
+    ]
+   },
+   "--r": {
+    "direct": [
+     "max_error"
+    ],
+    "all": [
+     "max_error"
+    ]
+   },
+   "--ref1": {
+    "direct": [
+     "in_halfmaps"
+    ],
+    "all": [
+     "in_halfmaps"
+    ]
+   },
+   "--ref2": {
+    "direct": [
+     "in_halfmaps"
+    ],
+    "all": [
+     "in_halfmaps"
+    ]
+   },
+   "--s_div": {
+    "direct": [
+     "do_motion",
+     "sigma_div"
+    ],
+    "all": [
+     "do_motion",
+     "sigma_div"
+    ]
+   },
+   "--s_vel": {
+    "direct": [
+     "do_motion",
+     "sigma_vel"
+    ],
+    "all": [
+     "do_motion",
+     "sigma_vel"
+    ]
+   },
+   "--shift_only": {
+    "direct": [
+     "do_shift_align"
+    ],
+    "all": [
+     "do_shift_align"
+    ]
+   },
+   "--shift_only_by_particles": {
+    "direct": [
+     "shift_align_type"
+    ],
+    "all": [
+     "do_shift_align",
+     "shift_align_type"
+    ]
+   },
+   "--sq_exp_ker": {
+    "direct": [
+     "do_sq_exp_ker"
+    ],
+    "all": [
+     "do_motion",
+     "do_sq_exp_ker"
+    ]
+   },
+   "--t": {
+    "direct": [
+     "in_tomograms"
+    ],
+    "all": [
+     "in_tomograms",
+     "use_direct_entries"
+    ]
+   },
+   "--theme": {
+    "direct": [],
+    "all": []
+   },
+   "--tomograms": {
+    "direct": [
+     "in_tomograms"
+    ],
+    "all": [
+     "in_tomograms",
+     "use_direct_entries"
+    ]
+   },
+   "--trajectories": {
+    "direct": [
+     "in_trajectories"
+    ],
+    "all": [
+     "in_trajectories",
+     "use_direct_entries"
+    ]
+   }
+  },
+  "relion.import": {
+   "--Cs": {
+    "direct": [
+     "Cs",
+     "do_raw"
+    ],
+    "all": [
+     "Cs",
+     "do_raw"
+    ]
+   },
+   "--Q0": {
+    "direct": [
+     "Q0",
+     "do_raw"
+    ],
+    "all": [
+     "Q0",
+     "do_raw"
+    ]
+   },
+   "--angpix": {
+    "direct": [
+     "angpix",
+     "do_raw"
+    ],
+    "all": [
+     "angpix",
+     "do_raw"
+    ]
+   },
+   "--beamtilt_x": {
+    "direct": [
+     "beamtilt_x",
+     "do_raw"
+    ],
+    "all": [
+     "beamtilt_x",
+     "do_raw"
+    ]
+   },
+   "--beamtilt_y": {
+    "direct": [
+     "beamtilt_y",
+     "do_raw"
+    ],
+    "all": [
+     "beamtilt_y",
+     "do_raw"
+    ]
+   },
+   "--continue": {
+    "direct": [],
+    "all": []
+   },
+   "--do_coordinates": {
+    "direct": [
+     "node_type"
+    ],
+    "all": [
+     "do_other",
+     "do_raw",
+     "node_type"
+    ]
+   },
+   "--do_halfmaps": {
+    "direct": [],
+    "all": [
+     "do_other",
+     "do_raw",
+     "node_type"
+    ]
+   },
+   "--do_micrographs": {
+    "direct": [
+     "is_multiframe"
+    ],
+    "all": [
+     "do_raw",
+     "is_multiframe"
+    ]
+   },
+   "--do_movies": {
+    "direct": [
+     "is_multiframe"
+    ],
+    "all": [
+     "do_raw",
+     "is_multiframe"
+    ]
+   },
+   "--do_other": {
+    "direct": [],
+    "all": [
+     "do_other",
+     "do_raw",
+     "node_type"
+    ]
+   },
+   "--do_particles": {
+    "direct": [],
+    "all": [
+     "do_other",
+     "do_raw",
+     "node_type"
+    ]
+   },
+   "--i": {
+    "direct": [
+     "fn_in_other"
+    ],
+    "all": [
+     "fn_in_other"
+    ]
+   },
+   "--kV": {
+    "direct": [
+     "do_raw",
+     "kV"
+    ],
+    "all": [
+     "do_raw",
+     "kV"
+    ]
+   },
+   "--odir": {
+    "direct": [],
+    "all": []
+   },
+   "--ofile": {
+    "direct": [
+     "fn_in_other"
+    ],
+    "all": [
+     "fn_in_other"
+    ]
+   },
+   "--optics_group_mtf": {
+    "direct": [
+     "fn_mtf"
+    ],
+    "all": [
+     "do_raw",
+     "fn_mtf"
+    ]
+   },
+   "--optics_group_name": {
+    "direct": [
+     "do_raw",
+     "optics_group_name"
+    ],
+    "all": [
+     "do_raw",
+     "optics_group_name"
+    ]
+   },
+   "--particles_optics_group_name": {
+    "direct": [
+     "optics_group_particles"
+    ],
+    "all": [
+     "do_other",
+     "do_raw",
+     "node_type",
+     "optics_group_particles"
+    ]
+   }
+  },
+  "relion.importtomo": {
+   "--add_factor": {
+    "direct": [
+     "add_factor",
+     "do_coords"
+    ],
+    "all": [
+     "add_factor",
+     "do_coords"
+    ]
+   },
+   "--amplitude-contrast": {
+    "direct": [
+     "Q0",
+     "do_coords"
+    ],
+    "all": [
+     "Q0",
+     "do_coords"
+    ]
+   },
+   "--centered": {
+    "direct": [
+     "is_center"
+    ],
+    "all": [
+     "do_coords",
+     "is_center"
+    ]
+   },
+   "--dose-per-movie-frame": {
+    "direct": [
+     "dose_is_per_movie_frame",
+     "dose_rate"
+    ],
+    "all": [
+     "do_coords",
+     "dose_is_per_movie_frame",
+     "dose_rate"
+    ]
+   },
+   "--dose-per-tilt-image": {
+    "direct": [
+     "dose_is_per_movie_frame",
+     "dose_rate"
+    ],
+    "all": [
+     "do_coords",
+     "dose_is_per_movie_frame",
+     "dose_rate"
+    ]
+   },
+   "--i": {
+    "direct": [
+     "do_coords",
+     "in_coords"
+    ],
+    "all": [
+     "do_coords",
+     "in_coords"
+    ]
+   },
+   "--images-are-motion-corrected": {
+    "direct": [
+     "images_are_motion_corrected"
+    ],
+    "all": [
+     "do_coords",
+     "images_are_motion_corrected"
+    ]
+   },
+   "--invert-defocus-handedness": {
+    "direct": [
+     "flip_tiltseries_hand"
+    ],
+    "all": [
+     "do_coords",
+     "flip_tiltseries_hand"
+    ]
+   },
+   "--mdoc-file-pattern": {
+    "direct": [
+     "do_coords",
+     "mdoc_files"
+    ],
+    "all": [
+     "do_coords",
+     "mdoc_files"
+    ]
+   },
+   "--mtf-file": {
+    "direct": [
+     "mtf_file"
+    ],
+    "all": [
+     "do_coords",
+     "mtf_file"
+    ]
+   },
+   "--nominal-pixel-size": {
+    "direct": [
+     "angpix",
+     "do_coords"
+    ],
+    "all": [
+     "angpix",
+     "do_coords"
+    ]
+   },
+   "--nominal-tilt-axis-angle": {
+    "direct": [
+     "do_coords",
+     "tilt_axis_angle"
+    ],
+    "all": [
+     "do_coords",
+     "tilt_axis_angle"
+    ]
+   },
+   "--o": {
+    "direct": [
+     "do_coords"
+    ],
+    "all": [
+     "do_coords"
+    ]
+   },
+   "--optics-group-name": {
+    "direct": [
+     "do_coords",
+     "optics_group_name"
+    ],
+    "all": [
+     "do_coords",
+     "optics_group_name"
+    ]
+   },
+   "--output-directory": {
+    "direct": [
+     "do_coords"
+    ],
+    "all": [
+     "do_coords"
+    ]
+   },
+   "--prefix": {
+    "direct": [
+     "prefix"
+    ],
+    "all": [
+     "do_coords",
+     "prefix"
+    ]
+   },
+   "--remove_substring": {
+    "direct": [
+     "remove_substring"
+    ],
+    "all": [
+     "do_coords",
+     "remove_substring"
+    ]
+   },
+   "--remove_substring2": {
+    "direct": [
+     "remove_substring2"
+    ],
+    "all": [
+     "do_coords",
+     "remove_substring2"
+    ]
+   },
+   "--scale_factor": {
+    "direct": [
+     "do_coords",
+     "scale_factor"
+    ],
+    "all": [
+     "do_coords",
+     "scale_factor"
+    ]
+   },
+   "--spherical-aberration": {
+    "direct": [
+     "Cs",
+     "do_coords"
+    ],
+    "all": [
+     "Cs",
+     "do_coords"
+    ]
+   },
+   "--tilt-image-movie-pattern": {
+    "direct": [
+     "do_coords",
+     "movie_files"
+    ],
+    "all": [
+     "do_coords",
+     "movie_files"
+    ]
+   },
+   "--voltage": {
+    "direct": [
+     "do_coords",
+     "kV"
+    ],
+    "all": [
+     "do_coords",
+     "kV"
+    ]
+   }
+  },
+  "relion.initialmodel": {
+   "--K": {
+    "direct": [
+     "nr_classes"
+    ],
+    "all": [
+     "nr_classes"
+    ]
+   },
+   "--apply_sym": {
+    "direct": [],
+    "all": []
+   },
+   "--auto_sampling": {
+    "direct": [],
+    "all": []
+   },
+   "--continue": {
+    "direct": [
+     "fn_cont"
+    ],
+    "all": [
+     "fn_cont"
+    ]
+   },
+   "--ctf": {
+    "direct": [
+     "do_ctf_correction"
+    ],
+    "all": [
+     "do_ctf_correction"
+    ]
+   },
+   "--ctf_intact_first_peak": {
+    "direct": [
+     "ctf_intact_first_peak"
+    ],
+    "all": [
+     "ctf_intact_first_peak",
+     "do_ctf_correction"
+    ]
+   },
+   "--denovo_3dref": {
+    "direct": [],
+    "all": []
+   },
+   "--dont_combine_weights_via_disc": {
+    "direct": [
+     "do_combine_thru_disc"
+    ],
+    "all": [
+     "do_combine_thru_disc"
+    ]
+   },
+   "--flatten_solvent": {
+    "direct": [
+     "do_solvent"
+    ],
+    "all": [
+     "do_solvent"
+    ]
+   },
+   "--gpu": {
+    "direct": [
+     "gpu_ids",
+     "use_gpu"
+    ],
+    "all": [
+     "gpu_ids",
+     "use_gpu"
+    ]
+   },
+   "--grad": {
+    "direct": [],
+    "all": []
+   },
+   "--healpix_order": {
+    "direct": [],
+    "all": []
+   },
+   "--i": {
+    "direct": [
+     "fn_img",
+     "in_optimisation",
+     "in_particles"
+    ],
+    "all": [
+     "fn_img",
+     "in_optimisation",
+     "in_particles",
+     "use_direct_entries"
+    ]
+   },
+   "--ios": {
+    "direct": [
+     "in_optimisation"
+    ],
+    "all": [
+     "in_optimisation",
+     "use_direct_entries"
+    ]
+   },
+   "--iter": {
+    "direct": [
+     "nr_iter"
+    ],
+    "all": [
+     "nr_iter"
+    ]
+   },
+   "--j": {
+    "direct": [
+     "nr_threads"
+    ],
+    "all": [
+     "nr_threads"
+    ]
+   },
+   "--mot": {
+    "direct": [
+     "in_trajectories"
+    ],
+    "all": [
+     "in_trajectories",
+     "use_direct_entries"
+    ]
+   },
+   "--no_parallel_disc_io": {
+    "direct": [
+     "do_parallel_discio"
+    ],
+    "all": [
+     "do_parallel_discio"
+    ]
+   },
+   "--o": {
+    "direct": [],
+    "all": []
+   },
+   "--offset_range": {
+    "direct": [],
+    "all": []
+   },
+   "--offset_step": {
+    "direct": [],
+    "all": []
+   },
+   "--oversampling": {
+    "direct": [],
+    "all": []
+   },
+   "--p": {
+    "direct": [
+     "in_particles"
+    ],
+    "all": [
+     "in_particles",
+     "use_direct_entries"
+    ]
+   },
+   "--pad": {
+    "direct": [],
+    "all": []
+   },
+   "--particle_diameter": {
+    "direct": [
+     "particle_diameter"
+    ],
+    "all": [
+     "particle_diameter"
+    ]
+   },
+   "--pool": {
+    "direct": [
+     "nr_pool"
+    ],
+    "all": [
+     "nr_pool"
+    ]
+   },
+   "--preread_images": {
+    "direct": [
+     "do_preread_images"
+    ],
+    "all": [
+     "do_preread_images"
+    ]
+   },
+   "--scratch_dir": {
+    "direct": [
+     "do_preread_images",
+     "scratch_dir"
+    ],
+    "all": [
+     "do_preread_images",
+     "scratch_dir"
+    ]
+   },
+   "--select_largest_class": {
+    "direct": [],
+    "all": []
+   },
+   "--sigma_tilt": {
+    "direct": [
+     "sigma_tilt"
+    ],
+    "all": [
+     "sigma_tilt"
+    ]
+   },
+   "--sym": {
+    "direct": [
+     "do_run_C1",
+     "sym_name"
+    ],
+    "all": [
+     "do_run_C1",
+     "sym_name"
+    ]
+   },
+   "--t": {
+    "direct": [
+     "in_tomograms"
+    ],
+    "all": [
+     "in_tomograms",
+     "use_direct_entries"
+    ]
+   },
+   "--tau2_fudge": {
+    "direct": [
+     "tau_fudge"
+    ],
+    "all": [
+     "tau_fudge"
+    ]
+   },
+   "--tomograms": {
+    "direct": [
+     "in_tomograms"
+    ],
+    "all": [
+     "in_tomograms",
+     "use_direct_entries"
+    ]
+   },
+   "--trajectories": {
+    "direct": [
+     "in_trajectories"
+    ],
+    "all": [
+     "in_trajectories",
+     "use_direct_entries"
+    ]
+   },
+   "--zero_mask": {
+    "direct": [],
+    "all": []
+   }
+  },
+  "relion.joinstar": {
+   "--check_duplicates": {
+    "direct": [
+     "do_mic",
+     "do_mov",
+     "do_part"
+    ],
+    "all": [
+     "do_mic",
+     "do_mov",
+     "do_part"
+    ]
+   },
+   "--combine": {
+    "direct": [
+     "do_mic",
+     "do_mov",
+     "do_part",
+     "fn_mic1",
+     "fn_mov1",
+     "fn_part1"
+    ],
+    "all": [
+     "do_mic",
+     "do_mov",
+     "do_part",
+     "fn_mic1",
+     "fn_mov1",
+     "fn_part1"
+    ]
+   },
+   "--i": {
+    "direct": [
+     "do_mic",
+     "do_mov",
+     "do_part",
+     "fn_mic1",
+     "fn_mov1",
+     "fn_part1"
+    ],
+    "all": [
+     "do_mic",
+     "do_mov",
+     "do_part",
+     "fn_mic1",
+     "fn_mov1",
+     "fn_part1"
+    ]
+   },
+   "--o": {
+    "direct": [
+     "do_mic",
+     "do_mov",
+     "do_part"
+    ],
+    "all": [
+     "do_mic",
+     "do_mov",
+     "do_part"
+    ]
+   }
+  },
+  "relion.localres": {
+   "--adhoc_bfac": {
+    "direct": [
+     "adhoc_bfac",
+     "do_relion_locres",
+     "do_resmap_locres"
+    ],
+    "all": [
+     "adhoc_bfac",
+     "do_relion_locres",
+     "do_resmap_locres"
+    ]
+   },
+   "--angpix": {
+    "direct": [
+     "angpix",
+     "do_relion_locres",
+     "do_resmap_locres"
+    ],
+    "all": [
+     "angpix",
+     "do_relion_locres",
+     "do_resmap_locres"
+    ]
+   },
+   "--i": {
+    "direct": [
+     "do_relion_locres",
+     "do_resmap_locres",
+     "fn_in"
+    ],
+    "all": [
+     "do_relion_locres",
+     "do_resmap_locres",
+     "fn_in"
+    ]
+   },
+   "--locres": {
+    "direct": [
+     "do_relion_locres",
+     "do_resmap_locres",
+     "fn_in"
+    ],
+    "all": [
+     "do_relion_locres",
+     "do_resmap_locres",
+     "fn_in"
+    ]
+   },
+   "--mask": {
+    "direct": [
+     "fn_mask"
+    ],
+    "all": [
+     "do_relion_locres",
+     "do_resmap_locres",
+     "fn_mask"
+    ]
+   },
+   "--maskVol": {
+    "direct": [
+     "do_resmap_locres",
+     "fn_mask"
+    ],
+    "all": [
+     "do_resmap_locres",
+     "fn_mask"
+    ]
+   },
+   "--maxRes": {
+    "direct": [
+     "do_resmap_locres",
+     "maxres"
+    ],
+    "all": [
+     "do_resmap_locres",
+     "maxres"
+    ]
+   },
+   "--minRes": {
+    "direct": [
+     "do_resmap_locres",
+     "minres"
+    ],
+    "all": [
+     "do_resmap_locres",
+     "minres"
+    ]
+   },
+   "--mtf": {
+    "direct": [
+     "fn_mtf"
+    ],
+    "all": [
+     "do_relion_locres",
+     "do_resmap_locres",
+     "fn_mtf"
+    ]
+   },
+   "--noguiSplit": {
+    "direct": [
+     "do_resmap_locres"
+    ],
+    "all": [
+     "do_resmap_locres"
+    ]
+   },
+   "--o": {
+    "direct": [
+     "do_relion_locres",
+     "do_resmap_locres"
+    ],
+    "all": [
+     "do_relion_locres",
+     "do_resmap_locres"
+    ]
+   },
+   "--pVal": {
+    "direct": [
+     "do_resmap_locres",
+     "pval"
+    ],
+    "all": [
+     "do_resmap_locres",
+     "pval"
+    ]
+   },
+   "--stepRes": {
+    "direct": [
+     "do_resmap_locres",
+     "stepres"
+    ],
+    "all": [
+     "do_resmap_locres",
+     "stepres"
+    ]
+   },
+   "--vxSize": {
+    "direct": [
+     "angpix",
+     "do_resmap_locres"
+    ],
+    "all": [
+     "angpix",
+     "do_resmap_locres"
+    ]
+   }
+  },
+  "relion.manualpick": {
+   "--allow_save": {
+    "direct": [],
+    "all": []
+   },
+   "--angpix": {
+    "direct": [
+     "angpix"
+    ],
+    "all": [
+     "angpix",
+     "do_topaz_denoise"
+    ]
+   },
+   "--black": {
+    "direct": [
+     "black_val"
+    ],
+    "all": [
+     "black_val"
+    ]
+   },
+   "--blue": {
+    "direct": [
+     "blue_value",
+     "do_color"
+    ],
+    "all": [
+     "blue_value",
+     "do_color"
+    ]
+   },
+   "--color_label": {
+    "direct": [
+     "color_label",
+     "do_color"
+    ],
+    "all": [
+     "color_label",
+     "do_color"
+    ]
+   },
+   "--color_star": {
+    "direct": [
+     "fn_color"
+    ],
+    "all": [
+     "do_color",
+     "fn_color"
+    ]
+   },
+   "--fast_save": {
+    "direct": [],
+    "all": []
+   },
+   "--highpass": {
+    "direct": [
+     "highpass"
+    ],
+    "all": [
+     "do_topaz_denoise",
+     "highpass"
+    ]
+   },
+   "--i": {
+    "direct": [
+     "fn_in"
+    ],
+    "all": [
+     "fn_in"
+    ]
+   },
+   "--lowpass": {
+    "direct": [
+     "lowpass"
+    ],
+    "all": [
+     "do_topaz_denoise",
+     "lowpass"
+    ]
+   },
+   "--minimum_pick_fom": {
+    "direct": [
+     "do_fom_threshold",
+     "minimum_pick_fom"
+    ],
+    "all": [
+     "do_fom_threshold",
+     "minimum_pick_fom"
+    ]
+   },
+   "--odir": {
+    "direct": [],
+    "all": []
+   },
+   "--particle_diameter": {
+    "direct": [
+     "diameter"
+    ],
+    "all": [
+     "diameter"
+    ]
+   },
+   "--pick_lines": {
+    "direct": [
+     "do_lines"
+    ],
+    "all": [
+     "do_lines",
+     "do_startend"
+    ]
+   },
+   "--pick_start_end": {
+    "direct": [
+     "do_lines"
+    ],
+    "all": [
+     "do_lines",
+     "do_startend"
+    ]
+   },
+   "--pickname": {
+    "direct": [],
+    "all": []
+   },
+   "--red": {
+    "direct": [
+     "do_color",
+     "red_value"
+    ],
+    "all": [
+     "do_color",
+     "red_value"
+    ]
+   },
+   "--scale": {
+    "direct": [
+     "micscale"
+    ],
+    "all": [
+     "micscale"
+    ]
+   },
+   "--selection": {
+    "direct": [],
+    "all": []
+   },
+   "--sigma_contrast": {
+    "direct": [
+     "sigma_contrast"
+    ],
+    "all": [
+     "sigma_contrast"
+    ]
+   },
+   "--topaz_denoise": {
+    "direct": [
+     "do_topaz_denoise"
+    ],
+    "all": [
+     "do_topaz_denoise"
+    ]
+   },
+   "--white": {
+    "direct": [
+     "white_val"
+    ],
+    "all": [
+     "white_val"
+    ]
+   }
+  },
+  "relion.maskcreate": {
+   "--angpix": {
+    "direct": [
+     "angpix"
+    ],
+    "all": [
+     "angpix"
+    ]
+   },
+   "--extend_inimask": {
+    "direct": [
+     "extend_inimask"
+    ],
+    "all": [
+     "extend_inimask"
+    ]
+   },
+   "--helix": {
+    "direct": [
+     "do_helix",
+     "helical_z_percentage"
+    ],
+    "all": [
+     "do_helix",
+     "helical_z_percentage"
+    ]
+   },
+   "--i": {
+    "direct": [
+     "fn_in"
+    ],
+    "all": [
+     "fn_in"
+    ]
+   },
+   "--ini_threshold": {
+    "direct": [
+     "inimask_threshold"
+    ],
+    "all": [
+     "inimask_threshold"
+    ]
+   },
+   "--j": {
+    "direct": [
+     "nr_threads"
+    ],
+    "all": [
+     "nr_threads"
+    ]
+   },
+   "--lowpass": {
+    "direct": [
+     "lowpass_filter"
+    ],
+    "all": [
+     "lowpass_filter"
+    ]
+   },
+   "--o": {
+    "direct": [],
+    "all": []
+   },
+   "--width_soft_edge": {
+    "direct": [
+     "width_mask_edge"
+    ],
+    "all": [
+     "width_mask_edge"
+    ]
+   },
+   "--z_percentage": {
+    "direct": [
+     "do_helix",
+     "helical_z_percentage"
+    ],
+    "all": [
+     "do_helix",
+     "helical_z_percentage"
+    ]
+   }
+  },
+  "relion.motioncorr": {
+   "--bfactor": {
+    "direct": [
+     "bfactor"
+    ],
+    "all": [
+     "bfactor"
+    ]
+   },
+   "--bin_factor": {
+    "direct": [
+     "bin_factor"
+    ],
+    "all": [
+     "bin_factor"
+    ]
+   },
+   "--defect_file": {
+    "direct": [
+     "fn_defect"
+    ],
+    "all": [
+     "fn_defect"
+    ]
+   },
+   "--dose_per_frame": {
+    "direct": [
+     "dose_per_frame"
+    ],
+    "all": [
+     "dose_per_frame"
+    ]
+   },
+   "--dose_weighting": {
+    "direct": [
+     "do_dose_weighting"
+    ],
+    "all": [
+     "do_dose_weighting"
+    ]
+   },
+   "--eer_grouping": {
+    "direct": [
+     "eer_grouping"
+    ],
+    "all": [
+     "eer_grouping"
+    ]
+   },
+   "--even_odd_split": {
+    "direct": [
+     "do_even_odd_split"
+    ],
+    "all": [
+     "do_even_odd_split"
+    ]
+   },
+   "--first_frame_sum": {
+    "direct": [
+     "first_frame_sum"
+    ],
+    "all": [
+     "first_frame_sum"
+    ]
+   },
+   "--float16": {
+    "direct": [
+     "do_float16"
+    ],
+    "all": [
+     "do_float16",
+     "do_own_motioncor"
+    ]
+   },
+   "--gain_flip": {
+    "direct": [
+     "fn_gain_ref"
+    ],
+    "all": [
+     "fn_gain_ref"
+    ]
+   },
+   "--gain_rot": {
+    "direct": [
+     "fn_gain_ref"
+    ],
+    "all": [
+     "fn_gain_ref"
+    ]
+   },
+   "--gainref": {
+    "direct": [
+     "fn_gain_ref"
+    ],
+    "all": [
+     "fn_gain_ref"
+    ]
+   },
+   "--gpu": {
+    "direct": [
+     "do_own_motioncor",
+     "gpu_ids"
+    ],
+    "all": [
+     "do_own_motioncor",
+     "gpu_ids"
+    ]
+   },
+   "--group_frames": {
+    "direct": [
+     "group_frames"
+    ],
+    "all": [
+     "group_frames"
+    ]
+   },
+   "--grouping_for_ps": {
+    "direct": [
+     "do_save_ps"
+    ],
+    "all": [
+     "do_save_ps"
+    ]
+   },
+   "--i": {
+    "direct": [
+     "input_star_mics"
+    ],
+    "all": [
+     "input_star_mics"
+    ]
+   },
+   "--j": {
+    "direct": [
+     "do_own_motioncor",
+     "nr_threads"
+    ],
+    "all": [
+     "do_own_motioncor",
+     "nr_threads"
+    ]
+   },
+   "--last_frame_sum": {
+    "direct": [
+     "last_frame_sum"
+    ],
+    "all": [
+     "last_frame_sum"
+    ]
+   },
+   "--motioncor2_exe": {
+    "direct": [
+     "do_own_motioncor",
+     "fn_motioncor2_exe"
+    ],
+    "all": [
+     "do_own_motioncor",
+     "fn_motioncor2_exe"
+    ]
+   },
+   "--o": {
+    "direct": [],
+    "all": []
+   },
+   "--only_do_unfinished": {
+    "direct": [],
+    "all": []
+   },
+   "--other_motioncor2_args": {
+    "direct": [
+     "other_motioncor2_args"
+    ],
+    "all": [
+     "do_own_motioncor",
+     "other_motioncor2_args"
+    ]
+   },
+   "--patch_x": {
+    "direct": [
+     "patch_x"
+    ],
+    "all": [
+     "patch_x"
+    ]
+   },
+   "--patch_y": {
+    "direct": [
+     "patch_y"
+    ],
+    "all": [
+     "patch_y"
+    ]
+   },
+   "--preexposure": {
+    "direct": [
+     "pre_exposure"
+    ],
+    "all": [
+     "pre_exposure"
+    ]
+   },
+   "--save_noDW": {
+    "direct": [
+     "do_save_noDW"
+    ],
+    "all": [
+     "do_dose_weighting",
+     "do_save_noDW"
+    ]
+   },
+   "--use_motioncor2": {
+    "direct": [
+     "do_own_motioncor"
+    ],
+    "all": [
+     "do_own_motioncor"
+    ]
+   },
+   "--use_own": {
+    "direct": [
+     "do_own_motioncor"
+    ],
+    "all": [
+     "do_own_motioncor"
+    ]
+   }
+  },
+  "relion.multibody": {
+   "--PCA_orient": {
+    "direct": [
+     "do_analyse"
+    ],
+    "all": [
+     "do_analyse"
+    ]
+   },
+   "--auto_local_healpix_order": {
+    "direct": [
+     "sampling"
+    ],
+    "all": [
+     "fn_cont",
+     "sampling"
+    ]
+   },
+   "--blush": {
+    "direct": [
+     "do_blush"
+    ],
+    "all": [
+     "do_blush",
+     "fn_cont"
+    ]
+   },
+   "--blush_model": {
+    "direct": [
+     "blush_version",
+     "do_blush"
+    ],
+    "all": [
+     "blush_version",
+     "do_blush",
+     "fn_cont"
+    ]
+   },
+   "--bodies": {
+    "direct": [
+     "do_analyse",
+     "fn_bodies"
+    ],
+    "all": [
+     "do_analyse",
+     "fn_bodies"
+    ]
+   },
+   "--continue": {
+    "direct": [
+     "fn_cont",
+     "fn_in"
+    ],
+    "all": [
+     "fn_cont",
+     "fn_in"
+    ]
+   },
+   "--data": {
+    "direct": [
+     "do_analyse"
+    ],
+    "all": [
+     "do_analyse"
+    ]
+   },
+   "--do_maps": {
+    "direct": [
+     "nr_movies"
+    ],
+    "all": [
+     "do_analyse",
+     "nr_movies"
+    ]
+   },
+   "--dont_combine_weights_via_disc": {
+    "direct": [
+     "do_combine_thru_disc"
+    ],
+    "all": [
+     "do_combine_thru_disc",
+     "fn_cont"
+    ]
+   },
+   "--gpu": {
+    "direct": [
+     "gpu_ids",
+     "use_gpu"
+    ],
+    "all": [
+     "fn_cont",
+     "gpu_ids",
+     "use_gpu"
+    ]
+   },
+   "--healpix_order": {
+    "direct": [
+     "sampling"
+    ],
+    "all": [
+     "fn_cont",
+     "sampling"
+    ]
+   },
+   "--j": {
+    "direct": [
+     "fn_cont",
+     "nr_threads"
+    ],
+    "all": [
+     "fn_cont",
+     "nr_threads"
+    ]
+   },
+   "--k": {
+    "direct": [
+     "nr_movies"
+    ],
+    "all": [
+     "do_analyse",
+     "nr_movies"
+    ]
+   },
+   "--model": {
+    "direct": [
+     "do_analyse"
+    ],
+    "all": [
+     "do_analyse"
+    ]
+   },
+   "--multibody_masks": {
+    "direct": [
+     "fn_bodies"
+    ],
+    "all": [
+     "fn_bodies",
+     "fn_cont"
+    ]
+   },
+   "--no_parallel_disc_io": {
+    "direct": [
+     "do_parallel_discio"
+    ],
+    "all": [
+     "do_parallel_discio",
+     "fn_cont"
+    ]
+   },
+   "--o": {
+    "direct": [
+     "do_analyse",
+     "fn_cont"
+    ],
+    "all": [
+     "do_analyse",
+     "fn_cont"
+    ]
+   },
+   "--offset_range": {
+    "direct": [
+     "offset_range"
+    ],
+    "all": [
+     "fn_cont",
+     "offset_range"
+    ]
+   },
+   "--offset_step": {
+    "direct": [
+     "offset_step"
+    ],
+    "all": [
+     "fn_cont",
+     "offset_step"
+    ]
+   },
+   "--oversampling": {
+    "direct": [],
+    "all": [
+     "fn_cont"
+    ]
+   },
+   "--pad": {
+    "direct": [
+     "do_pad1"
+    ],
+    "all": [
+     "do_pad1",
+     "fn_cont"
+    ]
+   },
+   "--pool": {
+    "direct": [
+     "fn_cont",
+     "nr_pool"
+    ],
+    "all": [
+     "fn_cont",
+     "nr_pool"
+    ]
+   },
+   "--preread_images": {
+    "direct": [
+     "do_preread_images"
+    ],
+    "all": [
+     "do_preread_images",
+     "fn_cont"
+    ]
+   },
+   "--reconstruct_subtracted_bodies": {
+    "direct": [
+     "do_subtracted_bodies"
+    ],
+    "all": [
+     "do_subtracted_bodies",
+     "fn_cont"
+    ]
+   },
+   "--scratch_dir": {
+    "direct": [
+     "do_preread_images",
+     "scratch_dir"
+    ],
+    "all": [
+     "do_preread_images",
+     "fn_cont",
+     "scratch_dir"
+    ]
+   },
+   "--select_eigenvalue": {
+    "direct": [
+     "do_select",
+     "select_eigenval"
+    ],
+    "all": [
+     "do_analyse",
+     "do_select",
+     "select_eigenval"
+    ]
+   },
+   "--select_eigenvalue_max": {
+    "direct": [
+     "do_select",
+     "eigenval_max"
+    ],
+    "all": [
+     "do_analyse",
+     "do_select",
+     "eigenval_max"
+    ]
+   },
+   "--select_eigenvalue_min": {
+    "direct": [
+     "do_select",
+     "eigenval_min"
+    ],
+    "all": [
+     "do_analyse",
+     "do_select",
+     "eigenval_min"
+    ]
+   },
+   "--solvent_correct_fsc": {
+    "direct": [
+     "fn_bodies"
+    ],
+    "all": [
+     "fn_bodies",
+     "fn_cont"
+    ]
+   }
+  },
+  "relion.picktomo": {
+   "--annotations-directory": {
+    "direct": [
+     "in_star_file",
+     "pick_mode"
+    ],
+    "all": [
+     "in_star_file",
+     "pick_mode"
+    ]
+   },
+   "--in-star-file": {
+    "direct": [
+     "in_star_file",
+     "pick_mode"
+    ],
+    "all": [
+     "in_star_file",
+     "pick_mode"
+    ]
+   },
+   "--output-directory": {
+    "direct": [],
+    "all": []
+   },
+   "--spacing-angstroms": {
+    "direct": [
+     "particle_spacing",
+     "pick_mode"
+    ],
+    "all": [
+     "particle_spacing",
+     "pick_mode"
+    ]
+   },
+   "--tilt-series-star-file": {
+    "direct": [
+     "in_tomoset"
+    ],
+    "all": [
+     "in_tomoset"
+    ]
+   },
+   "--tomograms-file": {
+    "direct": [
+     "in_star_file",
+     "in_tomoset",
+     "pick_mode"
+    ],
+    "all": [
+     "in_star_file",
+     "in_tomoset",
+     "pick_mode"
+    ]
+   }
+  },
+  "relion.polish": {
+   "--align_frac": {
+    "direct": [
+     "do_param_optim",
+     "eval_frac"
+    ],
+    "all": [
+     "do_param_optim",
+     "eval_frac"
+    ]
+   },
+   "--bfac_maxfreq": {
+    "direct": [
+     "do_param_optim",
+     "do_polish",
+     "maxres"
+    ],
+    "all": [
+     "do_param_optim",
+     "do_polish",
+     "maxres"
+    ]
+   },
+   "--bfac_minfreq": {
+    "direct": [
+     "do_param_optim",
+     "do_polish",
+     "minres"
+    ],
+    "all": [
+     "do_param_optim",
+     "do_polish",
+     "minres"
+    ]
+   },
+   "--combine_frames": {
+    "direct": [
+     "do_param_optim",
+     "do_polish"
+    ],
+    "all": [
+     "do_param_optim",
+     "do_polish"
+    ]
+   },
+   "--corr_mic": {
+    "direct": [
+     "fn_mic"
+    ],
+    "all": [
+     "fn_mic"
+    ]
+   },
+   "--eval_frac": {
+    "direct": [
+     "do_param_optim",
+     "eval_frac"
+    ],
+    "all": [
+     "do_param_optim",
+     "eval_frac"
+    ]
+   },
+   "--f": {
+    "direct": [
+     "fn_post"
+    ],
+    "all": [
+     "fn_post"
+    ]
+   },
+   "--first_frame": {
+    "direct": [
+     "first_frame"
+    ],
+    "all": [
+     "first_frame"
+    ]
+   },
+   "--float16": {
+    "direct": [
+     "do_float16"
+    ],
+    "all": [
+     "do_float16"
+    ]
+   },
+   "--i": {
+    "direct": [
+     "fn_data"
+    ],
+    "all": [
+     "fn_data"
+    ]
+   },
+   "--j": {
+    "direct": [
+     "nr_threads"
+    ],
+    "all": [
+     "nr_threads"
+    ]
+   },
+   "--last_frame": {
+    "direct": [
+     "last_frame"
+    ],
+    "all": [
+     "last_frame"
+    ]
+   },
+   "--min_p": {
+    "direct": [
+     "do_param_optim",
+     "optim_min_part"
+    ],
+    "all": [
+     "do_param_optim",
+     "optim_min_part"
+    ]
+   },
+   "--o": {
+    "direct": [],
+    "all": []
+   },
+   "--only_do_unfinished": {
+    "direct": [],
+    "all": []
+   },
+   "--params2": {
+    "direct": [
+     "sigma_acc"
+    ],
+    "all": [
+     "do_param_optim",
+     "sigma_acc"
+    ]
+   },
+   "--params3": {
+    "direct": [
+     "sigma_acc"
+    ],
+    "all": [
+     "do_param_optim",
+     "sigma_acc"
+    ]
+   },
+   "--params_file": {
+    "direct": [
+     "do_own_params",
+     "opt_params"
+    ],
+    "all": [
+     "do_own_params",
+     "do_param_optim",
+     "do_polish",
+     "opt_params"
+    ]
+   },
+   "--s_acc": {
+    "direct": [
+     "do_own_params",
+     "sigma_acc"
+    ],
+    "all": [
+     "do_own_params",
+     "do_param_optim",
+     "do_polish",
+     "sigma_acc"
+    ]
+   },
+   "--s_div": {
+    "direct": [
+     "do_own_params",
+     "sigma_div"
+    ],
+    "all": [
+     "do_own_params",
+     "do_param_optim",
+     "do_polish",
+     "sigma_div"
+    ]
+   },
+   "--s_vel": {
+    "direct": [
+     "do_own_params",
+     "sigma_vel"
+    ],
+    "all": [
+     "do_own_params",
+     "do_param_optim",
+     "do_polish",
+     "sigma_vel"
+    ]
+   },
+   "--scale": {
+    "direct": [
+     "extract_size",
+     "rescale"
+    ],
+    "all": [
+     "do_param_optim",
+     "do_polish",
+     "extract_size",
+     "rescale"
+    ]
+   },
+   "--window": {
+    "direct": [
+     "extract_size",
+     "rescale"
+    ],
+    "all": [
+     "do_param_optim",
+     "do_polish",
+     "extract_size",
+     "rescale"
+    ]
+   }
+  },
+  "relion.postprocess": {
+   "--adhoc_bfac": {
+    "direct": [
+     "adhoc_bfac",
+     "do_adhoc_bfac"
+    ],
+    "all": [
+     "adhoc_bfac",
+     "do_adhoc_bfac"
+    ]
+   },
+   "--angpix": {
+    "direct": [
+     "angpix"
+    ],
+    "all": [
+     "angpix"
+    ]
+   },
+   "--auto_bfac": {
+    "direct": [
+     "do_auto_bfac"
+    ],
+    "all": [
+     "do_auto_bfac"
+    ]
+   },
+   "--autob_lowres": {
+    "direct": [
+     "autob_lowres",
+     "do_auto_bfac"
+    ],
+    "all": [
+     "autob_lowres",
+     "do_auto_bfac"
+    ]
+   },
+   "--i": {
+    "direct": [
+     "fn_in"
+    ],
+    "all": [
+     "fn_in"
+    ]
+   },
+   "--low_pass": {
+    "direct": [
+     "do_skip_fsc_weighting",
+     "low_pass"
+    ],
+    "all": [
+     "do_skip_fsc_weighting",
+     "low_pass"
+    ]
+   },
+   "--mask": {
+    "direct": [
+     "fn_mask"
+    ],
+    "all": [
+     "fn_mask"
+    ]
+   },
+   "--mtf": {
+    "direct": [
+     "fn_mtf"
+    ],
+    "all": [
+     "fn_mtf"
+    ]
+   },
+   "--mtf_angpix": {
+    "direct": [
+     "fn_mtf",
+     "mtf_angpix"
+    ],
+    "all": [
+     "fn_mtf",
+     "mtf_angpix"
+    ]
+   },
+   "--o": {
+    "direct": [],
+    "all": []
+   },
+   "--skip_fsc_weighting": {
+    "direct": [
+     "do_skip_fsc_weighting"
+    ],
+    "all": [
+     "do_skip_fsc_weighting"
+    ]
+   }
+  },
+  "relion.pseudosubtomo": {
+   "--binned_size_pix": {
+    "direct": [
+     "binned_size_pix"
+    ],
+    "all": [
+     "binned_size_pix"
+    ]
+   },
+   "--box_size_A": {
+    "direct": [
+     "box_size_angst"
+    ],
+    "all": [
+     "box_size_angst"
+    ]
+   },
+   "--float16": {
+    "direct": [
+     "do_float16"
+    ],
+    "all": [
+     "do_float16"
+    ]
+   },
+   "--i": {
+    "direct": [
+     "in_optimisation",
+     "in_particles"
+    ],
+    "all": [
+     "in_optimisation",
+     "in_particles",
+     "use_direct_entries"
+    ]
+   },
+   "--ios": {
+    "direct": [
+     "in_optimisation"
+    ],
+    "all": [
+     "in_optimisation",
+     "use_direct_entries"
+    ]
+   },
+   "--j": {
+    "direct": [
+     "nr_threads"
+    ],
+    "all": [
+     "nr_threads"
+    ]
+   },
+   "--max_dose": {
+    "direct": [
+     "max_dose"
+    ],
+    "all": [
+     "max_dose"
+    ]
+   },
+   "--min_frames": {
+    "direct": [
+     "min_frames"
+    ],
+    "all": [
+     "min_frames"
+    ]
+   },
+   "--mot": {
+    "direct": [
+     "in_trajectories"
+    ],
+    "all": [
+     "in_trajectories",
+     "use_direct_entries"
+    ]
+   },
+   "--o": {
+    "direct": [],
+    "all": []
+   },
+   "--only_do_unfinished": {
+    "direct": [],
+    "all": []
+   },
+   "--p": {
+    "direct": [
+     "in_particles"
+    ],
+    "all": [
+     "in_particles",
+     "use_direct_entries"
+    ]
+   },
+   "--precrop_size_A": {
+    "direct": [
+     "precrop_size_angst"
+    ],
+    "all": [
+     "precrop_size_angst"
+    ]
+   },
+   "--real_subtomo": {
+    "direct": [
+     "subtomo_format"
+    ],
+    "all": [
+     "subtomo_format"
+    ]
+   },
+   "--stack2d": {
+    "direct": [
+     "subtomo_format"
+    ],
+    "all": [
+     "subtomo_format"
+    ]
+   },
+   "--t": {
+    "direct": [
+     "in_tomograms"
+    ],
+    "all": [
+     "in_tomograms",
+     "use_direct_entries"
+    ]
+   },
+   "--theme": {
+    "direct": [],
+    "all": []
+   },
+   "--tomograms": {
+    "direct": [
+     "in_tomograms"
+    ],
+    "all": [
+     "in_tomograms",
+     "use_direct_entries"
+    ]
+   },
+   "--trajectories": {
+    "direct": [
+     "in_trajectories"
+    ],
+    "all": [
+     "in_trajectories",
+     "use_direct_entries"
+    ]
+   }
+  },
+  "relion.reconstructparticletomo": {
+   "--SNR": {
+    "direct": [
+     "snr"
+    ],
+    "all": [
+     "snr"
+    ]
+   },
+   "--b": {
+    "direct": [
+     "box_size"
+    ],
+    "all": [
+     "box_size"
+    ]
+   },
+   "--bin": {
+    "direct": [
+     "binning"
+    ],
+    "all": [
+     "binning"
+    ]
+   },
+   "--crop": {
+    "direct": [
+     "crop_size"
+    ],
+    "all": [
+     "crop_size"
+    ]
+   },
+   "--cyl_outer_diameter": {
+    "direct": [
+     "helical_tube_outer_diameter"
+    ],
+    "all": [
+     "do_helix",
+     "helical_tube_outer_diameter"
+    ]
+   },
+   "--helical_rise": {
+    "direct": [
+     "do_helix",
+     "helical_rise"
+    ],
+    "all": [
+     "do_helix",
+     "helical_rise"
+    ]
+   },
+   "--helical_twist": {
+    "direct": [
+     "do_helix",
+     "helical_twist"
+    ],
+    "all": [
+     "do_helix",
+     "helical_twist"
+    ]
+   },
+   "--i": {
+    "direct": [
+     "in_optimisation",
+     "in_particles"
+    ],
+    "all": [
+     "do_helix",
+     "in_optimisation",
+     "in_particles",
+     "use_direct_entries"
+    ]
+   },
+   "--impose": {
+    "direct": [],
+    "all": [
+     "do_helix"
+    ]
+   },
+   "--ios": {
+    "direct": [
+     "in_optimisation"
+    ],
+    "all": [
+     "in_optimisation",
+     "use_direct_entries"
+    ]
+   },
+   "--j": {
+    "direct": [
+     "nr_threads"
+    ],
+    "all": [
+     "nr_threads"
+    ]
+   },
+   "--j_in": {
+    "direct": [],
+    "all": []
+   },
+   "--j_out": {
+    "direct": [
+     "nr_threads"
+    ],
+    "all": [
+     "nr_threads"
+    ]
+   },
+   "--mot": {
+    "direct": [
+     "in_trajectories"
+    ],
+    "all": [
+     "in_trajectories",
+     "use_direct_entries"
+    ]
+   },
+   "--nr_helical_asu": {
+    "direct": [
+     "do_helix",
+     "helical_nr_asu"
+    ],
+    "all": [
+     "do_helix",
+     "helical_nr_asu"
+    ]
+   },
+   "--o": {
+    "direct": [],
+    "all": [
+     "do_helix"
+    ]
+   },
+   "--only_do_unfinished": {
+    "direct": [],
+    "all": []
+   },
+   "--p": {
+    "direct": [
+     "in_particles"
+    ],
+    "all": [
+     "in_particles",
+     "use_direct_entries"
+    ]
+   },
+   "--rise": {
+    "direct": [
+     "helical_rise"
+    ],
+    "all": [
+     "do_helix",
+     "helical_rise"
+    ]
+   },
+   "--sym": {
+    "direct": [
+     "sym_name"
+    ],
+    "all": [
+     "sym_name"
+    ]
+   },
+   "--t": {
+    "direct": [
+     "in_tomograms"
+    ],
+    "all": [
+     "in_tomograms",
+     "use_direct_entries"
+    ]
+   },
+   "--theme": {
+    "direct": [],
+    "all": []
+   },
+   "--tomograms": {
+    "direct": [
+     "in_tomograms"
+    ],
+    "all": [
+     "in_tomograms",
+     "use_direct_entries"
+    ]
+   },
+   "--trajectories": {
+    "direct": [
+     "in_trajectories"
+    ],
+    "all": [
+     "in_trajectories",
+     "use_direct_entries"
+    ]
+   },
+   "--twist": {
+    "direct": [
+     "helical_twist"
+    ],
+    "all": [
+     "do_helix",
+     "helical_twist"
+    ]
+   },
+   "--z_percentage": {
+    "direct": [
+     "helical_z_percentage"
+    ],
+    "all": [
+     "do_helix",
+     "helical_z_percentage"
+    ]
+   }
+  },
+  "relion.reconstructtomograms": {
+   "--binned_angpix": {
+    "direct": [
+     "binned_angpix"
+    ],
+    "all": [
+     "binned_angpix"
+    ]
+   },
+   "--centre_proj": {
+    "direct": [
+     "centre_proj",
+     "do_proj"
+    ],
+    "all": [
+     "centre_proj",
+     "do_proj"
+    ]
+   },
+   "--ctf_intact_first_peak": {
+    "direct": [
+     "ctf_intact_first_peak"
+    ],
+    "all": [
+     "ctf_intact_first_peak",
+     "do_fourier"
+    ]
+   },
+   "--d": {
+    "direct": [
+     "zdim"
+    ],
+    "all": [
+     "zdim"
+    ]
+   },
+   "--do_proj": {
+    "direct": [
+     "do_proj"
+    ],
+    "all": [
+     "do_proj"
+    ]
+   },
+   "--fourier": {
+    "direct": [
+     "do_fourier"
+    ],
+    "all": [
+     "do_fourier"
+    ]
+   },
+   "--generate_split_tomograms": {
+    "direct": [
+     "generate_split_tomograms"
+    ],
+    "all": [
+     "generate_split_tomograms"
+    ]
+   },
+   "--h": {
+    "direct": [
+     "ydim"
+    ],
+    "all": [
+     "ydim"
+    ]
+   },
+   "--j": {
+    "direct": [
+     "nr_threads"
+    ],
+    "all": [
+     "nr_threads"
+    ]
+   },
+   "--o": {
+    "direct": [],
+    "all": []
+   },
+   "--only_do_unfinished": {
+    "direct": [],
+    "all": []
+   },
+   "--skip_fourier_wiener": {
+    "direct": [
+     "do_skip_wiener"
+    ],
+    "all": [
+     "do_fourier",
+     "do_skip_wiener"
+    ]
+   },
+   "--t": {
+    "direct": [
+     "in_tiltseries"
+    ],
+    "all": [
+     "in_tiltseries"
+    ]
+   },
+   "--thickness_proj": {
+    "direct": [
+     "do_proj",
+     "thickness_proj"
+    ],
+    "all": [
+     "do_proj",
+     "thickness_proj"
+    ]
+   },
+   "--tiltangle_offset": {
+    "direct": [
+     "tiltangle_offset"
+    ],
+    "all": [
+     "tiltangle_offset"
+    ]
+   },
+   "--tn": {
+    "direct": [
+     "tomo_name"
+    ],
+    "all": [
+     "tomo_name"
+    ]
+   },
+   "--w": {
+    "direct": [
+     "xdim"
+    ],
+    "all": [
+     "xdim"
+    ]
+   }
+  },
+  "relion.refine3d": {
+   "--auto_ignore_angles": {
+    "direct": [
+     "auto_faster"
+    ],
+    "all": [
+     "auto_faster"
+    ]
+   },
+   "--auto_local_healpix_order": {
+    "direct": [
+     "auto_local_sampling"
+    ],
+    "all": [
+     "auto_local_sampling"
+    ]
+   },
+   "--auto_refine": {
+    "direct": [],
+    "all": []
+   },
+   "--auto_resol_angles": {
+    "direct": [
+     "auto_faster"
+    ],
+    "all": [
+     "auto_faster"
+    ]
+   },
+   "--blush": {
+    "direct": [
+     "do_blush"
+    ],
+    "all": [
+     "do_blush"
+    ]
+   },
+   "--blush_model": {
+    "direct": [
+     "blush_version",
+     "do_blush"
+    ],
+    "all": [
+     "blush_version",
+     "do_blush"
+    ]
+   },
+   "--continue": {
+    "direct": [
+     "fn_cont"
+    ],
+    "all": [
+     "fn_cont"
+    ]
+   },
+   "--ctf": {
+    "direct": [
+     "do_ctf_correction"
+    ],
+    "all": [
+     "do_ctf_correction"
+    ]
+   },
+   "--ctf_intact_first_peak": {
+    "direct": [
+     "ctf_intact_first_peak"
+    ],
+    "all": [
+     "ctf_intact_first_peak",
+     "do_ctf_correction"
+    ]
+   },
+   "--dont_combine_weights_via_disc": {
+    "direct": [
+     "do_combine_thru_disc"
+    ],
+    "all": [
+     "do_combine_thru_disc"
+    ]
+   },
+   "--firstiter_cc": {
+    "direct": [
+     "ref_correct_greyscale"
+    ],
+    "all": [
+     "fn_ref",
+     "ref_correct_greyscale"
+    ]
+   },
+   "--flatten_solvent": {
+    "direct": [],
+    "all": []
+   },
+   "--gpu": {
+    "direct": [
+     "gpu_ids",
+     "use_gpu"
+    ],
+    "all": [
+     "gpu_ids",
+     "use_gpu"
+    ]
+   },
+   "--healpix_order": {
+    "direct": [
+     "sampling"
+    ],
+    "all": [
+     "sampling"
+    ]
+   },
+   "--helical_inner_diameter": {
+    "direct": [
+     "helical_tube_inner_diameter"
+    ],
+    "all": [
+     "do_helix",
+     "helical_tube_inner_diameter"
+    ]
+   },
+   "--helical_keep_tilt_prior_fixed": {
+    "direct": [
+     "keep_tilt_prior_fixed"
+    ],
+    "all": [
+     "do_helix",
+     "keep_tilt_prior_fixed"
+    ]
+   },
+   "--helical_nr_asu": {
+    "direct": [
+     "do_helix",
+     "helical_nr_asu"
+    ],
+    "all": [
+     "do_helix",
+     "helical_nr_asu"
+    ]
+   },
+   "--helical_nstart": {
+    "direct": [
+     "helical_nstart",
+     "helical_range_distance"
+    ],
+    "all": [
+     "do_helix",
+     "helical_nstart",
+     "helical_range_distance"
+    ]
+   },
+   "--helical_outer_diameter": {
+    "direct": [
+     "do_helix",
+     "helical_tube_outer_diameter"
+    ],
+    "all": [
+     "do_helix",
+     "helical_tube_outer_diameter"
+    ]
+   },
+   "--helical_rise_inistep": {
+    "direct": [
+     "helical_rise_inistep"
+    ],
+    "all": [
+     "do_helix",
+     "do_local_search_helical_symmetry",
+     "helical_rise_inistep"
+    ]
+   },
+   "--helical_rise_initial": {
+    "direct": [
+     "do_helix",
+     "helical_rise_initial"
+    ],
+    "all": [
+     "do_helix",
+     "helical_rise_initial"
+    ]
+   },
+   "--helical_rise_max": {
+    "direct": [
+     "do_local_search_helical_symmetry",
+     "helical_rise_max"
+    ],
+    "all": [
+     "do_helix",
+     "do_local_search_helical_symmetry",
+     "helical_rise_max"
+    ]
+   },
+   "--helical_rise_min": {
+    "direct": [
+     "do_local_search_helical_symmetry",
+     "helical_rise_min"
+    ],
+    "all": [
+     "do_helix",
+     "do_local_search_helical_symmetry",
+     "helical_rise_min"
+    ]
+   },
+   "--helical_sigma_distance": {
+    "direct": [
+     "helical_range_distance"
+    ],
+    "all": [
+     "do_helix",
+     "helical_range_distance"
+    ]
+   },
+   "--helical_symmetry_search": {
+    "direct": [
+     "do_local_search_helical_symmetry"
+    ],
+    "all": [
+     "do_helix",
+     "do_local_search_helical_symmetry"
+    ]
+   },
+   "--helical_twist_inistep": {
+    "direct": [
+     "helical_twist_inistep"
+    ],
+    "all": [
+     "do_helix",
+     "do_local_search_helical_symmetry",
+     "helical_twist_inistep"
+    ]
+   },
+   "--helical_twist_initial": {
+    "direct": [
+     "do_helix",
+     "helical_twist_initial"
+    ],
+    "all": [
+     "do_helix",
+     "helical_twist_initial"
+    ]
+   },
+   "--helical_twist_max": {
+    "direct": [
+     "do_local_search_helical_symmetry",
+     "helical_twist_max"
+    ],
+    "all": [
+     "do_helix",
+     "do_local_search_helical_symmetry",
+     "helical_twist_max"
+    ]
+   },
+   "--helical_twist_min": {
+    "direct": [
+     "do_local_search_helical_symmetry",
+     "helical_twist_min"
+    ],
+    "all": [
+     "do_helix",
+     "do_local_search_helical_symmetry",
+     "helical_twist_min"
+    ]
+   },
+   "--helical_z_percentage": {
+    "direct": [
+     "do_helix",
+     "helical_z_percentage"
+    ],
+    "all": [
+     "do_helix",
+     "helical_z_percentage"
+    ]
+   },
+   "--helix": {
+    "direct": [
+     "do_helix"
+    ],
+    "all": [
+     "do_helix"
+    ]
+   },
+   "--i": {
+    "direct": [
+     "fn_cont",
+     "fn_img",
+     "in_optimisation",
+     "in_particles"
+    ],
+    "all": [
+     "fn_cont",
+     "fn_img",
+     "in_optimisation",
+     "in_particles",
+     "use_direct_entries"
+    ]
+   },
+   "--ini_high": {
+    "direct": [
+     "ini_high"
+    ],
+    "all": [
+     "ini_high"
+    ]
+   },
+   "--ios": {
+    "direct": [
+     "fn_cont",
+     "in_optimisation"
+    ],
+    "all": [
+     "fn_cont",
+     "in_optimisation",
+     "use_direct_entries"
+    ]
+   },
+   "--j": {
+    "direct": [
+     "nr_threads"
+    ],
+    "all": [
+     "nr_threads"
+    ]
+   },
+   "--low_resol_join_halves": {
+    "direct": [],
+    "all": []
+   },
+   "--mot": {
+    "direct": [
+     "fn_cont",
+     "in_trajectories"
+    ],
+    "all": [
+     "fn_cont",
+     "in_trajectories",
+     "use_direct_entries"
+    ]
+   },
+   "--no_parallel_disc_io": {
+    "direct": [
+     "do_parallel_discio"
+    ],
+    "all": [
+     "do_parallel_discio"
+    ]
+   },
+   "--norm": {
+    "direct": [],
+    "all": []
+   },
+   "--o": {
+    "direct": [],
+    "all": []
+   },
+   "--offset_range": {
+    "direct": [
+     "offset_range"
+    ],
+    "all": [
+     "offset_range"
+    ]
+   },
+   "--offset_step": {
+    "direct": [
+     "offset_step"
+    ],
+    "all": [
+     "offset_step"
+    ]
+   },
+   "--oversampling": {
+    "direct": [],
+    "all": []
+   },
+   "--p": {
+    "direct": [
+     "fn_cont",
+     "in_particles"
+    ],
+    "all": [
+     "fn_cont",
+     "in_particles",
+     "use_direct_entries"
+    ]
+   },
+   "--pad": {
+    "direct": [
+     "do_pad1"
+    ],
+    "all": [
+     "do_pad1"
+    ]
+   },
+   "--particle_diameter": {
+    "direct": [
+     "particle_diameter"
+    ],
+    "all": [
+     "particle_diameter"
+    ]
+   },
+   "--pool": {
+    "direct": [
+     "nr_pool"
+    ],
+    "all": [
+     "nr_pool"
+    ]
+   },
+   "--preread_images": {
+    "direct": [
+     "do_preread_images"
+    ],
+    "all": [
+     "do_preread_images"
+    ]
+   },
+   "--ref": {
+    "direct": [
+     "fn_ref"
+    ],
+    "all": [
+     "fn_ref"
+    ]
+   },
+   "--relax_sym": {
+    "direct": [
+     "relax_sym"
+    ],
+    "all": [
+     "relax_sym"
+    ]
+   },
+   "--scale": {
+    "direct": [],
+    "all": []
+   },
+   "--scratch_dir": {
+    "direct": [
+     "do_preread_images",
+     "scratch_dir"
+    ],
+    "all": [
+     "do_preread_images",
+     "scratch_dir"
+    ]
+   },
+   "--sigma_psi": {
+    "direct": [
+     "auto_local_sampling",
+     "range_psi",
+     "sampling"
+    ],
+    "all": [
+     "auto_local_sampling",
+     "do_helix",
+     "range_psi",
+     "sampling"
+    ]
+   },
+   "--sigma_rot": {
+    "direct": [
+     "auto_local_sampling",
+     "range_rot",
+     "sampling"
+    ],
+    "all": [
+     "auto_local_sampling",
+     "do_helix",
+     "range_rot",
+     "sampling"
+    ]
+   },
+   "--sigma_tilt": {
+    "direct": [
+     "auto_local_sampling",
+     "range_tilt",
+     "sampling",
+     "sigma_tilt"
+    ],
+    "all": [
+     "auto_local_sampling",
+     "do_helix",
+     "range_tilt",
+     "sampling",
+     "sigma_tilt"
+    ]
+   },
+   "--solvent_correct_fsc": {
+    "direct": [
+     "do_solvent_fsc"
+    ],
+    "all": [
+     "do_solvent_fsc",
+     "fn_mask"
+    ]
+   },
+   "--solvent_mask": {
+    "direct": [
+     "fn_mask"
+    ],
+    "all": [
+     "fn_mask"
+    ]
+   },
+   "--split_random_halves": {
+    "direct": [],
+    "all": []
+   },
+   "--sym": {
+    "direct": [
+     "sym_name"
+    ],
+    "all": [
+     "sym_name"
+    ]
+   },
+   "--t": {
+    "direct": [
+     "fn_cont",
+     "in_tomograms"
+    ],
+    "all": [
+     "fn_cont",
+     "in_tomograms",
+     "use_direct_entries"
+    ]
+   },
+   "--tomograms": {
+    "direct": [
+     "fn_cont",
+     "in_tomograms"
+    ],
+    "all": [
+     "fn_cont",
+     "in_tomograms",
+     "use_direct_entries"
+    ]
+   },
+   "--trajectories": {
+    "direct": [
+     "fn_cont",
+     "in_trajectories"
+    ],
+    "all": [
+     "fn_cont",
+     "in_trajectories",
+     "use_direct_entries"
+    ]
+   },
+   "--trust_ref_size": {
+    "direct": [
+     "trust_ref_size"
+    ],
+    "all": [
+     "fn_ref",
+     "trust_ref_size"
+    ]
+   },
+   "--zero_mask": {
+    "direct": [
+     "do_zero_mask"
+    ],
+    "all": [
+     "do_zero_mask"
+    ]
+   }
+  },
+  "relion.select": {
+   "--allow_save": {
+    "direct": [
+     "fn_data",
+     "fn_mic",
+     "fn_model"
+    ],
+    "all": [
+     "do_class_ranker",
+     "do_discard",
+     "do_filaments",
+     "do_remove_duplicates",
+     "do_select_values",
+     "do_split",
+     "fn_data",
+     "fn_mic",
+     "fn_model"
+    ]
+   },
+   "--auto_select": {
+    "direct": [
+     "do_class_ranker"
+    ],
+    "all": [
+     "do_class_ranker",
+     "do_discard",
+     "do_filaments",
+     "do_remove_duplicates",
+     "do_select_values",
+     "do_split"
+    ]
+   },
+   "--discard_label": {
+    "direct": [
+     "discard_label",
+     "do_discard",
+     "do_select_values"
+    ],
+    "all": [
+     "discard_label",
+     "do_discard",
+     "do_filaments",
+     "do_remove_duplicates",
+     "do_select_values",
+     "do_split"
+    ]
+   },
+   "--discard_on_stats": {
+    "direct": [
+     "do_discard",
+     "do_select_values"
+    ],
+    "all": [
+     "do_discard",
+     "do_filaments",
+     "do_remove_duplicates",
+     "do_select_values",
+     "do_split"
+    ]
+   },
+   "--discard_sigma": {
+    "direct": [
+     "discard_sigma",
+     "do_discard",
+     "do_select_values"
+    ],
+    "all": [
+     "discard_sigma",
+     "do_discard",
+     "do_filaments",
+     "do_remove_duplicates",
+     "do_select_values",
+     "do_split"
+    ]
+   },
+   "--do_granularity_features": {
+    "direct": [
+     "do_class_ranker"
+    ],
+    "all": [
+     "do_class_ranker",
+     "do_discard",
+     "do_filaments",
+     "do_remove_duplicates",
+     "do_select_values",
+     "do_split"
+    ]
+   },
+   "--fn_imgs": {
+    "direct": [
+     "fn_data",
+     "fn_mic",
+     "fn_model"
+    ],
+    "all": [
+     "do_class_ranker",
+     "do_discard",
+     "do_filaments",
+     "do_remove_duplicates",
+     "do_select_values",
+     "do_split",
+     "fn_data",
+     "fn_mic",
+     "fn_model"
+    ]
+   },
+   "--fn_parts": {
+    "direct": [
+     "fn_model"
+    ],
+    "all": [
+     "do_class_ranker",
+     "do_discard",
+     "do_filaments",
+     "do_remove_duplicates",
+     "do_select_values",
+     "do_split",
+     "fn_model"
+    ]
+   },
+   "--fn_root": {
+    "direct": [
+     "do_class_ranker"
+    ],
+    "all": [
+     "do_class_ranker",
+     "do_discard",
+     "do_filaments",
+     "do_remove_duplicates",
+     "do_select_values",
+     "do_split"
+    ]
+   },
+   "--fn_sel_classavgs": {
+    "direct": [
+     "do_class_ranker"
+    ],
+    "all": [
+     "do_class_ranker",
+     "do_discard",
+     "do_filaments",
+     "do_remove_duplicates",
+     "do_select_values",
+     "do_split"
+    ]
+   },
+   "--fn_sel_parts": {
+    "direct": [
+     "do_class_ranker"
+    ],
+    "all": [
+     "do_class_ranker",
+     "do_discard",
+     "do_filaments",
+     "do_remove_duplicates",
+     "do_select_values",
+     "do_split"
+    ]
+   },
+   "--gui": {
+    "direct": [
+     "fn_data",
+     "fn_mic",
+     "fn_model"
+    ],
+    "all": [
+     "do_class_ranker",
+     "do_discard",
+     "do_filaments",
+     "do_remove_duplicates",
+     "do_select_values",
+     "do_split",
+     "fn_data",
+     "fn_mic",
+     "fn_model"
+    ]
+   },
+   "--i": {
+    "direct": [
+     "do_filaments",
+     "do_remove_duplicates",
+     "fn_data",
+     "fn_mic",
+     "fn_model"
+    ],
+    "all": [
+     "do_class_ranker",
+     "do_discard",
+     "do_filaments",
+     "do_remove_duplicates",
+     "do_select_values",
+     "do_split",
+     "fn_data",
+     "fn_mic",
+     "fn_model"
+    ]
+   },
+   "--image_angpix": {
+    "direct": [
+     "image_angpix"
+    ],
+    "all": [
+     "do_filaments",
+     "do_remove_duplicates",
+     "image_angpix"
+    ]
+   },
+   "--maxval": {
+    "direct": [
+     "do_select_values",
+     "select_maxval"
+    ],
+    "all": [
+     "do_discard",
+     "do_filaments",
+     "do_remove_duplicates",
+     "do_select_values",
+     "do_split",
+     "select_maxval"
+    ]
+   },
+   "--min_score": {
+    "direct": [
+     "do_class_ranker",
+     "rank_threshold"
+    ],
+    "all": [
+     "do_class_ranker",
+     "do_discard",
+     "do_filaments",
+     "do_remove_duplicates",
+     "do_select_values",
+     "do_split",
+     "rank_threshold"
+    ]
+   },
+   "--minval": {
+    "direct": [
+     "do_select_values",
+     "select_minval"
+    ],
+    "all": [
+     "do_discard",
+     "do_filaments",
+     "do_remove_duplicates",
+     "do_select_values",
+     "do_split",
+     "select_minval"
+    ]
+   },
+   "--nr_split": {
+    "direct": [
+     "nr_split"
+    ],
+    "all": [
+     "do_discard",
+     "do_filaments",
+     "do_remove_duplicates",
+     "do_select_values",
+     "do_split",
+     "nr_split"
+    ]
+   },
+   "--o": {
+    "direct": [
+     "do_class_ranker",
+     "do_discard",
+     "do_filaments",
+     "do_remove_duplicates",
+     "do_select_values",
+     "do_split"
+    ],
+    "all": [
+     "do_class_ranker",
+     "do_discard",
+     "do_filaments",
+     "do_remove_duplicates",
+     "do_select_values",
+     "do_split"
+    ]
+   },
+   "--opt": {
+    "direct": [
+     "do_class_ranker",
+     "fn_model"
+    ],
+    "all": [
+     "do_class_ranker",
+     "do_discard",
+     "do_filaments",
+     "do_remove_duplicates",
+     "do_select_values",
+     "do_split",
+     "fn_model"
+    ]
+   },
+   "--random_order": {
+    "direct": [
+     "do_random"
+    ],
+    "all": [
+     "do_discard",
+     "do_filaments",
+     "do_random",
+     "do_remove_duplicates",
+     "do_select_values",
+     "do_split"
+    ]
+   },
+   "--recenter": {
+    "direct": [
+     "do_recenter"
+    ],
+    "all": [
+     "do_class_ranker",
+     "do_discard",
+     "do_filaments",
+     "do_recenter",
+     "do_remove_duplicates",
+     "do_select_values",
+     "do_split",
+     "fn_model"
+    ]
+   },
+   "--regroup": {
+    "direct": [
+     "do_regroup",
+     "nr_groups"
+    ],
+    "all": [
+     "do_regroup",
+     "nr_groups"
+    ]
+   },
+   "--remove_duplicates": {
+    "direct": [
+     "do_filaments",
+     "do_remove_duplicates",
+     "duplicate_threshold"
+    ],
+    "all": [
+     "do_filaments",
+     "do_remove_duplicates",
+     "duplicate_threshold"
+    ]
+   },
+   "--select": {
+    "direct": [
+     "do_select_values",
+     "select_label"
+    ],
+    "all": [
+     "do_discard",
+     "do_filaments",
+     "do_remove_duplicates",
+     "do_select_values",
+     "do_split",
+     "select_label"
+    ]
+   },
+   "--select_min_nr_classes": {
+    "direct": [
+     "select_nr_classes",
+     "select_nr_parts"
+    ],
+    "all": [
+     "do_class_ranker",
+     "do_discard",
+     "do_filaments",
+     "do_remove_duplicates",
+     "do_select_values",
+     "do_split",
+     "select_nr_classes",
+     "select_nr_parts"
+    ]
+   },
+   "--select_min_nr_particles": {
+    "direct": [
+     "select_nr_parts"
+    ],
+    "all": [
+     "do_class_ranker",
+     "do_discard",
+     "do_filaments",
+     "do_remove_duplicates",
+     "do_select_values",
+     "do_split",
+     "select_nr_parts"
+    ]
+   },
+   "--size_split": {
+    "direct": [
+     "split_size"
+    ],
+    "all": [
+     "do_discard",
+     "do_filaments",
+     "do_remove_duplicates",
+     "do_select_values",
+     "do_split",
+     "split_size"
+    ]
+   },
+   "--split": {
+    "direct": [
+     "do_discard",
+     "do_select_values",
+     "do_split"
+    ],
+    "all": [
+     "do_discard",
+     "do_filaments",
+     "do_remove_duplicates",
+     "do_select_values",
+     "do_split"
+    ]
+   }
+  },
+  "relion.subtract": {
+   "--center_x": {
+    "direct": [
+     "center_x",
+     "do_center_mask",
+     "do_center_xyz"
+    ],
+    "all": [
+     "center_x",
+     "do_center_mask",
+     "do_center_xyz",
+     "do_fliplabel"
+    ]
+   },
+   "--center_y": {
+    "direct": [
+     "center_y",
+     "do_center_mask",
+     "do_center_xyz"
+    ],
+    "all": [
+     "center_y",
+     "do_center_mask",
+     "do_center_xyz",
+     "do_fliplabel"
+    ]
+   },
+   "--center_z": {
+    "direct": [
+     "center_z",
+     "do_center_mask",
+     "do_center_xyz"
+    ],
+    "all": [
+     "center_z",
+     "do_center_mask",
+     "do_center_xyz",
+     "do_fliplabel"
+    ]
+   },
+   "--data": {
+    "direct": [
+     "do_data",
+     "fn_data"
+    ],
+    "all": [
+     "do_data",
+     "do_fliplabel",
+     "fn_data"
+    ]
+   },
+   "--float16": {
+    "direct": [
+     "do_float16"
+    ],
+    "all": [
+     "do_fliplabel",
+     "do_float16"
+    ]
+   },
+   "--i": {
+    "direct": [
+     "do_fliplabel",
+     "fn_opt"
+    ],
+    "all": [
+     "do_fliplabel",
+     "fn_opt"
+    ]
+   },
+   "--mask": {
+    "direct": [
+     "fn_mask"
+    ],
+    "all": [
+     "do_fliplabel",
+     "fn_mask"
+    ]
+   },
+   "--new_box": {
+    "direct": [
+     "new_box"
+    ],
+    "all": [
+     "do_fliplabel",
+     "new_box"
+    ]
+   },
+   "--o": {
+    "direct": [
+     "do_fliplabel",
+     "fn_fliplabel"
+    ],
+    "all": [
+     "do_fliplabel",
+     "fn_fliplabel"
+    ]
+   },
+   "--recenter_on_mask": {
+    "direct": [
+     "do_center_mask"
+    ],
+    "all": [
+     "do_center_mask",
+     "do_fliplabel"
+    ]
+   },
+   "--revert": {
+    "direct": [
+     "do_fliplabel",
+     "fn_fliplabel"
+    ],
+    "all": [
+     "do_fliplabel",
+     "fn_fliplabel"
+    ]
+   }
+  }
+ }
+}

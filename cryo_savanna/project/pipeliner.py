@@ -37,7 +37,7 @@ from pathlib import Path
 
 from cryo_savanna.env.child import external_environ
 from cryo_savanna.jobdefs import external_jobs
-from cryo_savanna.project import processes
+from cryo_savanna.project import processes, references
 from cryo_savanna.project.gpu_queue import GpuQueue, is_waiting
 from cryo_savanna.project.jobstar import JobStar
 from cryo_savanna.project.lock import PipelineLock
@@ -179,12 +179,23 @@ class Pipeliner:
         return r
 
     # ------------------------------------------------------------------ add
-    def add_job(self, jobstar: JobStar, alias: str | None = None) -> AddResult:
-        """Add a job as Scheduled. Returns its name ("Class2D/job012/")."""
+    def add_job(self, jobstar: JobStar, alias: str | None = None, refs: list[str] | None = None) -> AddResult:
+        """Add a job as Scheduled. Returns its name ("Class2D/job012/").
+
+        ``refs``: the maps of a 3D classification that starts from several (project/references.py): their list
+        is written into the job's directory, which "Reference map:" names.
+        """
         self._runner_for(jobstar)
         tmp = self._gui_dir("tmp") / f"{uuid.uuid4().hex}.job.star"
+        current = Pipeline.read(self.project_dir)
+        before = set(current.processes)
+        predicted = None
+        if refs:  # the directory RELION gives it now (the editor's guess is older)
+            jt = job_type_for_label(jobstar.type_label)
+            predicted = f"{jt.dirname if jt else jobstar.type_label}/job{current.job_counter:03d}/"
+            jobstar = JobStar(jobstar.type_label, jobstar.is_continue, jobstar.is_tomo,
+                              {**jobstar.options, references.KEY: references.path_in(predicted)})
         jobstar.write(tmp)
-        before = set(Pipeline.read(self.project_dir).processes)
         args = ["--addJobFromStar", str(tmp.relative_to(self.project_dir))]
         if alias:
             args += ["--setJobAlias", alias]
@@ -201,9 +212,20 @@ class Pipeliner:
         if not new:
             raise PipelinerError("relion_pipeliner did not add the job (no new job in the pipeline)")
         warnings = [line.strip() for line in r.stderr.splitlines() if "WARNING" in line]
-        return AddResult(new[-1], warnings)
+        job = new[-1]
+        if refs:
+            references.write(self.project_dir, job, refs)
+            if job != predicted:  # another job took that directory meanwhile: name the list where it is
+                js = JobStar.read(self.project_dir / job / "job.star")
+                js.options[references.KEY] = references.path_in(job)
+                js.write(self.project_dir / job / "job.star")
+                warnings.append(f"Another job was added at the same moment: the reference maps of {job.rstrip('/')} "
+                                f"are listed in {references.path_in(job)}, while the pipeline names "
+                                f"{references.path_in(predicted or job)} as its input until it runs.")
+        return AddResult(job, warnings)
 
-    def overwrite_job(self, job: str, jobstar: JobStar, alias: str | None = None) -> AddResult:
+    def overwrite_job(self, job: str, jobstar: JobStar, alias: str | None = None,
+                      refs: list[str] | None = None) -> AddResult:
         """Replace ``job`` by a new job with these options in the same directory (as Scheduled).
 
         The old job and its files go to Trash/ (RELION's GUI does the same). Jobs that used its
@@ -223,7 +245,7 @@ class Pipeliner:
         held = placeholder(job)
         old_counter = ops.set_job_counter(pr.job_number)
         try:
-            res = self.add_job(jobstar, alias)
+            res = self.add_job(jobstar, alias, refs)  # (a list of references: written again, the old one is in Trash/)
         except Exception as e:  # also a timeout or an unwritable job.star: the old job is in Trash/ either way
             ops.take_place(held, None)
             raise PipelinerError(f"{e}\n\n{_in_trash(job)}") from e

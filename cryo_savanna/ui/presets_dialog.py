@@ -29,13 +29,17 @@ from qtpy.QtWidgets import (
     QWidget,
 )
 
+from cryo_savanna.jobdefs.flags import ADVANCED_TAB, EXTRA_ARGS, has_advanced_tab
 from cryo_savanna.jobdefs.model import JobVariant, OptionDef
 from cryo_savanna.project.presets import PresetError, PresetStore, check_name, is_input
 
 
 def tab_of(variant: JobVariant) -> dict[str, str]:
     """option key -> the label of the editor tab it is on."""
-    return {k: t.label for t in variant.tabs for row in t.rows for k in row.keys}
+    out = {k: t.label for t in variant.tabs for row in t.rows for k in row.keys}
+    if has_advanced_tab(variant):  # the job editor's own tab
+        out[EXTRA_ARGS] = ADVANCED_TAB
+    return out
 
 
 def form_order(variant: JobVariant, options: dict[str, OptionDef]) -> list[str]:
