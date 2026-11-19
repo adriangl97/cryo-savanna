@@ -401,6 +401,58 @@ def test_failed_tilt_series_and_continue(project, fake_aretomo):
     assert [flag(c, "-InPrefix") for c in calls(fake_aretomo)] == [job + "inputs/TS_43/TS_43.mrc"]
 
 
+def test_continue_aligns_again_only_tilt_series_with_another_thickness(project, fake_aretomo):
+    from cryo_savanna.jobdefs import aretomo_jobs as J
+    job = "External/job015/"
+    vals = values(tomo_names="TS_01 TS_03 TS_43", gpu_ids="0")
+    js = CATALOG.variant("align").make_jobstar(vals, False, job, None)
+    (project / job).mkdir(parents=True)
+    js.write(project / job / "job.star")
+    assert run_runner(project, job, vals).returncode == 0
+    assert all("-AlignZ" not in c for c in calls(fake_aretomo))
+    s, cols = table(project / job / A.SUMMARY, "global")
+    assert A.COL_ALIGN_Z in cols and [x[A.COL_ALIGN_Z] for x in s] == ["0"] * 3  # measured
+    st = J.read_align_z(project, job)
+    assert st.job_z == 0 and st.used == {"TS_01": 0, "TS_03": 0, "TS_43": 0} and st.to_align(NAMES) == []
+    assert st.measured["TS_01"] == pytest.approx(1620)
+
+    # another thickness for one tilt series, as the Tomograms view saves it: only that one again
+    J.save_align_z(project, job, {"TS_03": 1200, "TS_01": 0})  # 0: the job's, left out
+    own = decode(JobStar.read(project / job / "job.star").options["other_args"])[0]
+    assert own["tomo_align_z"] == "TS_03=1200" and own["tomo_names"] == "TS_01 TS_03 TS_43"
+    assert J.read_align_z(project, job).to_align(NAMES) == ["TS_03"]
+    fake_aretomo.unlink()
+    res = run_runner(project, job, own)
+    assert res.returncode == 0, res.stderr + res.stdout
+    c = calls(fake_aretomo)
+    assert [flag(x, "-InPrefix") for x in c] == [job + "inputs/TS_03/TS_03.mrc"] and flag(c[0], "-AlignZ") == "1200"
+    assert "TS_03: alignment thickness 1200, aligned with measured: aligning it again" in res.stdout
+    s, _ = table(project / job / A.SUMMARY, "global")
+    assert {x["rlnTomoName"]: x[A.COL_ALIGN_Z] for x in s} == {"TS_01": "0", "TS_03": "1200", "TS_43": "0"}
+    t, _ = table(project / job / A.TOMOGRAMS, "global")
+    assert [x["rlnTomoName"] for x in t] == ["TS_01", "TS_03", "TS_43"]
+    assert J.read_align_z(project, job).to_align(NAMES) == []
+    # continued again: nothing to do
+    fake_aretomo.unlink()
+    assert run_runner(project, job, own).returncode == 0 and not fake_aretomo.exists()
+
+    # a job of an older cryo-savanna (no alignment thickness in aretomo3.star): aligned with the job's
+    b = read_star(project / job / A.SUMMARY)
+    i = b["global"].columns.index(A.COL_ALIGN_Z)
+    b["global"].columns.pop(i)
+    for r in b["global"].rows:
+        r.pop(i)
+    write_star(project / job / A.SUMMARY, list(b.values()))
+    assert J.read_align_z(project, job).to_align(NAMES) == ["TS_03"]
+    res = run_runner(project, job, own)
+    assert [flag(x, "-InPrefix") for x in calls(fake_aretomo)] == [job + "inputs/TS_03/TS_03.mrc"]
+
+    with pytest.raises(A.Usage):
+        A.per_series({"tomo_align_z": "TS_01=x"}, "tomo_align_z")
+    assert A.align_z({"align_z": "800", "tomo_align_z": "TS_01=0"}, "TS_01") == 0
+    assert A.align_z({"align_z": "800", "tomo_align_z": "TS_01=0"}, "TS_03") == 800
+
+
 def test_missing_executable(project, fake_aretomo):
     res = run_runner(project, "External/job015/", values(aretomo_exe="NoSuchAreTomo3"))
     assert res.returncode == 1 and "AreTomo3 not found" in res.stderr
@@ -440,6 +492,53 @@ def test_registry(done_job):
     views = R.views_for(ctx)
     assert [v.title for v in views][:3] == ["Tomograms", "Tilt series", "AreTomo3"]
     assert views[0].args["star"] == job + A.TOMOGRAMS and views[1].args["star"] == job + A.ALIGNED
+
+
+def test_tomograms_view_sets_the_alignment_thickness(qtbot, done_job):
+    from cryo_savanna.jobdefs import aretomo_jobs as J
+    from cryo_savanna.viewers.aretomo_view import AretomoTomogramsView
+    from cryo_savanna.viewers.views import build_view
+    project, job = done_job
+    vals = values(tomo_names="TS_01 TS_03", align_z="900")
+    CATALOG.variant("align").make_jobstar(vals, False, job, None).write(project / job / "job.star")
+    ctx = R.JobContext(project, job, "relion.external", "Succeeded", [],
+                       JobStar.read(project / job / "job.star").options)
+    spec = R.views_for(ctx)[0]
+    assert spec.title == "Tomograms" and spec.args["aretomo"] == job
+    v = build_view(spec, ctx, None)
+    qtbot.addWidget(v)
+    assert isinstance(v, AretomoTomogramsView)
+    assert v.tasks.wait() and v.viewer.tasks.wait()
+    qtbot.waitUntil(lambda: v._current() == "TS_01")
+    model = v.viewer.model
+    col = {title: i + 1 for i, (_, title) in enumerate(model.columns)}  # column 0: row numbers
+    assert model.index(0, col["Measured thickness (px)"]).data() == "300"
+    # aligned with "measured" (0), the job now says 900: both would be aligned again
+    assert model.index(0, col["Alignment thickness (px)"]).data() == "measured → 900"
+    assert v.spin.value() == 900 and not v.save_btn.isEnabled()
+    v.set_align_z(0)  # back to measured for TS_01 alone
+    assert v.dirty and v.save_btn.isEnabled() and model.index(0, col["Alignment thickness (px)"]).data() == "measured"
+    assert v.settings.to_align(["TS_01", "TS_03"]) == ["TS_03"]
+    assert v.save()
+    own = decode(JobStar.read(project / job / "job.star").options["other_args"])[0]
+    assert own["tomo_align_z"] == "TS_01=0" and own["align_z"] == "900"
+    assert "TS_03" in v.note.text() and not v.dirty
+    v.viewer.select(1)
+    assert v._current() == "TS_03" and v.spin.value() == 900 and not v.job_btn.isEnabled()
+    v.spin.setValue(1300)
+    assert v.settings.per_series == {"TS_01": 0, "TS_03": 1300} and v.job_btn.isEnabled()
+    v._to_job()
+    assert v.settings.per_series == {"TS_01": 0} and v.spin.value() == 900
+    v.refresh()  # not saved: not read again
+    assert J.read_align_z(project, job).per_series == {"TS_01": 0}
+
+    # a reconstruction-only job has no thickness to change
+    rec_vals = values(tomo_names="TS_01 TS_03", alignment=A.ALIGN_INPUT)
+    CATALOG.variant("align").make_jobstar(rec_vals, False, job, None).write(project / job / "job.star")
+    v.dirty = False
+    v.refresh()
+    assert v.tasks.wait()
+    assert not v.spin.isEnabled() and "alignment of its input" in v.note.text()
 
 
 def test_last_settings(done_job):

@@ -90,6 +90,7 @@ class JobInfoPanel(QTabWidget):
         self._flag_tasks: set[FlagsTask] = set()
         self.queue = None  # slurm.QueueState
         self.held: dict = {}  # job -> pipeliner.Held: the jobs runs still going are to run
+        self.stale: dict = {}  # job -> staleness.Stale: the finished jobs that are out of date
         self.history: dict[str, list | str] = {}  # job -> its SLURM jobs (slurm.AcctJob), or an error
         self.main_inputs: MainInputs | None = None  # the main inputs chosen in cryo-savanna
         self.overview.setHtml("<p>Select a job.</p>")
@@ -121,6 +122,13 @@ class JobInfoPanel(QTabWidget):
         old = style.queue_entry(self.queue, self._job) if self._job else None
         self.queue = state
         if self._job and self._snap is not None and style.queue_entry(state, self._job) != old:
+            self._refresh_overview()
+
+    def set_stale(self, stale: dict) -> None:
+        """The finished jobs that are out of date (project/staleness.py)."""
+        old = self.stale.get(self._job) if self._job else None
+        self.stale = stale
+        if self._job and self._snap is not None and stale.get(self._job) != old:
             self._refresh_overview()
 
     def set_runs(self, held: dict) -> None:
@@ -295,6 +303,11 @@ class JobInfoPanel(QTabWidget):
         run = self._held_text(name)
         if run:
             rows.insert(2, ("Run", html.escape(run)))
+        stale = self.stale.get(name) if info.status == "Succeeded" else None
+        if stale is not None:
+            rows.insert(2, ("Out of date", f"<b style='color:#c8820a'>{html.escape(stale.text())}</b>"
+                                           "<br><span style='color:gray'>Job → Run out-of-date jobs again… runs it, "
+                                           "and the jobs after it, with their own settings</span>"))
         if pr.has_alias:
             rows.insert(0, ("Alias", html.escape(pr.alias)))
         summary = self.summaries.get(name)

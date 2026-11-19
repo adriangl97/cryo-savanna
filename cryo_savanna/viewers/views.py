@@ -31,6 +31,7 @@ from qtpy.QtWidgets import (
 from cryo_savanna.env.child import external_environ
 from cryo_savanna.images.cache import ThumbCache
 from cryo_savanna.images.mrc import ImageRef, header
+from cryo_savanna.results import flex, mapstats, polish
 from cryo_savanna.results import registry as R
 from cryo_savanna.results.classes import (
     data_star_for,
@@ -264,9 +265,12 @@ def particle_items(ps) -> list[GalleryItem]:
 # ---------------------------------------------------------------------------- plots
 
 class FiguresView(QWidget):
-    def __init__(self, project_dir: Path, figures: str, job: str = "", star: str = "", parent=None):
+    def __init__(self, project_dir: Path, figures: str, job: str = "", star: str = "", args: dict | None = None,
+                 parent=None):
+        """``args``: what else the figures read (the mask of a local-resolution map, the half maps)."""
         super().__init__(parent)
         self.project_dir, self.kind, self.job, self.star = Path(project_dir), figures, job, star
+        self.args = dict(args or {})
         self.tasks = Tasks(self)
         self.grid = FigureGrid()
         self.info = QLabel()
@@ -279,7 +283,11 @@ class FiguresView(QWidget):
 
     def _watch(self):
         if self.star:
-            return _stamp(self.project_dir / self.star)
+            return (_stamp(self.project_dir / self.star),
+                    *(_stamp(self.project_dir / self.args[k]) for k in ("mask", "half1") if self.args.get(k)))
+        if self.kind in ("polish", "flex"):  # one file the job writes (again) at the end
+            name = "bfactors.star" if self.kind == "polish" else flex.PROJECTIONS
+            return _dir_stamp(self.project_dir / self.job), _stamp(self.project_dir / self.job / name)
         return _dir_stamp(self.project_dir / self.job)
 
     def refresh(self) -> None:
@@ -288,11 +296,24 @@ class FiguresView(QWidget):
 
     def _load(self) -> None:
         self._stamp = self._watch()
-        project, kind, job, star = self.project_dir, self.kind, self.job, self.star
+        project, kind, job, star, args = self.project_dir, self.kind, self.job, self.star, self.args
 
         def read():
             if kind == "postprocess":
                 return postprocess_figures(project / star), star
+            if kind == "polish":
+                return polish.polish_figures(project / job), job + polish.BFACTORS
+            if kind == "flex":
+                fa = flex.read_flex(project / job)
+                source = job + flex.PROJECTIONS + ("; variance from run.out" if fa is not None and fa.from_log else "")
+                return flex.flex_figures(project / job), source
+            if kind == "locres":
+                mask = args.get("mask", "")
+                stats = mapstats.locres_stats(project / star, project / mask if mask else None)
+                return ([mapstats.locres_figure(stats)] if stats else []), star + (f" inside {mask}" if mask else "")
+            if kind == "halfmap_fsc":
+                fig = mapstats.halfmap_fsc(project / args["half1"], project / args["half2"])
+                return ([fig] if fig else []), f"{args['half1']} and {args['half2']}, computed by cryo-savanna"
             if kind == "convergence":
                 return convergence(project / job), job
             if kind == "model_fsc":
@@ -638,14 +659,15 @@ def build_view(spec: R.ViewSpec, ctx: R.JobContext, cache: ThumbCache | None, re
     if spec.kind == R.MICROGRAPHS:
         return MicrographViewer(project, a.get("star", ""), cache, ctf=a.get("ctf", False),
                                 motion=a.get("motion", False), picks=a.get("picks", ""),
-                                diameter=a.get("diameter"), box=a.get("box", ""))
+                                diameter=a.get("diameter"), box=a.get("box", ""), job=a.get("job", ""),
+                                final=a.get("final", ()), tracks=a.get("tracks", ""))
     if spec.kind == R.CLASSES:
         return ClassesView(project, job=a.get("job", ""), star=a.get("star", ""), tool=a.get("tool", ""),
                            request_tool=request_tool)
     if spec.kind == R.PARTICLES:
         return ParticlesView(project, a["star"])
     if spec.kind == R.PLOTS:
-        return FiguresView(project, a["figures"], job=a.get("job", ""), star=a.get("star", ""))
+        return FiguresView(project, a["figures"], job=a.get("job", ""), star=a.get("star", ""), args=a)
     if spec.kind == R.TABLE_PLOT:
         return TablePlotView(project, a["star"], a.get("block", ""), a.get("columns"), a.get("scatter"))
     if spec.kind == R.ANGLES:
@@ -662,7 +684,10 @@ def build_view(spec: R.ViewSpec, ctx: R.JobContext, cache: ThumbCache | None, re
     if spec.kind == R.TILT_SERIES:
         from cryo_savanna.viewers.tomo_viewer import TiltSeriesViewer
         return TiltSeriesViewer(project, a["star"], cache, tool=a.get("tool", ""), tool_arg=a.get("tool_arg", ""),
-                                request_tool=request_tool)
+                                request_tool=request_tool, compare=a.get("compare", ""))
+    if spec.kind == R.TOMOGRAMS and a.get("aretomo"):
+        from cryo_savanna.viewers.aretomo_view import AretomoTomogramsView
+        return AretomoTomogramsView(project, a["aretomo"], a["star"], cache=cache)
     if spec.kind == R.TOMOGRAMS:
         from cryo_savanna.viewers.tomo_viewer import TomogramViewer
         return TomogramViewer(project, a["star"], picks=a.get("picks", ""), diameter=a.get("diameter"), cache=cache)

@@ -161,6 +161,26 @@ def data_star_for(model: Path) -> Path:
     return model.with_name(model.name.replace("_half1_model.star", "_data.star").replace("_model.star", "_data.star"))
 
 
+def particle_iterations(project_dir: str | os.PathLike, job: str, final: list[str] | tuple = (),
+                        its: list | None = None) -> list[tuple[str, str]]:
+    """(label, particle file relative to the project) of an iterative job, oldest first: each iteration that
+    wrote its particles (gradient-driven Class2D/3D and InitialModel write them only every few iterations),
+    then the job's ``final`` particle files that are not one of those (Refine3D's run_data.star), once they
+    exist. ``its``: the job's iterations(), if the caller has them already."""
+    project_dir = Path(project_dir)
+    its = iterations(project_dir / job) if its is None else its
+    out: list[tuple[str, str]] = []
+    for it, model in its:
+        data = data_star_for(model)
+        if data.is_file():
+            out.append((f"Iteration {it}", os.path.relpath(data, project_dir)))
+    have = {rel for _, rel in out}
+    finals = [f for f in final if f not in have and (project_dir / f).is_file()]
+    for f in finals:
+        out.append(("Final" if len(finals) == 1 else f"Final ({Path(f).name})", f))
+    return out
+
+
 def class_counts(data_star: Path) -> dict[int, int]:
     r = loop_columns(data_star, "particles", ["rlnClassNumber"])
     if r is None or "rlnClassNumber" not in r[1]:

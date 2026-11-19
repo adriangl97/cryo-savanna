@@ -10,7 +10,7 @@ import time
 from collections.abc import Callable
 from typing import TYPE_CHECKING
 
-from qtpy.QtCore import Qt
+from qtpy.QtCore import Qt, QTimer
 from qtpy.QtWidgets import (
     QDialog,
     QDialogButtonBox,
@@ -24,9 +24,17 @@ from qtpy.QtWidgets import (
     QVBoxLayout,
 )
 
-from cryo_savanna.project import disk_usage, processes
+from cryo_savanna.project import autocontinue, disk_usage, processes
 from cryo_savanna.project.jobstar import JobStar
-from cryo_savanna.relion_consts import RELION_JOB_EXIT_ABORTED, RELION_JOB_EXIT_FAILURE, RELION_JOB_EXIT_SUCCESS
+from cryo_savanna.project.pipeline import Pipeline
+from cryo_savanna.project.pipeliner import rerun_refused
+from cryo_savanna.project.staleness import downstream
+from cryo_savanna.relion_consts import (
+    RELION_JOB_EXIT_ABORTED,
+    RELION_JOB_EXIT_FAILURE,
+    RELION_JOB_EXIT_SUCCESS,
+    STATUS_RUNNING,
+)
 from cryo_savanna.ui import style
 
 if TYPE_CHECKING:  # checked as the actions they are part of; at run time a plain class (no Qt diamond)
@@ -83,8 +91,89 @@ class RunScheduledDialog(QDialog):
 
 
 
+CONTINUE_WAIT_S = 600.0  # how long a job that hit the time limit waits for the run that sent it to the queue to let go
+CONTINUE_RETRY_S = 15.0
+
+
+class RerunDialog(QDialog):
+    """Pick out-of-date jobs to run again: (job, label, why it is out of date, why it cannot be, checked)."""
+
+    def __init__(self, parent, rows: list[tuple[str, str, str, str, bool]]):
+        super().__init__(parent)
+        self.setWindowTitle("Run out-of-date jobs again")
+        self.list = QListWidget()
+        for name, label, why, refused, checked in rows:
+            it = QListWidgetItem(f"{label} — {refused}" if refused else label)
+            it.setData(Qt.UserRole, name)
+            it.setToolTip(f"Out of date: {why}")
+            if refused:
+                it.setFlags(it.flags() & ~Qt.ItemIsEnabled)
+            else:
+                it.setFlags(it.flags() | Qt.ItemIsUserCheckable)
+                it.setCheckState(Qt.Checked if checked else Qt.Unchecked)
+            self.list.addItem(it)
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        buttons.button(QDialogButtonBox.Ok).setText("Run again")
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        lay = QVBoxLayout(self)
+        text = QLabel("These finished jobs ran before an input of theirs changed (or depend on one that did). Each "
+                      "job ticked is overwritten (its files go to Trash/, as Overwrite does) and runs again with its "
+                      "own settings, in one run: each after the jobs it reads from, which it waits for.")
+        text.setWordWrap(True)
+        lay.addWidget(text)
+        lay.addWidget(self.list)
+        lay.addWidget(buttons)
+
+    def selected(self) -> list[str]:
+        return [self.list.item(i).data(Qt.UserRole) for i in range(self.list.count())
+                if self.list.item(i).flags() & Qt.ItemIsUserCheckable and self.list.item(i).checkState() == Qt.Checked]
+
+
 class RunActions(_Base):
     """Run scheduled jobs, stop repeating runs, abort, mark lost SLURM jobs, clean, empty Trash/."""
+
+    def rerun_out_of_date(self, dialog_hook=None) -> None:
+        """Run out-of-date jobs again (project/staleness.py): those after the selected one, if it is out of date,
+        else all of them, chosen in a dialog. ``dialog_hook(dlg)`` (tests) answers it instead of the user."""
+        snap = self.snapshot
+        project, pl = self._ready()[0], self._ready()[1]
+        if snap is None:
+            return
+        stale = {n: st for n, st in self.stale.items() if n in snap.jobs and snap.jobs[n].status == "Succeeded"}
+        if not stale:
+            QMessageBox.information(self.window, "Run out-of-date jobs again", "No finished job is out of date.")
+            return
+        held = self._held_now()
+        current = self.current
+        chosen = set(downstream(snap.pipeline, current, stale)) if current is not None and current in stale \
+            else set(stale)
+        rows = []
+        for name, st in stale.items():
+            try:
+                refused = rerun_refused(JobStar.read(project / name / "job.star"))
+            except (OSError, ValueError, KeyError) as e:
+                refused = f"its job.star cannot be read ({e})"
+            if name in held:
+                refused = "is in a run that is still going"
+            rows.append((name, self._label(name), st.text(), refused, name in chosen and not refused))
+        dlg = RerunDialog(self.window, rows)
+        if (dialog_hook(dlg) if dialog_hook is not None else dlg.exec()) != QDialog.Accepted:
+            return
+        jobs = dlg.selected()
+        if not jobs:
+            return
+        warning = self._trash_warning(jobs)
+        if warning and dialog_hook is None and QMessageBox.question(
+                self.window, "Run out-of-date jobs again", warning.strip() + "\n\nRun them again?") != QMessageBox.Yes:
+            return
+
+        def done(result):
+            ran, _rec = result
+            self.select.emit(ran[0])
+            self.message.emit("Running again: " + ", ".join(j.rstrip("/") for j in ran))
+        what = f"Run {len(jobs)} out-of-date job{'s' if len(jobs) != 1 else ''} again"
+        self._run(what, lambda: pl.rerun(jobs), done)
 
     def run_scheduled(self) -> None:
         snap, pl = self.snapshot, self._ready()[1]
@@ -115,7 +204,7 @@ class RunActions(_Base):
 
         def label(rec, kind) -> str:
             what = (f"{rec.repeat}× · stops after its current job" if kind == "repeating"
-                    else "waits for its inputs · stops now")
+                    else "waits for its inputs or its GPUs · stops now")
             return (f"{time.strftime('%d %b %H:%M', time.localtime(rec.started))} · {what} · "
                     + ", ".join(self._label(j) for j in rec.jobs))
         labels = [label(r, k) for r, k in runs]
@@ -249,21 +338,84 @@ class RunActions(_Base):
             self._marked_lost.add((job, acct.id))
             what = "aborted" if acct.state.startswith("CANCELLED") else "failed"
             self._run(f"Mark {self._label(job)} as {what} (SLURM: {acct.state.lower().replace('_', ' ')})",
-                      lambda job=job, acct=acct: self._write_lost(job, acct))
+                      lambda job=job, acct=acct: self._write_lost(job, acct),
+                      lambda timed_out, job=job, acct=acct: self._after_time_limit(job, acct) if timed_out else None)
 
-    def _write_lost(self, job: str, acct) -> None:
+    def _write_lost(self, job: str, acct) -> bool:
+        """Write the exit file of a job SLURM ended; True when it was its time limit."""
         d = self._ready()[0] / job
         exits = (RELION_JOB_EXIT_SUCCESS, RELION_JOB_EXIT_FAILURE, RELION_JOB_EXIT_ABORTED)
         if not d.is_dir() or any((d / f).exists() for f in exits):  # meanwhile written, or the job is gone
-            return
+            return False
         if self.slurm is not None and self.slurm.ended_before_submission(job, acct):
-            return  # sent to the queue again since that look (Continue): this run is not the one that ended
+            return False  # sent to the queue again since that look (Continue): this run is not the one that ended
         marker = RELION_JOB_EXIT_ABORTED if acct.state.startswith("CANCELLED") else RELION_JOB_EXIT_FAILURE
         details = style.lost_details(acct)
         with open(d / "run.err", "a") as fh:  # where RELION's GUI and this window show why a job failed
             fh.write(f"\n ++++ cryo-savanna: SLURM job {acct.id} ended {acct.state}{f' ({details})' if details else ''}, "
-                     f"without RELION's exit file: {marker} written, {time.strftime('%a %b %d %H:%M:%S %Y')}\n")
+                     f"without RELION's exit file: {marker} written, {time.ctime()}\n")
         (d / marker).touch()
+        return acct.state.startswith("TIMEOUT")
+
+    # ------------------------------------------------------------------ continuing after the time limit
+    def _after_time_limit(self, job: str, acct) -> None:
+        """A relion_refine job SLURM ended at its time limit: continued from its latest iteration (Preferences →
+        "Continue jobs that hit the SLURM time limit"), else the status bar says how."""
+        info = self.snapshot.jobs.get(job) if self.snapshot is not None else None
+        if info is None or not autocontinue.continuable(info.process.type_label):
+            return
+        if not self.auto_continue:
+            self.message.emit(f"{self._label(job)} hit the SLURM time limit: Job → Continue… continues it from its "
+                              "latest iteration")
+            return
+        self._continuing[job] = (acct.id, time.monotonic() + CONTINUE_WAIT_S)
+        self._try_continue(job)
+
+    def _try_continue(self, job: str) -> None:
+        """Continue the job once the run that waited for it has seen it end (then it is free to run again)."""
+        hit = self._continuing.get(job)
+        if hit is None:
+            return
+        acct_id, deadline = hit
+        label = self._label(job)
+
+        def done(result: str) -> None:
+            if result == "wait" and time.monotonic() < deadline:
+                QTimer.singleShot(int(CONTINUE_RETRY_S * 1000), lambda: self._try_continue(job))
+                return
+            self._continuing.pop(job, None)
+            if result == "wait":
+                self.message.emit(f"{label} was not continued: the run that sent it to the queue still waits for it")
+            elif result == "limit":
+                self.message.emit(f"{label} hit the time limit again: continued {autocontinue.MAX_TIMES} times "
+                                  "already, so not again (give it a longer time limit)")
+            elif result:
+                self.message.emit(f"{label} {result}")
+
+        self._run(f"Continue {label} after the SLURM time limit", lambda: self._auto_continue(job, acct_id), done,
+                  on_error=lambda _msg: self._continuing.pop(job, None))
+
+    def _auto_continue(self, job: str, slurm_id: str) -> str:
+        """(In the worker.) "wait" while a run still holds the job, "limit" when it was continued often enough,
+        "" when it is gone, else what was done."""
+        project, pl, ops = self._ready()
+        p = Pipeline.read(project)
+        pr = p.processes.get(job)
+        if pr is None:
+            return ""
+        if job in pl.held_jobs(p):
+            return "wait"
+        if autocontinue.times_continued(project, job) >= autocontinue.MAX_TIMES:
+            return "limit"
+        js = autocontinue.continue_jobstar(project, job)
+        if pr.status == STATUS_RUNNING:  # no run waits for it: marked failed first, as RELION's GUI would
+            ops.mark_finished(job, failed=True)
+        pl.continue_job(job, js)
+        n = autocontinue.note_continued(project, job, slurm_id)
+        with open(project / job / "run.err", "a") as fh:
+            fh.write(f"\n ++++ cryo-savanna: continued from {js.options['fn_cont']} after SLURM job {slurm_id} hit "
+                     f"its time limit ({n} of at most {autocontinue.MAX_TIMES} times), {time.ctime()}\n")
+        return f"continued from {js.options['fn_cont']} after the SLURM time limit ({n} of {autocontinue.MAX_TIMES})"
 
     def clean(self, harsh: bool) -> None:
         job = self.current

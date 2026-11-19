@@ -566,3 +566,24 @@ def test_browsed_files_keep_the_projects_symlinks(qtbot, tmp_path):
     assert e.relative(str(project / "Movies" / "m1.tiff")) == "Movies/m1.tiff"
     assert e.relative(str(project.resolve() / "Class2D" / ".." / "x.star")) == "x.star"
     assert e.relative(str(raw / "m1.tiff")) == str(raw / "m1.tiff")  # outside the project: as chosen
+
+
+def test_the_submission_script_preview(editor, tmp_path):
+    template = tmp_path / "slurm.sh"
+    template.write_text("#!/bin/bash\n#SBATCH --job-name=XXXnameXXX\n#SBATCH --ntasks=XXXmpinodesXXX\n"
+                        "#SBATCH --cpus-per-task=XXXthreadsXXX\nsrun XXXcommandXXX\n")
+    editor.new_job(DEFS.variants["relion.class3d"])
+    link = editor.submit_preview_link
+    assert link is not None and not link.isVisibleTo(editor)  # not sent to a queue
+    editor.widgets["do_queue"].set_value("Yes")
+    editor._update_states()
+    assert link.isVisibleTo(editor) or not editor.tabs.isVisible()
+    for k, v in (("qsubscript", str(template)), ("nr_mpi", "3"), ("nr_threads", "4"), ("use_gpu", "Yes")):
+        editor.widgets[k].set_value(v)
+    shown = []
+    dlg = editor.preview_submission(shown.append)
+    assert shown == [dlg] and dlg.tasks.wait()
+    assert "#SBATCH --ntasks=3" in dlg.result.script and "--cpus-per-task=4" in dlg.result.script
+    assert f"--job-name={editor.job_dir()}" in dlg.result.script
+    assert any("asks for none" in p for p in dlg.result.problems)  # GPUs used, none asked for
+    assert "Check these" in dlg.checks.text()

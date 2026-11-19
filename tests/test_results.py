@@ -24,7 +24,13 @@ from cryo_savanna.project.jobstar import JobStar
 from cryo_savanna.project.snapshot import ProjectLoader
 from cryo_savanna.project.star import loop_columns
 from cryo_savanna.results import registry as R
-from cryo_savanna.results.classes import iterations, read_class_averages, read_model_classes, read_particles
+from cryo_savanna.results.classes import (
+    iterations,
+    particle_iterations,
+    read_class_averages,
+    read_model_classes,
+    read_particles,
+)
 from cryo_savanna.results.curves import angular_distribution, convergence, model_fsc, motion_figure, postprocess_figures
 from cryo_savanna.results.micrographs import motion_track, read_micrographs, read_picks
 from cryo_savanna.results.tables import Table, blocks_of
@@ -255,8 +261,9 @@ def test_viewers_per_job(spa_project):
     assert titles("Class3D/job009/")[:4] == ["Classes", "Maps", "Convergence", "Angular distribution"]
     assert titles("Refine3D/job011/")[:4] == ["Maps", "FSC", "Convergence", "Angular distribution"]
     assert titles("PostProcess/job013/") == ["FSC", "Maps", "Files"]
-    assert titles("Select/job007/") == ["Selection", "Selected classes", "Particles", "Files"]
-    assert titles("CtfRefine/job014/") == ["CTF refinement", "Per-particle CTF", "Aberrations", "Particles", "Files"]
+    assert titles("Select/job007/") == ["Selection", "Selected classes", "Picks", "Particles", "Files"]
+    assert titles("CtfRefine/job014/") == [
+        "CTF refinement", "Per-particle CTF", "Aberrations", "Picks", "Particles", "Files"]  # Picks before its particles
     mask = views(spa_project, "MaskCreate/job012/")[0]
     assert mask.title == "Maps" and mask.args == {
         "maps": ["Refine3D/job011/run_class001.mrc", "MaskCreate/job012/mask.mrc"],
@@ -266,14 +273,51 @@ def test_viewers_per_job(spa_project):
     assert titles("Polish/job015/") == ["Files"]  # running, nothing written yet
 
 
-def test_classification_jobs_get_picks_of_their_particles(spa_project):
+def test_particle_jobs_get_picks_of_their_particles(spa_project):
     c2 = views(spa_project, "Class2D/job006/")
     picks = next(v for v in c2 if v.title == "Picks")
-    assert picks.kind == R.MICROGRAPHS and picks.args == {"picks": "Class2D/job006/run_it200_data.star",
-                                                          "diameter": 200.0}
+    # an iterative job: the viewer lists its iterations (the latest shown), then its final particles
+    assert picks.kind == R.MICROGRAPHS and picks.args == {
+        "job": "Class2D/job006/", "final": ["Class2D/job006/run_it200_data.star"], "diameter": 200.0}
     assert [v.title for v in c2][2:] == ["Picks", "Particles", "Files"]  # the particles keep their tab
     assert "Picks" in [v.title for v in views(spa_project, "Class3D/job009/")]
-    assert "Picks" not in [v.title for v in views(spa_project, "Refine3D/job011/")]  # one class
+    r3 = views(spa_project, "Refine3D/job011/")  # one class: a Picks tab too
+    assert [v.title for v in r3][4:] == ["Picks", "Particles", "Files"]
+    assert next(v for v in r3 if v.title == "Picks").args == {
+        "job": "Refine3D/job011/", "final": ["Refine3D/job011/run_data.star"], "diameter": 200.0}
+    assert particle_iterations(spa_project, "Refine3D/job011/", ["Refine3D/job011/run_data.star"]) == [
+        ("Final", "Refine3D/job011/run_data.star")]  # no particles kept of its iterations
+    sel = next(v for v in views(spa_project, "Select/job010/") if v.title == "Picks")
+    assert sel.kind == R.MICROGRAPHS and sel.args == {"picks": "Select/job010/particles.star", "diameter": None}
+    # the jobs that show their picks under a tab of their own get no second one
+    assert [v.title for v in views(spa_project, "Extract/job005/")].count("On micrographs") == 1
+    assert "Picks" not in [v.title for v in views(spa_project, "Extract/job005/")]
+    assert "Picks" not in [v.title for v in views(spa_project, "Polish/job015/")]  # running, nothing written yet
+
+
+def test_running_jobs_get_picks_of_the_iterations_that_wrote_particles(spa_copy):
+    job = spa_copy / "Class3D/job009"
+    data = (job / "run_it025_data.star").read_text()
+    for f in job.glob("run_it025_*"):
+        f.unlink()
+    (job / "run_it010_data.star").write_text(data)  # VDAM: particles only every few iterations
+    out = ["Class3D/job009/run_it025_data.star"]  # listed from the start, written at the end
+    ctx = R.JobContext(spa_copy, "Class3D/job009/", "relion.class3d", "Running",
+                       [(out[0], "ParticleGroupMetadata.star.relion")], {"particle_diameter": "180"})
+    picks = next(v for v in R.views_for(ctx) if v.title == "Picks")
+    assert picks.args == {"job": "Class3D/job009/", "final": out, "diameter": 180.0}
+    assert particle_iterations(spa_copy, "Class3D/job009/", out) == [
+        ("Iteration 10", "Class3D/job009/run_it010_data.star")]  # it015 and it020 wrote no particles
+    (job / "run_it020_data.star").write_text(data)
+    (job / "run_it025_model.star").write_text((job / "run_it020_model.star").read_text())
+    (job / "run_it025_data.star").write_text(data)
+    # the same tab for the next iterations (not built again), the final particles being the last one
+    assert next(v for v in R.views_for(ctx) if v.title == "Picks").args == picks.args
+    assert [label for label, _ in particle_iterations(spa_copy, "Class3D/job009/", out)] == [
+        "Iteration 10", "Iteration 20", "Iteration 25"]
+    ctx.type_label = "relion.select"  # not iterative: its outputs only
+    (job / "run_it025_data.star").unlink()
+    assert "Picks" not in [v.title for v in R.views_for(ctx)]
 
 
 def test_picks_from_particles_carry_their_classes(spa_project):

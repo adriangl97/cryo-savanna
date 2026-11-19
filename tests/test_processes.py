@@ -72,10 +72,14 @@ def start(cwd: Path, job: str, ignore_term: bool = False) -> subprocess.Popen:
 
 def wait_found(project: Path, job: str, n: int, timeout: float = 10) -> list[P.Proc]:
     deadline = time.time() + timeout
+    last = None
     while time.time() < deadline:
         found = P.job_processes(project, job)
-        if len(found) >= n:
+        # the same twice: not the shell caught just before it exec'd the program (kill() takes a process whose
+        # command line changed for another one, given that number since, and leaves it alone)
+        if len(found) >= n and found == last:
             return found
+        last = found
         time.sleep(0.1)
     raise AssertionError(f"{job}: {P.job_processes(project, job)}")
 
@@ -198,3 +202,19 @@ def test_force_abort_from_the_window(qtbot, tmp_path, spa_copy, monkeypatch):
     a.abort_job()
     a.wait()
     assert asked and (spa_copy / job / "RELION_JOB_ABORT_NOW").exists()
+
+
+def test_a_process_of_another_project_with_a_job_of_that_name_is_not_the_jobs(tmp_path):
+    """Its working directory tells (/proc on Linux, lsof on macOS)."""
+    job = "External/job001/"
+    here, other = tmp_path / "here", tmp_path / "other"
+    for d in (here, other):
+        (d / job).mkdir(parents=True)
+    sh = start(other, job)
+    try:
+        found = wait_found(other, job, 1)
+        assert P.job_processes(here, job) == []
+        P.kill(other, job, found, term_wait_s=0.3)
+        assert sh.wait(10) is not None
+    finally:
+        sh.kill()

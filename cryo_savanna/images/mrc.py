@@ -233,7 +233,9 @@ def downsample(img: np.ndarray, max_px: int) -> tuple[np.ndarray, float]:
     if longest <= max_px:
         return img.astype(np.float32, copy=False), 1.0
     factor = longest / max_px
-    k = int(factor // 2) if factor >= 4 else 1  # leave 2-4× for the Fourier crop
+    # leave 2-4× for the Fourier crop; never more than the short side, which a block would leave with no pixel
+    # (a slab seen from the side, 16 × 4092 px: no image at all, and the Fourier transform of nothing fails)
+    k = min(int(factor // 2) if factor >= 4 else 1, min(img.shape))
     small = bin_mean(img, k) if k > 1 else img
     scale = max_px / max(small.shape)
     ny, nx = max(1, round(small.shape[0] * scale)), max(1, round(small.shape[1] * scale))

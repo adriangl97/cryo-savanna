@@ -48,7 +48,7 @@ and can be used interchangeably, even at the same time, on the same project.
 **Results inside the GUI** (see [Results](#results) for the full list)
 
 - Micrographs with their per-micrograph values, CTF spectra and fits, motion tracks, and picks;
-  for classification jobs, the picks of any set of classes, coloured by class.
+  for particles of several classes, the picks of any set of classes, coloured by class.
 - 2D class averages and 3D class sections per iteration, sortable by distribution, resolution,
   particle count or class score.
 - Plots: CTF and motion histograms and scatter plots, FSC, Guinier, convergence per iteration,
@@ -76,6 +76,16 @@ and can be used interchangeably, even at the same time, on the same project.
   this machine (CPUs, RAM, the GPUs chosen) or, for a queued job, a node of the SLURM partition its
   submission script asks for. For refinements they come from the box size of the input particles, and
   values RELION would refuse (VDAM with MPI, an even MPI count for Refine3D) are flagged.
+- **Time left** for running jobs: Class2D, Class3D and InitialModel from the pace of their last iterations
+  (the time per iteration for Refine3D and MultiBody), AreTomo3 and pytom from the items done, every other
+  RELION job from RELION's own progress bar (its current step).
+- **Out-of-date jobs**: finished jobs whose inputs changed after they ran (the job before them was continued or
+  overwritten, a selection saved again), and the jobs after them, are marked, and **Run out-of-date jobs
+  again…** runs them again with their own settings, in order, in one run.
+- **Preview submission script…** in the job editor: the `run_submit.script`.
+- **Local GPU queue**: jobs started on this machine while their GPUs are in use by other RELION or external jobs will wait for them.
+- Jobs that hit the **SLURM time limit** are continued from their last iteration (Preferences; at most 3 times),
+  and Continue has the last iteration filled in.
 - Failed jobs show their **likely cause** in the Overview and the tree (GPU or RAM out of memory, the
   queue's time limit, a missing input, too few MPI processes, ...), with the log line it comes from.
 - RELION's command-line-only programs (`relion_image_handler`, `relion_reconstruct`, the
@@ -208,9 +218,10 @@ Each job's results open as tabs next to its Overview and Options:
   astigmatism, max. resolution, FOM, picks), and the selected one large. CtfFind adds the power
   spectrum with its fit, MotionCorr the motion track.
 - **Picks**: AutoPick and ManualPick picks as circles, with a figure-of-merit threshold. Extract
-  jobs show their particles on their micrographs, and so do Class2D, Class3D and InitialModel jobs
-  with several classes. For particles of several classes, "Classes" chooses which classes' picks
-  are shown (all, one, or any set of them), each class in its own colour.
+  jobs show their particles on their micrographs, and so does any other job with particles
+  (Class2D, Class3D, InitialModel, Refine3D, Select, CtfRefine, Polish, Subtract, ...). For particles of several classes, "Classes" chooses which classes' picks
+  are shown (all, one, or any set of them), each class in its own colour. Polish also draws
+  each particle's track over the movie frames, magnified as in its logfile.pdf.
 - **Classes**: the class averages of each Class2D iteration, and the central sections of 3D
   classes. They can be sorted by distribution, resolution, particles or class score, and selected.
 - **Particles**: any particle file, as a paged grid.
@@ -218,12 +229,14 @@ Each job's results open as tabs next to its Overview and Options:
   curves (PostProcess, Refine3D), Guinier, convergence per iteration (resolution, class
   occupancy, accuracies, changes), and the angular distribution: a 2D map of the viewing
   directions and, in 3D, the map's surface with RELION's `.bild` cylinders around it (final map or
-  any iteration and class).
-- **Maps** (InitialModel, Class3D, Refine3D, MaskCreate, PostProcess, LocalRes, any map output):
+  any iteration and class). Polish's B-factor and scale per movie frame. LocalRes's
+  histogram of local resolution inside the mask; MultiBody's flexibility analysis (variance per
+  principal component, histograms of the projections, and the maps along the components).
+- **Maps** (InitialModel, Class3D, Refine3D, MaskCreate, PostProcess, LocalRes, Subtract, any map output):
   - three sections that cross at one point, or projections; click a section to move the other two;
   - the isosurface, drawn by cryo-savanna itself (no OpenGL). Drag to rotate, wheel to zoom. The
     level starts at 1% of the box, or at 0.5 for masks;
-  - the job's mask as a red outline (PostProcess, MaskCreate, Refine3D/Class3D with a mask);
+  - the job's mask as a red outline (PostProcess, MaskCreate, Subtract, Refine3D/Class3D with a mask);
   - LocalRes colours the sections and the surface by local resolution, blue (best) to red;
   - "Open in ChimeraX" opens the same map, level, mask and colours there (ChimeraX from PATH or
     `$CRYO_SAVANNA_CHIMERAX`);
@@ -235,6 +248,8 @@ Each job's results open as tabs next to its Overview and Options:
 - **Tilt series** (tomography: Import, MotionCorr, CtfFind, ExcludeTiltImages, AlignTiltSeries):
   the tilt series of the set, the tilts of the selected one (angle, dose, defocus, CTF, motion,
   alignment), the tilt image and its CTF spectrum, and the per-tilt values against the tilt angle.
+  Tomography CtfRefine and Polish also show how much each tilt's defocus, shifts and angles changed
+  from the job's input.
 - **Tomograms** (ReconstructTomograms, Denoise, ...): an XY slab of a few averaged sections, moved
   with the Z slider, at full resolution; XZ and YZ side views; denoised and raw side by side.
 - **Picks** (Pick tomograms, Extract subtomos, tomography Class3D and Refine3D): the particles in

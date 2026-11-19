@@ -132,6 +132,7 @@ class PickSet:
     micrographs: list[str]
     coord_files: dict[str, str] = field(default_factory=dict)  # micrograph -> coordinate STAR (relative)
     pixel_size: float | None = None  # of the micrographs, from a particle file's optics
+    box_angst: float | None = None  # the particle box (Å), from a particle file's optics
     classes: dict[int, int] = field(default_factory=dict)  # class -> particles (particle files with classes)
     _from_particles: dict[str, Picks] | None = None
     _cache: dict[str, tuple[tuple, Picks]] = field(default_factory=dict, repr=False)
@@ -217,8 +218,9 @@ def read_picks(project_dir: str | os.PathLike, star_rel: str) -> PickSet:
     per = {m: Picks(x[idx], y[idx], fom[idx] if fom is not None else None, cls[idx] if cls is not None else None)
            for m, idx in ((m, np.array(v)) for m, v in order.items())}
     px = optics_value(path, "rlnMicrographPixelSize") or optics_value(path, "rlnMicrographOriginalPixelSize")
+    box, box_px = optics_value(path, "rlnImageSize"), optics_value(path, "rlnImagePixelSize")
     return PickSet(project_dir, star_rel, list(order), pixel_size=px, classes=class_counts(cls),
-                   _from_particles=per)
+                   box_angst=box * box_px if box and box_px else None, _from_particles=per)
 
 
 def class_counts(cls: np.ndarray | None) -> dict[int, int]:

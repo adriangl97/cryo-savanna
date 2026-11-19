@@ -128,6 +128,39 @@ polling interval (Preferences, or `--poll`), and views of running jobs read new 
   looking, by sacct's submit line (newer SLURM releases only). A submit template with
   `#SBATCH --job-name=XXXnameXXX` (RELION fills in the job directory) makes this direct, and squeue
   readable for everyone.
+- **Preview submission script…** (job editor, under "Standard submission script", while "Submit to queue?"
+  is Yes).
+- **Time left**: a running Class2D, Class3D or InitialModel job shows, after its iteration and how long it has
+  run, how long it has left (`iter 12/25 · 1 h 05 min · ~40 min left`), at the pace of its last few
+  iterations. Refine3D and
+  MultiBody run until they converge: they show the time per iteration instead (`~6 min/iter`). AreTomo3 and
+  pytom template matching show the tilt series or tomograms done and the time the rest may take. Every other RELION
+  job shows what RELION's own progress bar in run.out estimates (`~12 min left in this step`): for a program
+  with several steps (CTF refinement, ...), only the step it is at.
+- **Out of date**: a finished job whose input was written again after it ran (the job that made it was
+  continued, overwritten and run again, or a selection was saved again), or whose input job is being run
+  again, shows "out of date" with its status in the List, on its card in the Tree and in the Overview, which
+  says why. **Job → Run out-of-date jobs again…** lists them: each job ticked is overwritten (its files go to
+  Trash/, as Overwrite does) and runs again with its own settings, all in one run, each after the jobs it
+  reads from. Interactive jobs (manual picking, a selection made in a window) are listed but not run, run
+  them again by hand. Only jobs with RELION's exit file are looked at (not those marked finished by hand),
+  and inputs from imported files do not count.
+- **Continuing after the SLURM time limit**: a Class2D, Class3D, InitialModel, Refine3D or MultiBody job that
+  SLURM ended at its time limit is marked failed (see Queue above). **Continue…** then has "Continue from
+  here" filled in with the last iteration it finished (the same for any continue of these jobs). With
+  Preferences → SLURM → "Continue jobs that hit the SLURM time limit", cryo-savanna continues it itself,
+  once the run that sent it to the queue has seen it fail, with the same settings, at most 3 times per run
+  of the job (`.cryo-savanna/auto_continue.json`), and says so at the end of run.err. Only while
+  cryo-savanna is open and looks at the queue.
+- **Local GPU queue** (Preferences, on by default): jobs that use GPUs of this machine (not sent to a queue)
+  and are started while another run of cryo-savanna uses those GPUs, or
+  while nvidia-smi shows a RELION job computing on them (one started from RELION's own GUI or a script: a
+  RELION program, or a program started by an External job, such as AreTomo3 or pytom), wait for them. Any other
+  program on the GPU is not waited for. Such a job shows
+  "Scheduled · waiting for a GPU", its run says which GPUs it waits for in the Overview, and Job → Stop
+  runs… stops it (the job stays Scheduled). It starts when the GPUs are free, also when cryo-savanna is
+  closed. The locks are files in `/tmp/cryo-savanna-gpu-locks/` (else in
+  `~/.cache/cryo-savanna/`), released when the run's processes end, so nothing is left to clean up.
 
 ## Box sizes
 
@@ -191,18 +224,22 @@ Each job gets the tabs that fit what it made:
 | Tab | For | What |
 |---|---|---|
 | Micrographs / Movies | Import, MotionCorr, CtfFind, Select | List with per-micrograph values (sort, filter); the image, zoomable to full detail; CTF spectrum, motion track |
-| Picks / On micrographs | AutoPick, ManualPick, Extract, Class2D, Class3D, InitialModel | Particles as circles; FOM threshold, circle size; for particles of several classes, which classes to show (any set of them, each in its own colour) |
+| Picks / On micrographs | AutoPick, ManualPick, Extract, and any job with particles (Class2D, Class3D, InitialModel, Refine3D, Select, CtfRefine, Polish, ...) | Particles as circles; FOM threshold, circle size; for particles of several classes, which classes to show (any set of them, each in its own colour); Polish also draws each particle's track over the movie frames, magnified (×20 by default) |
+| Frame weights | Polish | The B-factor and the scale (Guinier intercept) of each movie frame, from bfactors.star |
 | CTF / Motion plots | CtfFind, MotionCorr | Histograms or scatter; a clicked point shows its micrograph |
 | Classes | Class2D, Class3D, InitialModel, Select | Class averages (or central sections) per iteration; sort, size, select |
 | Particles | any particle file | Paged grid |
-| Maps | InitialModel … LocalRes, any map | Three sections or projections, 3D surface (drag to rotate as in ChimeraX), mask outline, local-resolution colours, Open in ChimeraX; while a 3D job runs, its latest iteration's maps, updated as new iterations are written; the Iteration menu shows any earlier iteration |
-| FSC | Refine3D, MultiBody, PostProcess | Gold-standard FSC of the half maps; PostProcess also the Guinier plot |
+| Maps | InitialModel … LocalRes, Subtract (its mask on the map), any map | Three sections or projections, 3D surface (drag to rotate as in ChimeraX), mask outline, local-resolution colours, Open in ChimeraX; while a 3D job runs, its latest iteration's maps, updated as new iterations are written; the Iteration menu shows any earlier iteration |
+| FSC | Refine3D, MultiBody, PostProcess, tomography Reconstruct particle | Gold-standard FSC of the half maps; PostProcess also the Guinier plot; Reconstruct particle: the FSC of its half maps without a mask, computed by cryo-savanna, with its 0.143 resolution |
+| Local resolution | LocalRes | Histogram of the local resolution inside the mask (RELION or ResMap), with its median and 5–95% range |
+| Flexibility | MultiBody (flexibility analysis) | Variance explained by each principal component (and cumulative), and the histogram of the particles' projections on each of the first six |
+| Components | MultiBody (flexibility analysis) | The maps relion_flex_analyse made along the first components (analyse_component*_bin*.mrc) |
 | Convergence | Class2D, Class3D, InitialModel, Refine3D, MultiBody | Resolution, class occupancy, accuracies and changes per iteration |
 | Angular distribution | Refine3D, Class3D, InitialModel, MultiBody | The particles' viewing directions as a 2D map (tilt against rot), and in 3D: the map's surface with RELION's .bild cylinders around it (longer and redder: more particles), for the final map or any iteration and class; drag to rotate, wheel to zoom |
 | CTF refinement | CtfRefine | What the job fitted; mean, spread and range of the particles' defocus, astigmatism, B-factor and scale changes; per optics group beam tilt, magnification anisotropy and overall magnification (flagged when it changes the pixel size) and the Zernike coefficients, before and after; Open logfile.pdf |
 | Per-particle CTF | CtfRefine | Histograms or scatter of the new values and of their changes from the input particles; the particles of a micrograph at their positions, coloured by a value (as RELION's per-micrograph plots); the mean change on every micrograph (click one to show it) |
 | Aberrations | CtfRefine | Per optics group, the phase differences in Fourier space for beam tilt and trefoil, 4th-order aberrations and the magnification displacements: observed, fitted and residuals, at ±1 rad or ±π |
-| Tilt series | tomography Import … AlignTiltSeries | Tilt series, their tilts and values, the tilt image and CTF spectrum, values against tilt angle |
+| Tilt series | tomography Import … AlignTiltSeries, CtfRefine, Polish | Tilt series, their tilts and values, the tilt image and CTF spectrum, values against tilt angle; tomography CtfRefine and Polish also show how much each tilt's defocus, shifts and angles changed from the job's input (per tilt, against the tilt angle, and the median per tilt series), and the CTF scale |
 | Tomograms / Picks | ReconstructTomograms, Denoise, Pick, Extract, Class3D | Z slab with side views, denoised and raw side by side, particles where the slab cuts them (of the classes chosen) |
 | Scores | pytom template matching | Every tomogram's status (pending, running, done, failed), run time and pytom's search statistics, updated as the job goes; the score histogram of the tomogram chosen (with the score Gaussian noise passes once) and the maximum projection of its score map along z |
 | Tomograms | pytom template matching | The tomograms and their score maps, Z slab and side views, one beside the other |
@@ -378,6 +415,13 @@ loaded with `module load` first. A new job takes both from the project's last Ar
 - *Compute*: GPU ids separated by colons (`0:1:2:3`): one tilt series per GPU at a time (or more,
   with *Tilt series per GPU*). Tilt series already done are skipped when the job runs again
   (Continue), so after a failure only the rest run.
+- *Alignment thickness of one tilt series*: in the job's **Tomograms** tab, the bar above the tomogram
+  shows the alignment thickness (`-AlignZ`, tilt-series pixels; *Measured*: AreTomo3's own) of the
+  tilt series chosen, and the table shows the thickness AreTomo3 measured and the one each tilt series
+  was aligned with. Change it for the tilt series whose alignment is poor and **Save**: it goes into
+  the job's *Alignment thickness of some tilt series* (`TS_01=1200 ...`). Continuing the job then
+  aligns and reconstructs again only the tilt series whose thickness is not the one they were aligned
+  with, while the others keep their alignment and tomogram.
 
 The job writes, as tilt series finish (so that its tabs show them while it runs):
 
@@ -390,7 +434,7 @@ The job writes, as tilt series finish (so that its tabs show them while it runs)
   `rlnTomoReconstructedTomogramHalf1/2`), their size and binning, for the Tomograms tab, template
   matching and denoising.
 - `aretomo3.star`: one row per tilt series, with status, run time, tilt axis, sample thickness, tilt
-  offsets, dark tilts and CTF resolution. AreTomo3's own output (`.aln`, `_CTF.txt`, logs) is in
+  offsets, dark tilts, CTF resolution and the alignment thickness it was aligned with. AreTomo3's own output (`.aln`, `_CTF.txt`, logs) is in
   `aretomo/<name>/`; each tilt series' log is in `logs/`.
 
 AreTomo3's tomograms are AreTomo3's reconstructions, not RELION's. Before you use particles picked
@@ -429,6 +473,17 @@ deleted).
 
 The ChimeraX that "Open in ChimeraX" starts; empty, the one on PATH. A `$CRYO_SAVANNA_CHIMERAX` set
 in the shell wins over this preference.
+
+### Local GPU queue
+
+On by default: runs of jobs that use GPUs of this machine wait until those GPUs are free (see
+[Running jobs](#running-jobs)). Off: they start at once, as in RELION's GUI.
+
+### Continue jobs that hit the SLURM time limit
+
+Off by default. On: relion_refine jobs (Class2D, Class3D, InitialModel, Refine3D, MultiBody) that SLURM ended
+at their time limit are continued from their last iteration, at most 3 times per run of the job (see
+[Running jobs](#running-jobs)).
 
 ### Scratch directory
 

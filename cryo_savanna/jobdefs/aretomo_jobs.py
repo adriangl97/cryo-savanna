@@ -10,12 +10,16 @@ from there (clone, continue, overwrite). The input tilt-series set also goes in 
 so the job hangs under the job it reads from.
 
 AreTomo3 itself is a program the runner starts (its executable, after the job's environment modules).
+
+The alignment thickness (-AlignZ) can be another for some tilt series (option tomo_align_z, which the
+Tomograms view of the job sets: ``read_align_z`` / ``save_align_z``); a continue of the job aligns again
+only the tilt series whose thickness is not the one they were aligned with.
 """
 
 from __future__ import annotations
 
 import os
-from dataclasses import replace
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 from cryo_savanna import aretomo_runner as A
@@ -32,6 +36,7 @@ from cryo_savanna.jobdefs.pytom_jobs import (
     _yn,
     add_running_tab,
     decode,
+    encode,
 )
 from cryo_savanna.project.jobstar import JobStar
 from cryo_savanna.project.pipeline import Pipeline
@@ -87,6 +92,10 @@ def align_options() -> tuple[list[OptionDef], list[Tab], dict[int, Group]]:
         _o("tilt_axis", "Tilt axis angle (°):", "", "Empty: rlnTomoNominalTiltAxisAngle of the tilt series."),
         _o("align_z", "Alignment thickness (px):", "", "Height of the volume used for the alignment, in pixels "
            "of the tilt series (-AlignZ). Empty: the sample thickness AreTomo3 measures."),
+        _o("tomo_align_z", "Alignment thickness of some tilt series:", "", "Another alignment thickness for "
+           "some tilt series, as <rlnTomoName>=<px> separated by spaces (e.g. TS_01=1200; 0: measured by "
+           "AreTomo3); the Tomograms view sets it. When the job is continued, only the tilt series whose "
+           "alignment thickness changed are aligned and reconstructed again."),
         _o("at_patch", "Local alignment patches (x y):", "", "Patches for local alignment (-AtPatch), e.g. 4 4. "
            "Empty: global alignment only."),
         _radio("tilt_cor", "Tilt angle offset:", tuple(A.TILTCOR), next(iter(A.TILTCOR)),
@@ -149,7 +158,7 @@ def align_options() -> tuple[list[OptionDef], list[Tab], dict[int, Group]]:
         Tab("Input", tuple(Row((k,)) for k in ("in_tiltseries", "tomo_names", "angpix", "do_halves", "keep_stacks"))),
         Tab("Alignment", (
             Row(("alignment",)), Row(("tilt_axis_mode",), group=1), Row(("tilt_axis",), group=1),
-            Row(("align_z",), group=1), Row(("at_patch",), group=1), Row(("tilt_cor",), group=1),
+            Row(("align_z",), group=1), Row(("tomo_align_z",), group=1), Row(("at_patch",), group=1), Row(("tilt_cor",), group=1),
             Row(("tilt_offset",), group=1), Row(("dark_tol",), group=1), Row(("ctf_to_star",), group=1),
             Row(("ext_phase",), group=1))),
         Tab("Reconstruction", (
@@ -256,3 +265,85 @@ def newest_input(pipeline: Pipeline) -> dict[str, str]:
         if n.producer and n.kind == "TomogramGroupMetadata" and not name.endswith("tomograms.star"):
             return {"in_tiltseries": name}
     return {}
+
+
+# ---------------------------------------------------------------------------- alignment thickness per tilt series
+
+@dataclass
+class AlignZSettings:
+    """The alignment thickness (-AlignZ, tilt-series px; 0: none, AreTomo3 measures it) of the tilt series of
+    an AreTomo3 job: ``job_z`` and ``per_series`` are the job's options (job.star: what a continue uses),
+    ``used`` what each tilt series done was aligned with (aretomo3.star), ``measured`` the sample thickness
+    AreTomo3 found (Å). ``use_input``: the job only reconstructs (no alignment, no thickness to change)."""
+    job_z: int
+    per_series: dict[str, int]
+    used: dict[str, int | None] = field(default_factory=dict)
+    measured: dict[str, float] = field(default_factory=dict)
+    use_input: bool = False
+
+    def wanted(self, name: str) -> int:
+        return self.per_series.get(name, self.job_z)
+
+    def to_align(self, names) -> list[str]:
+        """The tilt series done that a continue of the job aligns again for these settings."""
+        return [n for n in names if n in self.used and self.used[n] != self.wanted(n)]
+
+
+def _options(project_dir: Path, job: str) -> tuple[JobStar, dict[str, str], list[str]]:
+    js = JobStar.read(Path(project_dir) / job / "job.star")
+    own, other = decode(js.options.get("other_args", ""))
+    return js, own, other
+
+
+def _job_z(own: dict[str, str]) -> int:
+    try:
+        return max(0, int(float(own.get("align_z", "") or 0)))
+    except ValueError:
+        return 0
+
+
+def read_align_z(project_dir: Path, job: str) -> AlignZSettings:
+    """From the job's job.star and aretomo3.star. Raises OSError / ValueError / KeyError / A.Usage."""
+    from cryo_savanna.project.star import read_star
+    _, own, _ = _options(project_dir, job)
+    out = AlignZSettings(_job_z(own), A.per_series(own, "tomo_align_z"),
+                         use_input=own.get("alignment", "") == A.ALIGN_INPUT)
+    summary = Path(project_dir) / job / A.SUMMARY
+    if not summary.is_file():
+        return out
+    b = read_star(summary).get("global")
+    if b is None or A.TOMO_NAME not in b.columns:
+        return out
+    has_z = A.COL_ALIGN_Z in b.columns
+    for r in b.rows:
+        row = dict(zip(b.columns, r))
+        name = row[A.TOMO_NAME]
+        try:
+            out.measured[name] = float(row.get(A.COL_THICKNESS, ""))
+        except ValueError:
+            pass
+        if row.get(A.COL_STATUS) != "done":
+            continue
+        if not has_z:  # a job of an older cryo-savanna: aligned with the job's thickness
+            out.used[name] = out.job_z
+            continue
+        try:
+            out.used[name] = int(float(row[A.COL_ALIGN_Z]))
+        except (ValueError, KeyError):
+            out.used[name] = None
+    return out
+
+
+def save_align_z(project_dir: Path, job: str, per_series: dict[str, int]) -> None:
+    """Writes the alignment thickness of some tilt series into the job's job.star (its option tomo_align_z),
+    for the next continue of the job: it aligns again only the tilt series whose thickness changed.
+    Thicknesses equal to the job's own are left out."""
+    js, own, other = _options(project_dir, job)
+    job_z = _job_z(own)
+    own["tomo_align_z"] = " ".join(f"{k}={int(v)}" for k, v in sorted(per_series.items())
+                                   if v is not None and int(v) >= 0 and int(v) != job_z)
+    text = encode(own, list(own))
+    if other:
+        text += " " + " ".join(other)
+    js.options["other_args"] = text
+    js.write(Path(project_dir) / job / "job.star")

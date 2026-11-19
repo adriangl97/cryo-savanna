@@ -46,7 +46,13 @@ TILT_COLUMNS = [  # per-tilt values worth a column
     ("rlnDefocusU", "Defocus U (Å)"), ("rlnDefocusV", "Defocus V (Å)"), ("rlnCtfMaxResolution", "Max. res. (Å)"),
     ("rlnCtfFigureOfMerit", "FOM"), ("rlnAccumMotionTotal", "Motion (Å)"),
     ("rlnTomoXShiftAngst", "X shift (Å)"), ("rlnTomoYShiftAngst", "Y shift (Å)"),
-    ("rlnTomoZRot", "Tilt axis (°)"), ("rlnTomoYTilt", "Fitted tilt (°)"),
+    ("rlnTomoZRot", "Tilt axis (°)"), ("rlnTomoYTilt", "Fitted tilt (°)"), ("rlnCtfScalefactor", "CTF scale"),
+]
+# per-tilt values that tomography CtfRefine and Polish (relion_tomo_refine_ctf, relion_tomo_align) change
+CHANGE_COLUMNS = [
+    ("rlnDefocusU", "ΔDefocus U (Å)"), ("rlnDefocusV", "ΔDefocus V (Å)"), ("rlnDefocusAngle", "ΔAstig. angle (°)"),
+    ("rlnTomoXShiftAngst", "ΔX shift (Å)"), ("rlnTomoYShiftAngst", "ΔY shift (Å)"),
+    ("rlnTomoZRot", "ΔTilt axis (°)"), ("rlnTomoYTilt", "ΔTilt (°)"), ("rlnTomoXTilt", "ΔX tilt (°)"),
 ]
 SERIES_COLUMNS = [("rlnTomoSizeX", "X"), ("rlnTomoSizeY", "Y"), ("rlnTomoSizeZ", "Z"),
                   ("rlnTomoTomogramBinning", "Binning"), ("rlnTomoTiltSeriesPixelSize", "Pixel (Å)")]
@@ -174,10 +180,12 @@ def tilt_figures(tilts: Table, name: str = "") -> list[Figure]:
                                    ("rlnAccumMotionLate", "Late")]),
         ("shifts", "Alignment shifts", "Å", [("rlnTomoXShiftAngst", "X"), ("rlnTomoYShiftAngst", "Y")]),
         ("axis", "Tilt axis angle", "°", [("rlnTomoZRot", "Tilt axis")]),
+        ("scale", "CTF scale", "", [("rlnCtfScalefactor", "Scale")]),
         ("dose", "Pre-exposure", "e/Å²", [("rlnMicrographPreExposure", "Dose")]),
     ]
     for key, title, unit, cols in groups:
-        fig = Figure(key, title + (f" — {name}" if name else ""), "Tilt angle (°)", f"{title} ({unit})")
+        fig = Figure(key, title + (f" — {name}" if name else ""), "Tilt angle (°)",
+                     f"{title} ({unit})" if unit else title)
         for col, label in cols:
             if tilts.has(col):
                 y = tilts.numeric(col)
@@ -198,6 +206,103 @@ def series_summary(tilts: Table) -> dict[str, str]:
     if tilts.has("rlnDefocusU"):
         out["Defocus (µm)"] = f"{np.nanmedian(tilts.numbers('rlnDefocusU')) / 1e4:.2f}"
     return out
+
+
+# ---------------------------------------------------------------------------- changes from the input
+
+def _tilt_keys(t: Table) -> list[str] | None:
+    for col in ("rlnMicrographName", "rlnMicrographMovieName"):
+        if t.has(col):
+            return t.column(col)
+    return None
+
+
+def tilt_changes(after: Table, before: Table) -> dict[str, np.ndarray]:
+    """Per tilt of ``after``, how much each value of CHANGE_COLUMNS changed from ``before`` (the same tilt
+    series in the job's input): tilts matched by image name, else by position. NaN for a tilt not in
+    ``before``; only values that changed somewhere."""
+    ka, kb = _tilt_keys(after), _tilt_keys(before)
+    if ka is not None and kb is not None:
+        where = {k: i for i, k in enumerate(kb)}
+        idx = np.array([where.get(k, -1) for k in ka])
+    elif len(after) == len(before):
+        idx = np.arange(len(after))
+    else:
+        return {}
+    out = {}
+    for col, _ in CHANGE_COLUMNS:
+        if not (after.has(col) and before.has(col)):
+            continue
+        a, b = after.numeric(col), before.numeric(col)
+        if a is None or b is None:
+            continue
+        d = np.full(len(a), np.nan)
+        ok = idx >= 0
+        d[ok] = a[ok] - b[idx[ok]]
+        if col in ("rlnDefocusAngle", "rlnTomoZRot", "rlnTomoYTilt", "rlnTomoXTilt"):
+            d = (d + 180) % 360 - 180  # angles: the shorter way round
+        if np.any(np.abs(d[np.isfinite(d)]) > 1e-6):
+            out[col] = d
+    return out
+
+
+def change_figures(tilts: Table, changes: dict[str, np.ndarray], name: str = "") -> list[Figure]:
+    """The changes against the tilt angle."""
+    if not changes or not tilts.has("rlnTomoNominalStageTiltAngle"):
+        return []
+    x = tilts.numbers("rlnTomoNominalStageTiltAngle")
+    order = np.argsort(x)
+    titles = dict(CHANGE_COLUMNS)
+    out = []
+    for key, title, unit, cols in (
+            ("d_defocus", "Defocus change", "Å", ["rlnDefocusU", "rlnDefocusV"]),
+            ("d_shift", "Shift change", "Å", ["rlnTomoXShiftAngst", "rlnTomoYShiftAngst"]),
+            ("d_angles", "Angle change", "°", ["rlnTomoZRot", "rlnTomoYTilt", "rlnTomoXTilt", "rlnDefocusAngle"])):
+        fig = Figure(key, title + (f" — {name}" if name else ""), "Tilt angle (°)", f"{title} ({unit})",
+                     hlines=[(0.0, "")])
+        for col in cols:
+            if col in changes:
+                fig.curves.append(Curve(titles[col].split(" (")[0], x[order], changes[col][order], symbols=True))
+        if fig.curves:
+            out.append(fig)
+    return out
+
+
+def changes_summary(changes: dict[str, np.ndarray]) -> dict[str, str]:
+    """Per tilt series: the median size of its defocus and shift changes."""
+    out = {}
+    if "rlnDefocusU" in changes:
+        d = np.abs(changes["rlnDefocusU"])
+        if np.isfinite(d).any():
+            out["|ΔDefocus| (Å)"] = f"{np.nanmedian(d):.0f}"
+    if "rlnTomoXShiftAngst" in changes or "rlnTomoYShiftAngst" in changes:
+        n = len(next(iter(changes.values())))
+        dx = changes.get("rlnTomoXShiftAngst", np.zeros(n))
+        dy = changes.get("rlnTomoYShiftAngst", np.zeros(n))
+        d = np.hypot(dx, dy)
+        if np.isfinite(d).any():
+            out["|ΔShift| (Å)"] = f"{np.nanmedian(d):.1f}"
+    return out
+
+
+def input_tomograms(project_dir: Path, options: dict[str, str]) -> str | None:
+    """The tomogram set a tomography refinement job (CtfRefine, Polish) started from: its input
+    optimisation set's tomograms, else its own tomograms input."""
+    if options.get("use_direct_entries") == "Yes" or not options.get("in_optimisation"):
+        rel = options.get("in_tomograms", "")
+        if rel and (project_dir / rel).is_file():
+            return rel
+    opt = options.get("in_optimisation", "")
+    if opt and (project_dir / opt).is_file():
+        try:
+            b = next(iter(read_star(project_dir / opt).values()), None)
+        except (OSError, ValueError):
+            b = None
+        found = b.get("rlnTomoTomogramsFile") if b is not None else None
+        if found and (project_dir / found).is_file():
+            return str(found)
+    rel = options.get("in_tomograms", "")
+    return rel if rel and (project_dir / rel).is_file() else None
 
 
 # ---------------------------------------------------------------------------- particles

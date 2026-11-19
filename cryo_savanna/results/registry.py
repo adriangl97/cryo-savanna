@@ -16,12 +16,14 @@ from pathlib import Path
 
 from cryo_savanna.project.summary import base_type
 from cryo_savanna.project.selection import interactive_kind
-from cryo_savanna.results.classes import data_star_for, iterations, latest_iteration_maps
+from cryo_savanna.results import flex, polish
+from cryo_savanna.results.classes import iterations, latest_iteration_maps, particle_iterations
 from cryo_savanna.results.ctfrefine import aberration_images, fits_ctf
 from cryo_savanna.results.tomo import (
     TOMO_NAME,
     columns_of,
     has_tomograms,
+    input_tomograms,
     is_tomo_particles,
     is_warp_particles,
     tomograms_for_particles,
@@ -95,6 +97,18 @@ def _option_file(ctx: JobContext, *keys: str) -> str | None:
     return None
 
 
+def _refinement_map(ctx: JobContext, optimiser: str) -> str:
+    """The map of the refinement an optimiser file is from (Refine3D/job011/run_optimiser.star ->
+    run_class001.mrc; MultiBody: its first body), if it exists."""
+    if not optimiser.endswith("_optimiser.star"):
+        return ""
+    root = optimiser[: -len("optimiser.star")]
+    for name in ("class001.mrc", "body001.mrc"):
+        if ctx.exists(root + name):
+            return root + name
+    return ""
+
+
 def pick_diameter(ctx: JobContext) -> float | None:
     """Circle size for picks, in Å, from the picking job's settings."""
     o = ctx.options
@@ -134,30 +148,26 @@ def tomo_pick_diameter(ctx: JobContext) -> float | None:
     return None
 
 
-def class_job_particles(ctx: JobContext, its: list | None = None) -> str | None:
-    """The micrograph particles of an SPA classification job with several classes, for its Picks tab: its
-    output, else (while it runs) those of its latest iteration. Also Warp particles (named by their
-    .tomostar, which have rlnMicrographName too): those are shown on their tomograms. RELION
-    tomography particles get theirs as any tomogram particles do. ``its``: the job's iterations(), if the
-    caller has them already."""
+ITERATIVE = ("relion.class2d", "relion.class3d", "relion.initialmodel", "relion.refine3d", "relion.multibody")
+# jobs whose picks have a tab of their own already (coordinate lists; Extract's "On micrographs")
+_OWN_PICKS = ("relion.manualpick", "relion.autopick", "relion.extract")
+
+
+def job_particles(ctx: JobContext) -> str | None:
+    """The particles of a job for its Picks tab: the newest of its particle outputs (a continued job lists
+    its earlier ones too)."""
+    outs = [n for n, nt in ctx.outputs if nt.split(".", 1)[0] == "ParticleGroupMetadata" and ctx.exists(n)]
+    return max(outs, key=lambda n: (ctx.project_dir / n).stat().st_mtime_ns) if outs else None
+
+
+def is_spa_particles(path: str | os.PathLike) -> bool:
+    """Particles on micrographs (rlnMicrographName and coordinates, no rlnTomoName). Warp particles have
+    these too: callers tell them apart with is_warp_particles first."""
     try:
-        if int(ctx.options.get("nr_classes", "1")) < 2:
-            return None
-    except ValueError:
-        return None
-    data = ctx.output("ParticleGroupMetadata")
-    if not data:
-        its = iterations(ctx.job_dir) if its is None else its
-        data = ctx.name + data_star_for(its[-1][1]).name if its else None
-    if not data or not ctx.exists(data):
-        return None
-    try:
-        cols = columns_of(ctx.project_dir / data, "particles") or []
+        cols = columns_of(path, "particles") or []
     except OSError:
-        return None
-    if TOMO_NAME in cols or "rlnMicrographName" not in cols or "rlnCoordinateX" not in cols:
-        return None
-    return data
+        return False
+    return TOMO_NAME not in cols and "rlnMicrographName" in cols and "rlnCoordinateX" in cols
 
 
 def _pytom_views(ctx: JobContext, kind: str, add, add_maps) -> None:
@@ -191,7 +201,7 @@ def _aretomo_views(ctx: JobContext, kind: str, add, add_maps) -> None:
     from cryo_savanna import aretomo_runner as A
     tomograms, aligned, summary = (ctx.name + f for f in (A.TOMOGRAMS, A.ALIGNED, A.SUMMARY))
     if ctx.exists(tomograms) and has_tomograms(ctx.project_dir / tomograms):
-        add(TOMOGRAMS, "Tomograms", star=tomograms)
+        add(TOMOGRAMS, "Tomograms", star=tomograms, aretomo=ctx.name)  # with the alignment thickness to change
     if ctx.exists(aligned) and columns_of(ctx.project_dir / aligned, "global"):
         add(TILT_SERIES, "Tilt series", star=aligned)
     if ctx.exists(summary):
@@ -230,6 +240,14 @@ def views_for(ctx: JobContext) -> list[ViewSpec]:
         if maps:
             add(VOLUME, "Maps" if len(maps) > 1 else "Map", maps=maps, mask=mask if ctx.exists(mask) else "",
                 color=color if ctx.exists(color) else "", masks=list(masks or []), **extra)
+
+    def add_picks(kind: str, **args) -> None:
+        """The Picks tab, before the particles when the job's own views listed them already (CtfRefine)."""
+        n = len(views)
+        add(kind, "Picks", **args)
+        at = next((i for i, v in enumerate(views[:n]) if v.kind == PARTICLES), None)
+        if len(views) > n and at is not None:
+            views.insert(at, views.pop())
 
     density = [n for n, nt in ctx.outputs if nt.split(".", 1)[0] == "DensityMap"]
     listed: list[list] = []
@@ -296,24 +314,20 @@ def views_for(ctx: JobContext) -> list[ViewSpec]:
         if job_iterations():
             add(PLOTS, "Convergence", job=ctx.name, figures="convergence")
             add(ANGLES, "Angular distribution", job=ctx.name)
-    if t in ("relion.class2d", "relion.class3d", "relion.initialmodel"):
-        parts = class_job_particles(ctx, job_iterations())
-        if parts and is_warp_particles(ctx.project_dir / parts):
-            # Warp particles: on the tomograms Warp reconstructed (no RELION tomogram set)
-            add(TOMOGRAMS, "Picks", star="", picks=parts, diameter=tomo_pick_diameter(ctx))
-            seen_files.discard(parts)
-        elif parts:
-            # the particles on their micrographs, with the classes to show; no micrograph list in a
-            # particle file, so the micrographs it names
-            add(MICROGRAPHS, "Picks", picks=parts, diameter=_float(ctx.options.get("particle_diameter")))
-            seen_files.discard(parts)  # still gets its Particles tab below
-    elif t in ("relion.refine3d", "relion.multibody"):
+    if t in ("relion.refine3d", "relion.multibody"):
         # the full map before the half maps
         add_job_maps(sorted(density, key=lambda n: "half" in n), ctx.options.get("fn_mask", ""))
         if job_iterations() or ctx.file("run_model.star"):
             add(PLOTS, "FSC", job=ctx.name, figures="model_fsc")
             add(PLOTS, "Convergence", job=ctx.name, figures="convergence")
             add(ANGLES, "Angular distribution", job=ctx.name)
+        if t == "relion.multibody":
+            if ctx.file(flex.PROJECTIONS):
+                add(PLOTS, "Flexibility", job=ctx.name, figures="flex")
+            components = flex.component_maps(ctx.job_dir)
+            if components:
+                maps = [ctx.name + n for n in components]
+                add(VOLUME, "Components", maps=maps, mask="", color="", masks=[])
     elif t == "relion.maskcreate":
         mask = ctx.output("Mask3D") or ""
         source = _option_file(ctx, "fn_in")
@@ -326,6 +340,32 @@ def views_for(ctx: JobContext) -> list[ViewSpec]:
     elif t == "relion.localres":
         locres = next((n for n, nt in ctx.outputs if nt.startswith("Image3D")), "")
         add_maps(density or [ctx.options.get("fn_in", "")], mask=ctx.options.get("fn_mask", ""), color=locres)
+        if ctx.exists(locres):
+            add(PLOTS, "Local resolution", figures="locres", star=locres, mask=_option_file(ctx, "fn_mask") or "")
+    elif t == "relion.polish":
+        if ctx.file(polish.BFACTORS):
+            add(PLOTS, "Frame weights", figures="polish", job=ctx.name)
+        shiny = ctx.output("ParticleGroupMetadata")
+        if shiny and is_spa_particles(ctx.project_dir / shiny):
+            # the particles on their micrographs, with the tracks of their motion
+            add(MICROGRAPHS, "Picks", star=_option_file(ctx, "fn_mic") or "", picks=shiny, tracks=ctx.name)
+            seen_files.discard(shiny)  # still gets its Particles tab below
+    elif t == "relion.subtract":
+        mask = _option_file(ctx, "fn_mask") or ""
+        ref = _refinement_map(ctx, ctx.options.get("fn_opt", ""))
+        if mask:
+            # what is kept: the mask on the map the particles were subtracted from
+            add_maps([ref, mask] if ref else [mask], mask=mask, masks=[mask])
+    elif t in ("relion.ctfrefinetomo", "relion.framealigntomo"):
+        tomos = ctx.output("TomogramGroupMetadata")
+        if tomos:
+            add(TILT_SERIES, "Tilt series", star=tomos,
+                compare=input_tomograms(ctx.project_dir, ctx.options) or "")
+    elif t == "relion.reconstructparticletomo":
+        add_maps([m for m in (ctx.file(n) for n in ("merged.mrc", "half1.mrc", "half2.mrc")) if m])
+        h1, h2 = ctx.file("half1.mrc"), ctx.file("half2.mrc")
+        if h1 and h2:
+            add(PLOTS, "FSC", figures="halfmap_fsc", star=h2, half1=h1, half2=h2)
     elif t == "relion.select":
         if interactive_kind(ctx.type_label, ctx.options) == "classes":
             add(SELECTION, "Selection", job=ctx.name, what="classes")
@@ -352,6 +392,36 @@ def views_for(ctx: JobContext) -> list[ViewSpec]:
         found = kind_of_exe(ctx.options.get("fn_exe", ""))
         if found is not None and found[0].name in EXTERNAL_VIEWS:
             EXTERNAL_VIEWS[found[0].name](ctx, found[1], add, add_maps)
+
+    if t in ITERATIVE:
+        # the particles of each iteration that wrote them, the latest shown (and followed while the job
+        # runs), then the final ones; with the classes to show when they carry several. The tab does not
+        # change with the iterations (the viewer lists them), so it is not built again at each one.
+        final = [n for n, nt in ctx.outputs if nt.split(".", 1)[0] == "ParticleGroupMetadata"]
+        its = particle_iterations(ctx.project_dir, ctx.name, final, job_iterations())
+        newest = ctx.project_dir / its[-1][1] if its else None
+        if newest is not None and is_warp_particles(newest):
+            # Warp particles: on the tomograms Warp reconstructed (no RELION tomogram set)
+            add_picks(TOMOGRAMS, star="", picks=its[-1][1], diameter=tomo_pick_diameter(ctx))
+            seen_files.difference_update([its[-1][1]])
+        elif newest is not None and is_spa_particles(newest):
+            # no micrograph list in a particle file: the micrographs it names
+            add_picks(MICROGRAPHS, job=ctx.name, final=final, diameter=_float(ctx.options.get("particle_diameter")))
+            seen_files.difference_update(final)  # they still get their Particles tab below
+    elif t not in _OWN_PICKS:
+        # the particles of any other job on their micrographs (Warp particles: on the tomograms Warp
+        # reconstructed), with the classes to show when they carry several; RELION tomography particles get
+        # theirs below, as any tomogram particles do
+        parts = job_particles(ctx)
+        listed_parts = parts in seen_files
+        if parts and is_warp_particles(ctx.project_dir / parts):
+            add_picks(TOMOGRAMS, star="", picks=parts, diameter=tomo_pick_diameter(ctx))
+        elif parts and is_spa_particles(ctx.project_dir / parts):
+            add_picks(MICROGRAPHS, picks=parts, diameter=_float(ctx.options.get("particle_diameter")))
+        else:
+            listed_parts = True
+        if not listed_parts:
+            seen_files.discard(parts)  # still gets its Particles tab below
 
     # anything else a viewer can show; of several tomogram particle files (a continued job lists its
     # earlier ones too), the newest gets the Picks tab
