@@ -382,6 +382,13 @@ loaded with `module load` first. A new job takes both from the project's last Ar
 - *Compute*: GPU ids separated by colons (`0:1:2:3`): one tilt series per GPU at a time (or more,
   with *Tilt series per GPU*). Tilt series already done are skipped when the job runs again
   (Continue), so after a failure only the rest run.
+- *Alignment thickness of one tilt series*: in the job's **Tomograms** tab, the bar above the tomogram
+  shows the alignment thickness (`-AlignZ`, tilt-series pixels; *Measured*: AreTomo3's own) of the
+  tilt series chosen, and the table shows the thickness AreTomo3 measured and the one each tilt series
+  was aligned with. Change it for the tilt series whose alignment is poor and **Save**: it goes into
+  the job's *Alignment thickness of some tilt series* (`TS_01=1200 ...`). Continuing the job then
+  aligns and reconstructs again only the tilt series whose thickness is not the one they were aligned
+  with, while the others keep their alignment and tomogram.
 
 The job writes, as tilt series finish (so that its tabs show them while it runs):
 
@@ -394,7 +401,7 @@ The job writes, as tilt series finish (so that its tabs show them while it runs)
   `rlnTomoReconstructedTomogramHalf1/2`), their size and binning, for the Tomograms tab, template
   matching and denoising.
 - `aretomo3.star`: one row per tilt series, with status, run time, tilt axis, sample thickness, tilt
-  offsets, dark tilts and CTF resolution. AreTomo3's own output (`.aln`, `_CTF.txt`, logs) is in
+  offsets, dark tilts, CTF resolution and the alignment thickness it was aligned with. AreTomo3's own output (`.aln`, `_CTF.txt`, logs) is in
   `aretomo/<name>/`; each tilt series' log is in `logs/`.
 
 AreTomo3's tomograms are AreTomo3's reconstructions, not RELION's. Before you use particles picked

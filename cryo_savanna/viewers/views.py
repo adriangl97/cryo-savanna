@@ -685,6 +685,9 @@ def build_view(spec: R.ViewSpec, ctx: R.JobContext, cache: ThumbCache | None, re
         from cryo_savanna.viewers.tomo_viewer import TiltSeriesViewer
         return TiltSeriesViewer(project, a["star"], cache, tool=a.get("tool", ""), tool_arg=a.get("tool_arg", ""),
                                 request_tool=request_tool, compare=a.get("compare", ""))
+    if spec.kind == R.TOMOGRAMS and a.get("aretomo"):
+        from cryo_savanna.viewers.aretomo_view import AretomoTomogramsView
+        return AretomoTomogramsView(project, a["aretomo"], a["star"], cache=cache)
     if spec.kind == R.TOMOGRAMS:
         from cryo_savanna.viewers.tomo_viewer import TomogramViewer
         return TomogramViewer(project, a["star"], picks=a.get("picks", ""), diameter=a.get("diameter"), cache=cache)

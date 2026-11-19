@@ -47,7 +47,10 @@ AreTomo3's tomograms (aretomo/<name>/<name>_Vol.mrc, _EVN_Vol / _ODD_Vol for the
 in tomograms.star (rlnTomoReconstructedTomogram, Half1/2, rlnTomoSize[XYZ], rlnTomoTomogramBinning)
 for cryo-savanna's tomogram viewer and template matching. aretomo3.star has one row per tilt series
 (status, run time, tilt axis, thickness, ...); it and the two STAR files are rewritten as tilt series
-finish. Tilt series already done are skipped when the job runs again (continue).
+finish. Tilt series already done are skipped when the job runs again (continue), except those whose
+alignment thickness (-AlignZ) is not the one they were aligned with: the job's "Alignment thickness", or
+that of the tilt series in "Alignment thickness of some tilt series" (<rlnTomoName>=<px> ..., which
+cryo-savanna's Tomograms view sets). aretomo3.star keeps the thickness each tilt series was aligned with.
 
 Like every External job it writes RELION_JOB_EXIT_SUCCESS / _FAILURE / _ABORTED and, before success,
 RELION_OUTPUT_NODES.star. RELION_JOB_ABORT_NOW and SIGTERM/SIGINT/SIGHUP (scancel) stop AreTomo3.
@@ -90,6 +93,7 @@ COL_STATUS, COL_SECONDS, COL_LOG = P + "Status", P + "Seconds", P + "Log"
 COL_ALN, COL_TOMOGRAM, COL_TILTS, COL_DARK = P + "Alignment", P + "Tomogram", P + "Tilts", P + "DarkTilts"
 COL_AXIS, COL_THICKNESS, COL_ALPHA, COL_BETA = P + "TiltAxis", P + "ThicknessAngst", P + "AlphaOffset", P + "BetaOffset"
 COL_CTF_RES = P + "CtfMaxResolution"
+COL_ALIGN_Z = P + "AlignZ"  # the -AlignZ a tilt series was aligned with (0: none, AreTomo3 measured it)
 GEN_TS_FILE, GEN_ALN_MODE = P + "TiltSeriesFile", P + "AlignmentMode"  # data_general of aretomo3.star
 TOMO_NAME, TS_STAR = "rlnTomoName", "rlnTomoTiltSeriesStarFile"
 ALIGN_COLS = ("rlnTomoXTilt", "rlnTomoYTilt", "rlnTomoZRot", "rlnTomoXShiftAngst", "rlnTomoYShiftAngst")
@@ -506,6 +510,50 @@ def write_inputs(ts, opts):
         ts["notes"].append("no CTF values (rlnDefocusU) in the input: the tomogram is not CTF-corrected")
 
 
+def per_series(opts, key, what=""):
+    """{tilt series: whole number >= 0} of an option written as "name=value name=value ..."."""
+    out = {}
+    for w in words(opts, key):
+        name, sep, v = w.rpartition("=")
+        try:
+            val = int(v)
+        except ValueError:
+            val = None
+        if not sep or not name or val is None or val < 0:
+            raise Usage("%s: %r is not <rlnTomoName>=<whole number>" % (what or key, w))
+        out[name] = val
+    return out
+
+
+def align_z(opts, name=None):
+    """The -AlignZ of a tilt series (px): its own (tomo_align_z), else the job's; 0: none (measured)."""
+    own = per_series(opts, "tomo_align_z", "Alignment thickness of some tilt series")
+    if name in own:
+        return own[name]
+    return number(opts, "align_z", int, what="Alignment thickness") or 0
+
+
+def previous_align_z(job_dir):
+    """{tilt series: the -AlignZ it was aligned with (None: not known)} from the aretomo3.star of an
+    earlier run of the job; None if that has no such column (none yet, or an older cryo-savanna's)."""
+    path = os.path.join(job_dir, SUMMARY)
+    if not os.path.isfile(path):
+        return None
+    try:
+        b = C.loop_block(path, "global")
+    except (OSError, ValueError, KeyError, Usage):
+        return None
+    if COL_ALIGN_Z not in b.columns or TOMO_NAME not in b.columns:
+        return None
+    out = {}  # type: dict
+    for r in b.dicts():
+        try:
+            out[r[TOMO_NAME]] = int(float(r[COL_ALIGN_Z]))
+        except (ValueError, TypeError):
+            out[r[TOMO_NAME]] = None
+    return out
+
+
 def _pair_words(opts, key, what, count=2, kind=float):
     w = words(opts, key)
     if not w:
@@ -540,7 +588,7 @@ def aretomo_command(opts, ts, gpu):
                 raise Usage("%s: no rlnTomoNominalTiltAxisAngle: give the tilt axis angle, or search the full "
                             "range" % ts["name"])
             cmd += ["-TiltAxis", num(round(ts["axis"], 3))] + (["-1"] if mode == AXIS_FIXED else [])
-        z = number(opts, "align_z", int, what="Alignment thickness")
+        z = align_z(opts, ts["name"])
         if z:
             cmd += ["-AlignZ", str(z)]
         patch = _pair_words(opts, "at_patch", "Local alignment patches", 2, int)
@@ -691,7 +739,7 @@ def remove_stacks(ts):
 def write_tables(job_dir, opts, columns, rows, state):
     """aretomo3.star (every tilt series), aligned_tilt_series.star and tomograms.star (those done)."""
     extra = [COL_STATUS, COL_SECONDS, COL_LOG, COL_ALN, COL_TOMOGRAM, COL_TILTS, COL_DARK, COL_AXIS,
-             COL_THICKNESS, COL_ALPHA, COL_BETA, COL_CTF_RES]
+             COL_THICKNESS, COL_ALPHA, COL_BETA, COL_CTF_RES, COL_ALIGN_Z]
     summary_cols = [TOMO_NAME] + extra
     table = []
     for r in rows:
@@ -703,7 +751,7 @@ def write_tables(job_dir, opts, columns, rows, state):
         table.append([r[TOMO_NAME], s["status"], "%.0f" % s.get("seconds", 0), s["log"], i.get("aln", ""),
                       s.get("tomo", {}).get("rlnTomoReconstructedTomogram", ""), i.get("tilts", ""), i.get("dark", ""),
                       v(i.get("axis")), v(i.get("thickness"), "%.1f"), v(i.get("alpha")), v(i.get("beta")),
-                      v(i.get("ctf_res"))])
+                      v(i.get("ctf_res")), v(s.get("align_z"), "%d")])
     general = {GEN_TS_FILE: text(opts, "in_tiltseries"), GEN_ALN_MODE: text(opts, "alignment") or ALIGN_ARETOMO}
     C.write_star(os.path.join(job_dir, SUMMARY), [("general", general, None, None), ("global", None, summary_cols, table)])
 
@@ -775,6 +823,9 @@ def run_align(sup, job_dir, threads, opts):
     for w in picking_warnings(opts):
         say("WARNING: " + w)
     use_input = text(opts, "alignment") == ALIGN_INPUT
+    # the -AlignZ each tilt series was aligned with; for a job of an older cryo-savanna (no such column),
+    # the job's own: only those given another one since are aligned again
+    before = previous_align_z(job_dir)
     series, state = {}, {}
     for r in rows:  # every tilt series' inputs first: a wrong setting shows before hours of processing
         ts = prepare(r, opts, job_dir)
@@ -782,8 +833,14 @@ def run_align(sup, job_dir, threads, opts):
         series[name] = ts
         p = ts["paths"]
         aretomo_command(opts, ts, 0)  # checks the options
-        state[name] = {"status": "pending", "log": _rel(p["log"]), "star": p["star"]}
+        used = before.get(name) if before is not None else align_z(opts)
+        state[name] = {"status": "pending", "log": _rel(p["log"]), "star": p["star"], "align_z": used}
         if yes(opts, "skip_done") and os.path.isfile(p["vol"]) and (use_input or os.path.isfile(p["aln"])):
+            want = align_z(opts, name)
+            if not use_input and used != want:
+                say("%s: alignment thickness %s, aligned with %s: aligning it again"
+                    % (name, want or "measured", "unknown" if used is None else used or "measured"))
+                continue
             try:
                 state[name].update({"info": collect(ts, opts), "tomo": tomogram_values(ts, opts), "status": "done"})
                 say("%s: already done, skipped" % name)
@@ -801,7 +858,7 @@ def run_align(sup, job_dir, threads, opts):
         def factory(gpu):
             def gen():
                 ts, s = series[name], state[name]
-                s["status"], t0 = "running", time.time()
+                s["status"], s["align_z"], t0 = "running", None, time.time()
                 write_tables(job_dir, opts, columns, rows, state)
                 write_inputs(ts, opts)
                 for note in ts["notes"]:
@@ -822,6 +879,7 @@ def run_align(sup, job_dir, threads, opts):
                 except Usage:
                     C._show_tail(s["log"])
                     raise
+                s["align_z"] = None if use_input else align_z(opts, name)
                 if not yes(opts, "keep_stacks"):
                     remove_stacks(ts)
                 return True

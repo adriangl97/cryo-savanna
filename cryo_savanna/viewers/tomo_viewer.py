@@ -407,6 +407,7 @@ class TomogramViewer(QWidget):
         self.levels = (0.0, 1.0)
         self._stamp: object = None
         self.picks_loaded: Callable[[TomoPicks], None] | None = None  # called with the TomoPicks when they were (re)read
+        self.set_loaded: Callable[[TiltSeriesSet], None] | None = None  # called when the set was (re)read
         self._side_dots: object = None  # what the side views' dots were drawn from (they do not move with the slab)
 
         self.model = TableModel(self)
@@ -570,6 +571,8 @@ class TomogramViewer(QWidget):
             self._count_picks()
         else:
             self.info.setText(f"{len(ts)} tomograms   ·   {self.star}")
+        if self.set_loaded is not None:  # e.g. the AreTomo3 view's columns
+            self.set_loaded(ts)
         self.table.resizeColumnsToContents()
         if self.warp:
             self.napari.set_command(None, "RELION's napari viewer needs a RELION tomogram set (rlnTomoName)")

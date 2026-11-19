@@ -201,7 +201,7 @@ def _aretomo_views(ctx: JobContext, kind: str, add, add_maps) -> None:
     from cryo_savanna import aretomo_runner as A
     tomograms, aligned, summary = (ctx.name + f for f in (A.TOMOGRAMS, A.ALIGNED, A.SUMMARY))
     if ctx.exists(tomograms) and has_tomograms(ctx.project_dir / tomograms):
-        add(TOMOGRAMS, "Tomograms", star=tomograms)
+        add(TOMOGRAMS, "Tomograms", star=tomograms, aretomo=ctx.name)  # with the alignment thickness to change
     if ctx.exists(aligned) and columns_of(ctx.project_dir / aligned, "global"):
         add(TILT_SERIES, "Tilt series", star=aligned)
     if ctx.exists(summary):
