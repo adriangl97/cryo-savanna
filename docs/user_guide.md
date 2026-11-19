@@ -72,8 +72,18 @@ polling interval (Preferences, or `--poll`), and views of running jobs read new 
   when its field is in use (not greyed out) and names an output of a job, or a file in a job's directory
   (by its name, its alias or its full path). The marks follow the fields as you change them, and go when the
   editor closes.
-- **Additional arguments** lists every flag of the program the job runs, with its default and help:
-  tick a flag or type a value and it is added to the arguments.
+- **Advanced parameters** (the last tab of RELION's job types): "Additional arguments" at the top, then every
+  flag of the program that gets them, by the sections of its `--help`, as rows like those of the other tabs: a Yes/No for a switch, a field with the program's default for a
+  value. A flag changed from its default is added to the arguments and shown in bold; typing in the box fills
+  in the rows. Flags the job writes itself are not listed.
+- **Several reference maps** (3D classification, SPA and tomography): *Several…* next to "Reference map:"
+  lists the maps of the pipeline (and *Add files…*); tick two or more, and each starts one class, in the order
+  shown (numbered; Up / Down or drag to change it). *Number of classes* is set to how many there are. When the
+  job is added, cryo-savanna writes their list to `references.star` in the job's directory
+  (`_rlnReferenceImage`, which relion_refine reads as one class per map; no other option is needed) and
+  "Reference map:" names that file. A clone, an overwrite or the next new job of this type starts from the same
+  maps. The jobs of the maps are linked to the classification in the tree and the graph, and marked while the
+  editor is open.
 - **Setting presets** (job editor, next to "Defaults"): named settings of a job type, kept for you
   (`~/.config/cryo-savanna/presets/`, or `$CRYO_SAVANNA_CONFIG`), for every project. *Save current settings
   as…* lists the options: those changed from RELION's default are ticked, inputs (input nodes, files,

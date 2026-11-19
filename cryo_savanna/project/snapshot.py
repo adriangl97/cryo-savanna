@@ -18,8 +18,9 @@ from pathlib import Path
 
 from cryo_savanna.jobdefs.external_jobs import EXTERNAL, program_title
 from cryo_savanna.jobdefs.model import JobDefs
+from cryo_savanna.project import references
 from cryo_savanna.project.jobstar import JobStar
-from cryo_savanna.project.lineage import primary_parents
+from cryo_savanna.project.lineage import job_holding, primary_parents
 from cryo_savanna.project.main_inputs import MainInputs
 from cryo_savanna.project.pipeline import Pipeline, Process
 from cryo_savanna.project.stars import Stars
@@ -55,13 +56,14 @@ def _digest(text: str) -> bytes:
 class JobInfo:
     process: Process
     primary_parent: str | None  # job drawn above this one in the tree
-    other_parents: list[str]  # producers of the other inputs (references, masks, ...)
+    other_parents: list[str]  # producers of the other inputs (references, masks, ...; each of several references)
     children: list[str] = field(default_factory=list)  # jobs whose primary parent is this one
     status: str = ""  # effective status, see ProjectLoader._effective_status
     pending_update: bool = False  # finished on disk, pipeline still says Running
     modified: float | None = None  # latest activity in the job directory (epoch seconds)
     program: str = ""  # External jobs: the program they run (shown with the type, found by the filter)
     starred: bool = False  # starred in cryo-savanna (project/stars.py)
+    reference_maps: dict[str, str] = field(default_factory=dict)  # several references: map -> its job (other_parents)
 
     @property
     def name(self) -> str:
@@ -113,6 +115,7 @@ class ProjectLoader:
         self.pipeline_path = self.project_dir / f"{pipeline_name}_pipeline.star"
         self.pipeline_name = pipeline_name
         self._jobstars: dict[Path, tuple[Stamp, JobStar]] = {}
+        self._ref_lists: dict[str, tuple[Stamp, list[str]]] = {}  # list of references -> its maps (by its stamp)
         self._snapshot: ProjectSnapshot | None = None
         self._live: dict[str, tuple] = {}  # running job -> stamps of its markers and log
         self._digest: bytes = b""  # of the pipeline text last read
@@ -187,14 +190,17 @@ class ProjectLoader:
         else:
             parents = primary_parents(pipeline, self.project_dir, self.defs, self.read_jobstar,
                                       self.main_inputs.choices() if self.main_inputs is not None else None)
+        refs = self._reference_jobs(pipeline)
         if self.stars is not None:
             self._stars_stamp = self.stars.stamp()
         starred = self.stars.starred() if self.stars is not None else set()
         jobs: dict[str, JobInfo] = {}
         for name, pr in pipeline.processes.items():
             primary = parents[name]
-            others = [x for x in pipeline.parents(name) if x not in (primary, name)]
-            jobs[name] = JobInfo(pr, primary, others, program=self._program(pr), starred=name in starred)
+            maps = refs.get(name, {})
+            others = [x for x in dict.fromkeys(pipeline.parents(name) + list(maps.values())) if x not in (primary, name)]
+            jobs[name] = JobInfo(pr, primary, others, program=self._program(pr), starred=name in starred,
+                                 reference_maps=maps)
         roots = []
         for name, info in jobs.items():
             if info.primary_parent is None or info.primary_parent not in jobs:
@@ -212,6 +218,28 @@ class ProjectLoader:
         snap = ProjectSnapshot(self.project_dir, pipeline, jobs, roots, st, time.time())
         self._live = live
         return snap
+
+    def _reference_jobs(self, pipeline: Pipeline) -> dict[str, dict[str, str]]:
+        """Jobs whose maps a 3D classification starts from, when it has several (their list, references.star,
+        is its input in the pipeline: project/references.py): job -> {map: the job it comes from}."""
+        out: dict[str, dict[str, str]] = {}
+        for name, pr in pipeline.processes.items():
+            for node in pr.inputs:
+                if not node.endswith("/" + references.FILE):
+                    continue
+                for m in self._reference_list(node):
+                    n = pipeline.nodes.get(m)
+                    job = n.producer if n is not None and n.producer else job_holding(pipeline, m)
+                    if job is not None and job != name:
+                        out.setdefault(name, {})[m] = job
+        return out
+
+    def _reference_list(self, path: str) -> list[str]:
+        st = stamp(self.project_dir / path)  # read again when written again (a job overwritten)
+        hit = self._ref_lists.get(path)
+        if hit is None or hit[0] != st:
+            hit = self._ref_lists[path] = (st, (references.read(self.project_dir, path) or []) if st else [])
+        return hit[1]
 
     def _program(self, pr: Process) -> str:
         jt = job_type_for_label(pr.type_label)

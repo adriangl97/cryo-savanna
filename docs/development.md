@@ -56,6 +56,9 @@ has to be checked before it is used. The runners (`*_runner.py`, `runner_common.
 | `cryo_savanna/jobdefs/aretomo_jobs.py`, `cryo_savanna/aretomo_runner.py`, `cryo_savanna/viewers/aretomo_view.py` | "Additional external jobs": AreTomo3's form and its runner (standard library only; it imports `runner_common.py`, and both are copied into the project), and its Tomograms view, which sets the alignment thickness of single tilt series for a continue |
 | `cryo_savanna/runner_common.py`, `cryo_savanna/jobdefs/runner_files.py` | What the runners of the "Additional external jobs" share (standard library only: External job arguments, exit files and output nodes, STAR, MRC headers, environment modules, the programs they run, RELION 5 tomograms), and how the runners and it are copied into a project's `.cryo-savanna/` |
 | `cryo_savanna/jobdefs/flags.py`, `jobdefs/help/` | Flags of the program behind each job's "Additional arguments", from `--help` (bundled 5.1.1 texts as fallback) |
+| `cryo_savanna/jobdefs/command-flags-5.1.1.json`, `tools/extract_jobdefs/command_flags.py` | The flags each job type writes itself, and the options behind them (generated from RELION's `getCommands*Job`): the job editor's Advanced parameters tab leaves them out |
+| `cryo_savanna/ui/flag_panel.py` | The job editor's Advanced parameters tab: the additional arguments and the flags of their program, as rows |
+| `cryo_savanna/project/references.py`, `cryo_savanna/ui/references_dialog.py` | Several reference maps of a 3D classification: their list (`references.star` in the job's directory, written by `Pipeliner.add_job`), read back for clones and for the links of the job tree; the dialog that chooses them |
 | `cryo_savanna/env/relion_env.py` | Reads `RELION_*` variables the same way RELION does |
 | `cryo_savanna/jobdefs/external_jobs.py` | The kinds of External jobs with a form and a runner of cryo-savanna's own (CLI tools, pytom, AreTomo3, tomogram masks) in one place: which kind a job is, its runner, its form, its main input. A new wrapper is one more entry there |
 | `cryo_savanna/ui/errors.py` | Errors nothing caught: in the status bar and in `errors.log` of the cache folder, not only in the terminal |
@@ -121,6 +124,13 @@ python tools/extract_jobdefs/extract.py /tmp/relion-src -o cryo_savanna/jobdefs/
 Needs a C++17 compiler. The extractor compiles RELION's own job and window initialisers against
 small stand-in classes, so defaults, ranges, help text, tabs and on/off groups come straight from
 RELION's code.
+
+Then the flags each job type writes itself (no compiler: it reads the command builders of
+`src/pipeline_jobs.cpp`, and the job definitions above for each type's options):
+
+```bash
+python tools/extract_jobdefs/command_flags.py /tmp/relion-src -o cryo_savanna/jobdefs/command-flags-5.1.1.json --version 5.1.1
+```
 
 The job definitions are only one part: [other_relion_versions.md](other_relion_versions.md) lists
 everything that follows 5.1.1 and the steps to move cryo-savanna to another release (untested).

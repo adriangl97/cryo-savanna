@@ -336,7 +336,7 @@ def _overwrite_keeping_order(spa_copy, monkeypatch, job, fail=False):
         written.append(list(self.processes))
     monkeypatch.setattr(Pipeline, "write", recorded)
 
-    def add_job(js, alias=None):
+    def add_job(js, alias=None, refs=None):
         if fail:
             raise subprocess.TimeoutExpired("relion_pipeliner", 600)
         with ops._lock("addJobFromStar") as lock:
@@ -406,7 +406,7 @@ def test_failed_selection_overwrite_puts_the_old_job_back(spa_copy, monkeypatch,
     pl = Pipeliner(spa_copy, exe="relion_pipeliner", environ={})
     ops = PipelineOps(spa_copy)
 
-    def add_job(js, alias=None):  # stands in for relion_pipeliner: a new job in the old job's directory
+    def add_job(js, alias=None, refs=None):  # stands in for relion_pipeliner: a new job in the old job's directory
         trashed = spa_copy / "Trash" / job
         shutil.copytree(trashed, tmp_path / "old", symlinks=True)
         ops.undelete(trashed / "deleted_pipeline.star")

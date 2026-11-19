@@ -18,6 +18,8 @@ treat them as a checklist, and expect some steps to need fixing on the way.
 | Alias, mark finished/failed, delete, undelete | `cryo_savanna/project/ops.py` | `src/pipeliner.cpp` |
 | Select and Exclude tilt images output files | `cryo_savanna/project/selection.py` | `src/displayer.cpp`, `tomography_python_programs/exclude_tilt_images` |
 | Which program a job passes "Additional arguments" to | `cryo_savanna/jobdefs/flags.py` (`JOB_PROGRAMS`) | `src/pipeline_jobs.cpp` (`getCommands*`) |
+| The flags each job writes itself (left out of the Advanced parameters tab) | `cryo_savanna/jobdefs/command-flags-5.1.1.json` | `src/pipeline_jobs.cpp` (`getCommands*Job`, `getTomoInputCommmand`) |
+| Several references of a 3D classification as a STAR file | `cryo_savanna/project/references.py` | `src/ml_model.cpp` (`initialiseFromImages`), `getCommandsClass3DJob` |
 | CLI tools menu, programs with an `_mpi` version | `cryo_savanna/jobdefs/cli_catalog.py`, `cli_tools.py` (`_MPI_PROGRAMS`) | `src/apps/` |
 | Result viewers: output file names and STAR labels | `cryo_savanna/results/` | what each program writes |
 
@@ -50,6 +52,15 @@ python tools/extract_jobdefs/extract.py ~/src/relion -o cryo_savanna/jobdefs/rel
   adjust what `extract.py` copies out of the source if functions were moved or renamed.
 - *"placed but undefined options"*: RELION's own GUI warns about these too; not an error.
 
+Then the flags each job type writes itself (it reads the command builders, and the definitions just made):
+
+```bash
+python tools/extract_jobdefs/command_flags.py ~/src/relion -o cryo_savanna/jobdefs/command-flags-X.Y.Z.json --version X.Y.Z
+```
+
+- *"no job type for getCommands…Job"*: a new job type: add its command builder to `BUILDERS` in
+  `command_flags.py`.
+
 Compare with the 5.1.1 definitions to see what changed for users:
 
 ```bash
@@ -65,10 +76,11 @@ In `cryo_savanna/jobdefs/model.py`:
 DEFAULT_VERSION = "X.Y.Z"
 ```
 
-That one value chooses the definitions file, the bundled `--help` directory, the version the
-warning compares with (so the "made for" warning now appears for 5.1.1 instead), and the version
-shown in About and `--print-tree`. Keep `relion-5.1.1.json` and `help/5.1.1/`: switching back is
-the same one line. Both are packaged (`pyproject.toml` takes `*.json` and `help/*/*.txt`).
+That one value chooses the definitions file, the flags the jobs write (`command-flags-X.Y.Z.json`), the
+bundled `--help` directory, the version the warning compares with (so the "made for" warning now appears
+for 5.1.1 instead), and the version shown in About and `--print-tree`. Keep `relion-5.1.1.json`,
+`command-flags-5.1.1.json` and `help/5.1.1/`: switching back is the same one line. They are packaged
+(`pyproject.toml` takes `*.json` and `help/*/*.txt`).
 
 ## 4. Bundle the --help texts
 

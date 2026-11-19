@@ -28,10 +28,15 @@ for job use, and an _mpi binary started outside mpirun can hang on a cluster log
 
 RELION's IOParser uses the last value when a flag is given twice, and the extra arguments come last,
 so a flag here can also override a value the job's options set.
+
+The flags a job type writes itself (from its options, or always) are in command-flags-<version>.json, read
+from RELION's command builders by tools/extract_jobdefs/command_flags.py (``job_flags``): the job editor's
+"Advanced parameters" tab leaves them out, as they are set on its other tabs.
 """
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import shlex
@@ -39,11 +44,13 @@ import shutil
 import subprocess
 import tempfile
 from dataclasses import dataclass, field
+from functools import lru_cache
 from importlib import resources
 
 from cryo_savanna.env.child import external_environ
 from cryo_savanna.jobdefs.cli_catalog import FLAG_TOOLS
 from cryo_savanna.jobdefs.model import DEFAULT_VERSION
+from cryo_savanna.relion_consts import job_type_for_label
 
 # RELION C++ programs that receive a job's additional arguments (their --help can be parsed).
 JOB_PROGRAMS = {
@@ -58,6 +65,7 @@ KNOWN_PROGRAMS = JOB_PROGRAMS | set(FLAG_TOOLS)  # programs whose --help is read
 NO_LIVE_HELP = {"relion_manualpick", "relion_display"}  # GUI programs: use the bundled text
 HELP_RETRY_ARGS = {"relion_run_motioncorr": ["--use_own"]}  # stops before printing its help otherwise
 HIDDEN_FLAGS = {"--version", "--theme", "--list_themes", "--pipeline_control"}
+EXTRA_ARGS = "other_args"  # the job option RELION appends to the command
 
 _HEADER = "+++ RELION: command line arguments"
 _SECTION = re.compile(r"^=+\s*(.*?)\s*=+\s*$")
@@ -169,6 +177,52 @@ def program_for(label: str, values: dict[str, str]) -> str:
     if label == "relion.importtomo":
         return "relion_tomo_import_coordinates" if yes("do_coords") else "relion_python_tomo_import"
     return ""
+
+
+# ---------------------------------------------------------------------------- flags the job writes itself
+
+ADVANCED_TAB = "Advanced parameters"  # the job editor's tab with the additional arguments and the flags
+
+
+def has_advanced_tab(variant) -> bool:
+    """Whether the job editor gives a job type the "Advanced parameters" tab: RELION's job types with
+    additional arguments. The forms of cryo-savanna's own (CLI tools, pytom, AreTomo3, masks) already are
+    their program's flags, and keep the box on their Running tab."""
+    return EXTRA_ARGS in variant.options and not getattr(variant, "is_cli", False)
+
+
+@dataclass(frozen=True)
+class JobFlag:
+    """A flag a job type writes on its command line."""
+    name: str
+    options: tuple[str, ...]  # the options that set it (their statement and innermost condition); () = always
+    under: tuple[str, ...]  # also the options of every condition it sits under
+
+
+@lru_cache(maxsize=4)
+def _job_flags(version: str) -> dict[str, dict[str, JobFlag]]:
+    try:
+        text = resources.files("cryo_savanna.jobdefs").joinpath(f"command-flags-{version}.json").read_text()
+    except (FileNotFoundError, OSError):
+        return {}
+    data = json.loads(text)
+    return {label: {f: JobFlag(f, tuple(u["direct"]), tuple(u["all"])) for f, u in flags.items()}
+            for label, flags in data["jobs"].items()}
+
+
+def job_flags(label: str, version: str = DEFAULT_VERSION) -> dict[str, JobFlag]:
+    """The flags a job of this type writes itself (RelionJob::getCommands*Job): flag -> JobFlag."""
+    jt = job_type_for_label(label)
+    return _job_flags(version).get(jt.label if jt is not None else label, {})
+
+
+def option_flags(label: str, version: str = DEFAULT_VERSION) -> dict[str, list[str]]:
+    """Option key -> the flags it sets on the command line (shown with the option's help)."""
+    out: dict[str, list[str]] = {}
+    for f in job_flags(label, version).values():
+        for k in f.options:
+            out.setdefault(k, []).append(f.name)
+    return out
 
 
 # ---------------------------------------------------------------------------- flag lists
@@ -325,24 +379,3 @@ def set_arg(text: str, flag: str, value: str | None, switch: bool = False) -> st
         else:
             groups.append(_Group(flag, raw))
     return _join(groups)
-
-
-def command_flags(note: str, other_args: str = "", program: str = "") -> dict[str, str]:
-    """Flags in the last command(s) a job ran (from its note.txt) -> value, without its extra arguments.
-
-    With ``program``, only the commands that run it (or its _mpi version) count.
-    """
-    blocks = note.split(" ++++ with the following command(s):")
-    if len(blocks) < 2:
-        return {}
-    body = blocks[-1].split(" ++++", 1)[0]
-    extra = parse_args(other_args)
-    seen: dict[str, list[str]] = {}
-    for line in body.splitlines():
-        if program and not re.search(rf"\b{re.escape(program)}(_mpi)?\b", line):
-            continue
-        for g in _groups(line):
-            if g.flag:
-                seen.setdefault(g.flag, []).append(_unquote(g.raw[0]) if g.raw else "")
-    # a flag also in the extra arguments: the job's own value is the first one, if it has one
-    return {f: (v[0] if f in extra else v[-1]) for f, v in seen.items() if f not in extra or len(v) > 1}

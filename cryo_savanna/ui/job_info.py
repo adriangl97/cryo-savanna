@@ -34,6 +34,7 @@ from cryo_savanna.jobdefs.cli_catalog import POSITIONAL
 from cryo_savanna.jobdefs import external_jobs
 from cryo_savanna.jobdefs.cli_tools import CliCatalog
 from cryo_savanna.jobdefs.model import JobDefs, JobVariant
+from cryo_savanna.project import references
 from cryo_savanna.project.failure_hints import RELION_ERROR, Diagnosis
 from cryo_savanna.jobdefs.pytom_jobs import PytomVariant, decode
 from cryo_savanna.project.jobstar import JobStar
@@ -359,6 +360,10 @@ class JobInfoPanel(QTabWidget):
         def producer(n: str) -> str:
             node = pipe.nodes.get(n)
             if node is None or node.producer is None:
+                maps = info.reference_maps if n.endswith("/" + references.FILE) else {}
+                if maps:  # several reference maps (project/references.py)
+                    return "the list of the reference maps, one class each: " + "; ".join(
+                        f"{html.escape(m)} from {self._link(j)}" for m, j in maps.items())
                 return "<span style='color:gray'>not made by a job</span>"
             text = "from " + self._link(node.producer)
             if n == main and node.producer == info.primary_parent:

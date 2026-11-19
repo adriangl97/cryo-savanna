@@ -413,7 +413,10 @@ class JobGraphView(QGraphicsView):
             e = EdgeItem(a, b, [lay.pos[a], *mids, lay.pos[b]], (sizes[a][1], sizes[b][1]), (a, b) in lay.primary, self)
             files = [n for n in snap.jobs[b].process.inputs
                      if n in snap.pipeline.nodes and snap.pipeline.nodes[n].producer == a]
-            e.setToolTip("\n".join(f"{n}  ({snap.pipeline.nodes[n].type_label})" for n in files))
+            tips = [f"{n}  ({snap.pipeline.nodes[n].type_label})" for n in files]
+            tips += [f"{m}  (one of the reference maps of {b.rstrip('/')})"
+                     for m, job in snap.jobs[b].reference_maps.items() if job == a]
+            e.setToolTip("\n".join(tips))
             scene.addItem(e)
             self.edges.append(e)
             self._edges_by_job.setdefault(a, []).append(e)

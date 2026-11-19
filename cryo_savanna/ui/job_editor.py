@@ -29,7 +29,9 @@ yes/no option greys out the rows it controls, as in RELION, and in continue mode
 RELION lets you change stay editable. Changed values are marked; hovering or focusing an option
 shows its help. The result is a JobStar with exactly the options RELION writes.
 
-Below "Additional arguments:" a panel lists every flag of the program that gets them (flag_panel.py).
+"Additional arguments:" has a tab of its own, "Advanced parameters", with every flag of the program that gets
+them that the job does not set itself (flag_panel.py). A 3D classification can start from several reference
+maps, one class each (project/references.py).
 """
 
 from __future__ import annotations
@@ -72,17 +74,18 @@ from cryo_savanna.env.relion_env import RelionEnv, RelionEnvError
 from cryo_savanna.jobdefs import box_sizes
 from cryo_savanna.jobdefs import compute_advice as advice_rules
 from cryo_savanna.jobdefs.cli_tools import CliVariant
-from cryo_savanna.jobdefs.flags import Flag, FlagSource, command_flags, program_for
+from cryo_savanna.jobdefs.flags import (ADVANCED_TAB, Flag, FlagSource, has_advanced_tab, job_flags, option_flags,
+                                        program_for)
 from cryo_savanna.jobdefs.model import JobVariant, OptionDef, Row
 from cryo_savanna.jobdefs.pytom_jobs import PytomVariant
+from cryo_savanna.project import references
 from cryo_savanna.project.jobstar import JobStar
 from cryo_savanna.project.pipeline import Pipeline
 from cryo_savanna.project.presets import PresetError, PresetStore, is_input
-from cryo_savanna.relion_consts import job_type_for_label
 from cryo_savanna.project.scratch import SCRATCH_KEY
 from cryo_savanna.project.scratch import base_dir as scratch_base_dir
 from cryo_savanna.project.selection import interactive_kind
-from cryo_savanna.ui.flag_panel import FlagPanel, FlagsTask
+from cryo_savanna.ui.flag_panel import AdvancedPanel, FlagsTask
 from cryo_savanna.ui.presets_dialog import ManagePresetsDialog, SavePresetDialog
 
 MODE_NEW, MODE_CONTINUE, MODE_OVERWRITE = "new", "continue", "overwrite"
@@ -439,11 +442,15 @@ class JobEditor(QWidget):
         self.env = env
         self.type_names = type_names
         self.flag_source = flag_source or FlagSource()
-        self.flag_panel: FlagPanel | None = None
-        self.flags_toggle: QToolButton | None = None
-        self.show_flags = True  # kept from job to job
+        self.advanced: AdvancedPanel | None = None  # the "Advanced parameters" tab (flag_panel.py)
+        self.advanced_tab = -1  # its index
         self.flags_program: str | None = None
-        self.source_job: str | None = None  # job whose command shows what the options set
+        self.source_job: str | None = None  # the job a new one is cloned from
+        # several reference maps of a 3D classification (project/references.py): their list, the button that
+        # chooses them and the line under "Reference map:" that names them
+        self.references: list[str] = []
+        self.refs_button: QToolButton | None = None
+        self.refs_line: QLabel | None = None
         self._flags_pool = QThreadPool(self)
         self._flags_pool.setMaxThreadCount(1)
         self._flag_tasks: set[FlagsTask] = set()
@@ -563,6 +570,8 @@ class JobEditor(QWidget):
         for w in self.widgets.values():
             if isinstance(w, NodeWidget):
                 w.fill(pipeline)
+        if self.references and self.mode == MODE_NEW and self.widgets[references.KEY].value() != self._refs_path():
+            self.widgets[references.KEY].set_value(self._refs_path())  # the directory the new job gets moved on
         self._update_inputs()
 
     def new_job(self, variant: JobVariant, values: dict[str, str] | None = None, note: str = "",
@@ -667,20 +676,22 @@ class JobEditor(QWidget):
         self.submit_preview_link = None
         box_keys = box_sizes.box_options(variant.key)
         advised = advice_rules.covered(variant.key, options)
-        self.flag_panel = self.flags_toggle = None
+        self.advanced, self.advanced_tab = None, -1
         self.flags_program = None
         self.selector = None
+        self.references, self.refs_button, self.refs_line = [], None, None
         while self.tabs.count():
             w = self.tabs.widget(0)
             self.tabs.removeTab(0)
             w.deleteLater()
+        advanced = has_advanced_tab(variant)
+        extra_row: Row | None = None  # "Additional arguments:", for the Advanced parameters tab
         for ti, tab in enumerate(variant.resolved_tabs(self.env)):
             page = QWidget()
             grid = QGridLayout(page)
             grid.setColumnStretch(1, 1)
             grid.setVerticalSpacing(4)
             r = 0
-            panel_row = None
             hint_rows = [i for i, rw in enumerate(tab.rows) if advised and any(k in HINT_KEYS and k in options
                                                                                 for k in rw.keys)]
             if tab.label == "Running" and variant.label in RELION_SELECTORS:
@@ -691,31 +702,13 @@ class JobEditor(QWidget):
                 keys = [k for k in row.keys if k in self.options]
                 if not keys:
                     continue
-                parts: list[QWidget] = []
-                if len(keys) == 1:
-                    key = keys[0]
-                    label = QLabel(self.options[key].label.strip())
-                    field = self._field(key)
-                else:  # RELION's place2/place3: several options on one line
-                    label = QLabel(row.label.strip() or self.options[keys[0]].label.strip())
-                    field = QWidget()
-                    h = QHBoxLayout(field)
-                    h.setContentsMargins(0, 0, 0, 0)
-                    for k in keys:
-                        h.addWidget(QLabel(self.options[k].label.strip()))
-                        h.addWidget(self._field(k), 1)
-                    key = keys[0]
-                label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
-                label.setToolTip(self._tooltip(keys))
-                marker = QLabel()
-                marker.setFixedWidth(12)
-                for k in keys:
-                    self.labels[k], self.markers[k] = label, marker
+                if advanced and keys == [EXTRA_ARGS]:
+                    extra_row = row
+                    continue
+                label, field, marker = self._row_parts(ti, row, keys)
                 grid.addWidget(label, r, 0)
                 grid.addWidget(field, r, 1)
                 grid.addWidget(marker, r, 2)
-                parts = [label, field, marker]
-                self.rows.append((ti, row, parts))
                 r += 1
                 boxes = [k for k in keys if k in box_keys]
                 if boxes:  # a line under the field, shown when the size is not a good one
@@ -743,19 +736,51 @@ class JobEditor(QWidget):
                     grid.addWidget(link, r, 1, 1, 2)
                     self.submit_preview_link = link
                     r += 1
-                if keys == [EXTRA_ARGS] and not getattr(variant, "is_cli", False):
-                    panel_row = r
-                    grid.addWidget(self._make_flag_panel(), r, 0, 1, 3)
+                if keys == [references.KEY] and references.supported(variant.label):
+                    grid.addWidget(self._make_references(), r, 1, 1, 2)
                     r += 1
-            grid.setRowStretch(r if panel_row is None else panel_row, 1)
-            scroll = QScrollArea()
-            scroll.setWidgetResizable(True)
-            scroll.setFrameShape(QFrame.NoFrame)
-            scroll.setWidget(page)
-            self.tabs.addTab(scroll, tab.label)
+            grid.setRowStretch(r, 1)
+            self._add_tab(page, tab.label)
+        if extra_row is not None:
+            self.advanced_tab = self.tabs.count()
+            panel = AdvancedPanel(lambda opt: make_widget(opt, self))
+            panel.place_box(*self._row_parts(self.advanced_tab, extra_row, [EXTRA_ARGS]))
+            panel.edited.connect(self.widgets[EXTRA_ARGS].set_value)
+            panel.flag_focused.connect(self.show_flag_help)
+            self.advanced = panel
+            self._add_tab(panel, ADVANCED_TAB)
         self.search.clear()
         self.only_changed.setChecked(False)
         self.help.setHtml("<p style='color:gray'>Point at an option to see its help.</p>")
+
+    def _add_tab(self, page: QWidget, label: str) -> None:
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setWidget(page)
+        self.tabs.addTab(scroll, label)
+
+    def _row_parts(self, ti: int, row: Row, keys: list[str]) -> tuple[QLabel, QWidget, QLabel]:
+        """The label, field(s) and changed-marker of one row of tab ``ti``, kept in self.rows."""
+        if len(keys) == 1:
+            label = QLabel(self.options[keys[0]].label.strip())
+            field: QWidget = self._field(keys[0])
+        else:  # RELION's place2/place3: several options on one line
+            label = QLabel(row.label.strip() or self.options[keys[0]].label.strip())
+            field = QWidget()
+            h = QHBoxLayout(field)
+            h.setContentsMargins(0, 0, 0, 0)
+            for k in keys:
+                h.addWidget(QLabel(self.options[k].label.strip()))
+                h.addWidget(self._field(k), 1)
+        label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        label.setToolTip(self._tooltip(keys))
+        marker = QLabel()
+        marker.setFixedWidth(12)
+        for k in keys:
+            self.labels[k], self.markers[k] = label, marker
+        self.rows.append((ti, row, [label, field, marker]))
+        return label, field, marker
 
     def _make_selector(self, tool: str) -> QComboBox:
         self.selector = QComboBox()
@@ -770,50 +795,29 @@ class JobEditor(QWidget):
         """Run now should open cryo-savanna's own selection window instead of RELION's tool."""
         return self.selector is not None and self.selector.currentIndex() == 0
 
-    def _make_flag_panel(self) -> FlagPanel:
-        """The flag list under "Additional arguments:", with a button on that row to show or hide it."""
-        box = self.widgets[EXTRA_ARGS]
-        panel = FlagPanel()
-        panel.setVisible(self.show_flags)
-        box.edit.textChanged.connect(panel.set_text)
-        panel.edited.connect(box.set_value)
-        panel.flag_focused.connect(self.show_flag_help)
-        toggle = QToolButton()
-        toggle.setText("All flags")
-        toggle.setCheckable(True)
-        toggle.setChecked(self.show_flags)
-        toggle.setToolTip("Show every flag of the program that gets these arguments")
-        toggle.toggled.connect(self._toggle_flags)
-        box.layout_.addWidget(toggle)
-        self.flag_panel, self.flags_toggle = panel, toggle
-        return panel
-
-    def _toggle_flags(self, on: bool) -> None:
-        self.show_flags = on
-        self._apply_search()
-
     def _update_flags_program(self) -> None:
         """Show the flags of the program that gets the extra arguments with the current options."""
-        if self.flag_panel is None or self.variant is None:
+        if self.advanced is None or self.variant is None:
             return
         program = program_for(self.variant.label, self.values())
         if program == self.flags_program:
             return
         self.flags_program = program
-        self.flag_panel.set_job_flags(*self._job_flags(program))
-        if self.flag_source.needs_run(program):
-            self.flag_panel.set_loading(program)
+        loading = self.flag_source.needs_run(program)
+        self.advanced.set_program(program, job_flags(self.variant.label), self._option_name, loading)
+        if loading:
             task = FlagsTask(self.flag_source, program)
             task.signals.done.connect(self._on_flags_ready)
             self._flag_tasks.add(task)
             self._flags_pool.start(task)
         else:
-            self.flag_panel.set_flags(program, self.flag_source.flags(program))
+            self.advanced.set_flags(program, self.flag_source.flags(program))
+            self._apply_search()
 
     def _on_flags_ready(self, program: str, flags) -> None:
         self._flag_tasks = {t for t in self._flag_tasks if t.program != program}
-        if self.flag_panel is not None and program == self.flags_program:
-            self.flag_panel.set_flags(program, flags)
+        if self.advanced is not None and program == self.flags_program:
+            self.advanced.set_flags(program, flags)
             self._apply_search()
 
     def wait_flags(self) -> None:
@@ -821,30 +825,121 @@ class JobEditor(QWidget):
         self._flags_pool.waitForDone()
         QApplication.processEvents()
 
-    def _job_flags(self, program: str) -> tuple[dict[str, str], str]:
-        """Flags the job's own options put on the command line, from the note.txt of the job being
-        continued or cloned, else of the newest job of this type."""
-        candidates = [self.source_job] if self.source_job else []
-        if self.pipeline is not None and self.variant is not None:
-            own = self.variant.label
+    def _option_name(self, key: str) -> str:
+        """An option as the form names it ("Number of iterations")."""
+        o = self.options.get(key)
+        return (o.label.strip().rstrip(":").strip() or key) if o is not None else key
 
-            def same_type(label: str) -> bool:
-                # whatever RELION added to the label (relion.autopick.log is a relion.autopick job)
-                jt = job_type_for_label(label)
-                return label == own or (jt is not None and jt.label == own)
-            candidates += [n for n, pr in reversed(self.pipeline.processes.items())
-                           if n != self.source_job and same_type(pr.type_label)]
-        for job in candidates[:20]:
-            try:
-                note = (self.project_dir / job / "note.txt").read_text(errors="replace")
-                extra = JobStar.read(self.project_dir / job / "job.star").options.get(EXTRA_ARGS, "")
-            except (OSError, ValueError, KeyError):
-                continue
-            flags = command_flags(note, extra, program)
-            if flags:
-                which = "this job" if job == self.job else job.rstrip("/")
-                return flags, which
-        return {}, ""
+    # ------------------------------------------------------------------ several references (3D classification)
+    def _make_references(self) -> QLabel:
+        """The "Several…" button of "Reference map:", and the line under it that names the maps chosen."""
+        w = self.widgets[references.KEY]
+        btn = QToolButton()
+        btn.setText("Several…")
+        btn.setToolTip("Start from more than one reference map, one class each: cryo-savanna writes their list "
+                       f"to {references.FILE} in the job's directory, and this field names that file")
+        btn.clicked.connect(lambda: self.open_references())
+        w.layout_.addWidget(btn)
+        line = QLabel()
+        line.setWordWrap(True)
+        line.setTextFormat(Qt.RichText)
+        line.linkActivated.connect(self._on_refs_link)
+        line.hide()
+        self.refs_button, self.refs_line = btn, line
+        return line
+
+    def _refs_path(self) -> str:
+        """The list of references of the job in the form: in the directory it will get (or has)."""
+        return references.path_in(self.job_dir())
+
+    def _sync_references(self) -> None:
+        """Whether "Reference map:" names a list of references (that of a job cloned, overwritten, continued, or
+        of the last job of this type), and if so take its maps; a new job writes its own list, in its own
+        directory."""
+        if self.refs_line is None:
+            self.references = []
+            return
+        w = self.widgets[references.KEY]
+        if self.references and w.value() == self._refs_path():
+            maps = self.references  # still the list chosen (a preset, Defaults keep the inputs)
+        else:
+            maps = self.references = references.read(self.project_dir, w.value()) or []
+            if maps and self.mode != MODE_CONTINUE:
+                w.set_value(self._refs_path())
+        if maps and self.mode != MODE_CONTINUE:  # (also after a preset with its own number of classes)
+            self.widgets[references.NR_CLASSES].set_value(str(len(maps)))
+
+    def _locked_by_references(self, key: str) -> str:
+        """Why an option is set from the list of references ("": it is not)."""
+        if not self.references:
+            return ""
+        n = len(self.references)
+        if key == references.KEY:
+            return f"names the list of the {n} reference maps (Several…)"
+        if key == references.NR_CLASSES:
+            return f"one class for each of the {n} reference maps"
+        return ""
+
+    def _update_refs_line(self) -> None:
+        line = self.refs_line
+        if line is None:
+            return
+        row_shown = references.KEY in self.labels and not self.labels[references.KEY].isHidden()
+        if not self.references or not row_shown:
+            line.hide()
+            return
+        dim = self.palette().color(QPalette.PlaceholderText).name()
+        maps = "; ".join(f"{i}. <tt>{html.escape(m)}</tt>" for i, m in enumerate(self.references, start=1))
+        links = (" <a href='edit'>Change…</a> · <a href='single'>Use one map</a>"
+                 if self.refs_button is not None and self.refs_button.isEnabled() else "")
+        where = ("read from the file above" if self.mode == MODE_CONTINUE
+                 else "written to the file above when the job is added")
+        line.setText(f"<b>{len(self.references)} reference maps</b>, one class each: {maps}.{links}"
+                     f"<br><span style='color:{dim}'>{where}</span>")
+        line.show()
+
+    def _on_refs_link(self, href: str) -> None:
+        if href == "edit":
+            self.open_references()
+        elif href == "single":
+            self.set_references(self.references[:1])
+
+    def open_references(self, dialog_hook=None) -> bool:
+        """Choose the reference maps (ui/references_dialog.py). ``dialog_hook(dlg)``: instead of showing it
+        (tests), its answer the dialog's."""
+        from cryo_savanna.ui.references_dialog import ReferencesDialog
+        w = self.widgets.get(references.KEY)
+        if not isinstance(w, NodeWidget):
+            return False
+        current = list(self.references)
+        if not current and w.value().strip() not in ("", "None"):
+            current = [w.value().strip()]
+        nodes = [(w.combo.itemData(i), w.combo.itemText(i)) for i in range(w.combo.count())]
+        opt = self.options[references.KEY]
+        dlg = ReferencesDialog(self, current, nodes, str(w._start_dir()), self.relative,
+                               qt_file_filter(opt.pattern) if opt.pattern else "")
+        accepted = dialog_hook(dlg) if dialog_hook is not None else dlg.exec() == QDialog.Accepted
+        if accepted:
+            self.set_references(dlg.maps())
+        return bool(accepted)
+
+    def set_references(self, maps: list[str]) -> None:
+        """Two maps or more: the job starts from them, one class each; one: that map is the reference."""
+        maps = [m for m in dict.fromkeys(m.strip() for m in maps) if m]
+        w = self.widgets[references.KEY]
+        if len(maps) >= 2:
+            self.references = maps  # first: the field's change then keeps them
+            w.set_value(self._refs_path())
+            self.widgets[references.NR_CLASSES].set_value(str(len(maps)))
+        else:
+            self.references = []
+            w.set_value(maps[0] if maps else "")
+        self._update_states()
+
+    def reference_maps(self) -> list[str]:
+        """The maps of the job's list of references, to write when it is added ([]: one map, as RELION has it)."""
+        w = self.widgets.get(references.KEY)
+        return list(self.references) if self.references and w is not None and w.value() == self._refs_path() else []
 
     def _field(self, key: str) -> OptionWidget:
         w = make_widget(self.options[key], self)
@@ -886,7 +981,10 @@ class JobEditor(QWidget):
         self._loading = True
         for k, w in self.widgets.items():
             w.set_value(values.get(k, self.options[k].default))
+        self._sync_references()
         self._loading = False
+        if self.advanced is not None:
+            self.advanced.set_text(self.widgets[EXTRA_ARGS].value())
         self._update_states()
         self._update_flags_program()
 
@@ -899,7 +997,11 @@ class JobEditor(QWidget):
         its directory (outputs go there): the job being continued or overwritten, else the one the next new
         job will get."""
         v = self._variant
-        vals = values if values is not None else self.values()
+        vals = dict(values if values is not None else self.values())
+        if self.references and vals.get(references.KEY) == self._refs_path():
+            if job_dir:
+                vals[references.KEY] = references.path_in(job_dir)  # (Pipeliner.add_job checks it again)
+            vals[references.NR_CLASSES] = str(len(self.references))  # one class each, also in Variations…
         if self.is_cli:
             assert isinstance(v, (CliVariant, PytomVariant))  # the forms of their own (is_cli)
             return v.make_jobstar(vals, self.mode == MODE_CONTINUE, job_dir or self.job_dir(), self.pipeline)
@@ -933,6 +1035,10 @@ class JobEditor(QWidget):
     def _on_changed(self, key: str) -> None:
         if getattr(self, "_loading", False):
             return
+        if key == EXTRA_ARGS and self.advanced is not None:  # first: the counts of the search include its rows
+            self.advanced.set_text(self.widgets[key].value())
+        if key == references.KEY and not self.references:  # a list of references typed or browsed
+            self._sync_references()
         self._update_states()
         self._update_flags_program()
         if self.only_changed.isChecked():
@@ -1054,24 +1160,35 @@ class JobEditor(QWidget):
         pal = self.palette()
         dim = pal.color(QPalette.PlaceholderText).name()
         accent = pal.color(QPalette.Highlight).name()
+        editable_now: dict[str, bool] = {}
         for _, row, _parts in self.rows:
             active = self.variant.group_active(row.group, vals)
             for k in row.keys:
                 if k not in self.widgets:
                     continue
-                editable = active and self._editable(k, vals) and not self.readonly
-                self.widgets[k].setEnabled(editable)
+                editable = editable_now[k] = active and self._editable(k, vals) and not self.readonly
+                locked = self._locked_by_references(k)  # set from the list of references
+                w = self.widgets[k]
+                if k == references.KEY and isinstance(w, NodeWidget):  # its Several… button stays usable
+                    w.setEnabled(editable)
+                    w.combo.setEnabled(not locked)
+                    w.browse.setEnabled(not locked)
+                else:
+                    w.setEnabled(editable and not locked)
                 changed = vals[k] != self.options[k].default
                 self.markers[k].setText(f"<span style='color:{accent}'>●</span>" if changed else "")
-                self.markers[k].setToolTip(f"changed from the default ({self.options[k].default or 'empty'})"
-                                           if changed else "")
+                self.markers[k].setToolTip((f"changed from the default ({self.options[k].default or 'empty'})"
+                                            if changed else "") + (f"\n{locked}" if locked else ""))
                 lab = self.labels[k]
                 f = lab.font()
                 f.setBold(changed)
                 lab.setFont(f)
                 lab.setStyleSheet("" if active else f"color:{dim}")
-        if self.flag_panel is not None:
-            self.flag_panel.setEnabled(self.widgets[EXTRA_ARGS].isEnabled())
+        if self.advanced is not None:
+            self.advanced.set_editable(editable_now.get(EXTRA_ARGS, False))
+        if self.refs_button is not None:
+            self.refs_button.setEnabled(editable_now.get(references.KEY, False))
+        self._update_refs_line()
         if self.selector is not None:
             self.selector.setEnabled(not self.readonly and interactive_kind(self.variant.label, vals) is not None)
         if self.submit_preview_link is not None:
@@ -1100,12 +1217,14 @@ class JobEditor(QWidget):
             for k in row.keys:
                 if k not in self.widgets or not is_input(self.options[k]):
                     continue
-                job = _input_job(vals[k], p, dirs, project)
-                if job is None or job == self.job:
-                    continue
                 label = self.options[k].label.strip().rstrip(":").strip() or k
-                if label not in out.setdefault(job, []):
-                    out[job].append(label)
+                given = self.references if k == references.KEY and self.references else [vals[k]]
+                for value in given:  # several reference maps: the job of each
+                    job = _input_job(value, p, dirs, project)
+                    if job is None or job == self.job:
+                        continue
+                    if label not in out.setdefault(job, []):
+                        out[job].append(label)
         return out
 
     def _update_inputs(self, vals: dict[str, str] | None = None) -> None:
@@ -1271,17 +1390,18 @@ class JobEditor(QWidget):
         only_changed = self.only_changed.isChecked()
         vals = self.values() if only_changed else {}
         counts = [0] * self.tabs.count()
+        flags_shown = 0  # the flag rows of the Advanced parameters tab that match
+        if self.advanced is not None:
+            flags_shown = self.advanced.apply_filter(text, only_changed)
+            counts[self.advanced_tab] += flags_shown
         for ti, row, parts in self.rows:
             keys = [k for k in row.keys if k in self.options]
             hay = " ".join([row.label] + [f"{k} {self.options[k].label} {self.options[k].help}" for k in keys]).lower()
-            flags_match = keys == [EXTRA_ARGS] and self.flag_panel is not None and self.flag_panel.matches(text)
+            flags_match = keys == [EXTRA_ARGS] and flags_shown > 0 and bool(text)  # the box the flags go in
             show = (not text or text in hay or flags_match) and \
                 (not only_changed or any(vals[k] != self.options[k].default for k in keys))
             for w in parts:
                 w.setVisible(show)
-            if keys == [EXTRA_ARGS] and self.flag_panel is not None:
-                self.flag_panel.setVisible(show and self.show_flags)
-                self.flag_panel.set_search(text if flags_match and text not in hay else "")
             counts[ti] += show
         filtering = bool(text) or only_changed
         for ti in range(self.tabs.count()):
@@ -1290,6 +1410,7 @@ class JobEditor(QWidget):
             self.tabs.setTabEnabled(ti, counts[ti] > 0 or not filtering)
         self._update_box_warnings()  # a row hidden by the search hides its warning too
         self._update_compute_hints()
+        self._update_refs_line()
         if filtering and counts and counts[self.tabs.currentIndex()] == 0:
             first = next((i for i, c in enumerate(counts) if c), None)
             if first is not None:
@@ -1309,6 +1430,10 @@ class JobEditor(QWidget):
             extra.append(f"default from {env}" + (" or Preferences" if "RELION_SCRATCH_DIR" in env else ""))
         if key == SCRATCH_KEY and self.own_scratch:
             extra.append("each job gets its own savanna_NNN subdirectory in it")
+        if self.variant is not None and not self.is_cli:
+            flags = option_flags(self.variant.label).get(key)
+            if flags:
+                extra.append("command line: " + " ".join(flags))
         name = "" if o.label.strip() == key else html.escape(key) + " · "
         box = ""
         if self.variant is not None and key in box_sizes.box_options(self.variant.key):
@@ -1316,6 +1441,12 @@ class JobEditor(QWidget):
                    "than others (128 px almost twice as fast as 122 px): cryo-savanna warns when the size is not "
                    "on " f"<a href='{box_sizes.SOURCE}'>{box_sizes.SOURCE_NAME}</a> (EMAN wiki, “Particle Box "
                    "Size”), gives the closest good ones, and asks before the job is run or scheduled.</p>")
+        if key == references.KEY and self.refs_button is not None:
+            box += ("<p>cryo-savanna: <b>Several…</b> chooses more than one reference map. Each starts one class, "
+                    "in the order of the list, and Number of classes is set to how many there are. cryo-savanna "
+                    f"writes them to <tt>{references.FILE}</tt> in the job's directory when the job is added, and "
+                    "this field names that file (relion_refine reads a STAR file of references as one class per "
+                    "map; no other option is needed).</p>")
         if self.compute_hints and key in HINT_KEYS + (advice_rules.DEDICATED,):
             box += ("<p>cryo-savanna suggests MPI processes, threads, pooled particles and GPUs for what the job "
                     "runs on: this machine (its CPUs, RAM and the GPUs nvidia-smi lists), or, when the job is "
@@ -1333,15 +1464,11 @@ class JobEditor(QWidget):
             bits.append("on/off switch")
         else:
             bits.append(f"default {flag.default}" if flag.default is not None else "no default")
-        job_value = self.flag_panel.job_flags.get(flag.name) if self.flag_panel is not None else None
-        note = ""
-        if job_value is not None:
-            note = (f"<p style='color:gray'>The job's options set this ({html.escape(job_value or 'on')} in "
-                    f"{html.escape(self.flag_panel.job_flags_from if self.flag_panel else '')}). A value here overrides it: RELION uses the "
-                    "last one given.</p>")
         self.help.setHtml(f"<b>{html.escape(flag.name)}</b> <span style='color:gray'>"
                           f"{html.escape(' · '.join(b for b in bits if b))}</span>"
-                          f"<p style='white-space:pre-wrap'>{html.escape(flag.help)}</p>{note}")
+                          f"<p style='white-space:pre-wrap'>{html.escape(flag.help)}</p>"
+                          "<p style='color:gray'>Changed from its default, it is added to the additional arguments "
+                          "at the top of this tab.</p>")
 
     # ------------------------------------------------------------------ submit
     def relative(self, path: str) -> str:

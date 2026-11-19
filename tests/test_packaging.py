@@ -58,9 +58,10 @@ def test_licence_notices_are_in_place():
     assert "transformations.h" in notice and "Jasenko Zivanov" in notice
     # the ported tilt-image exclusion keeps the BSD notice itself, also when copied on its own
     assert "Redistribution and use in source and binary forms" in (ROOT / "cryo_savanna/project/selection.py").read_text()
-    defs = json.loads((ROOT / "cryo_savanna" / "jobdefs" / "relion-5.1.1.json").read_text())
-    assert "Scheres" in defs["notice"] and "NOTICE.md" in defs["notice"]
-    assert "This complete copyright notice must be included" in defs["notice"]  # RELION's notice in full
+    for name in ("relion-5.1.1.json", "command-flags-5.1.1.json"):
+        defs = json.loads((ROOT / "cryo_savanna" / "jobdefs" / name).read_text())
+        assert "Scheres" in defs["notice"] and "NOTICE.md" in defs["notice"], name
+        assert "This complete copyright notice must be included" in defs["notice"], name  # RELION's notice in full
 
 
 def test_help_texts_carry_no_details_of_the_machine_they_came_from():

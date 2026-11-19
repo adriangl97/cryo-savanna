@@ -1,35 +1,32 @@
 # Copyright (C) 2026 Adrián González-López
 # SPDX-License-Identifier: GPL-2.0-or-later
-"""Every flag of the program behind a job's "Additional arguments:" box, to tick and fill in.
+"""The job editor's "Advanced parameters" tab: the "Additional arguments:" box, then every flag of the program
+that gets it, as rows like those of the other tabs, under the sections of the program's --help.
 
-The box stays the one source of truth: ticking a flag or typing a value rewrites the box (leaving
-whatever else is typed there alone), and typing in the box ticks the flags it names. Flags that the
-job's own options already put on the command line show that value; RELION uses the last value given,
-so setting one here overrides it.
+The box stays the one source of truth: changing a flag's row rewrites the box (leaving whatever else is typed
+there alone), and typing in the box fills in the rows of the flags it names. A flag is in bold (and marked)
+when the box gives it. Flags the job writes itself are left out (jobdefs/flags.py ``job_flags``): those of
+its options, set on the other tabs, and those it always writes. Typed in the box anyway, they override the
+job's value (RELION uses the last one given), which the tab says.
 """
 
 from __future__ import annotations
 
 import html
+import re
+from collections.abc import Callable
+from dataclasses import dataclass
 
-from qtpy.QtCore import QObject, QRunnable, Qt, Signal
-from qtpy.QtGui import QBrush, QFont, QPalette
-from qtpy.QtWidgets import (
-    QCheckBox,
-    QHBoxLayout,
-    QHeaderView,
-    QLabel,
-    QLineEdit,
-    QTreeWidget,
-    QTreeWidgetItem,
-    QVBoxLayout,
-    QWidget,
-)
+from qtpy.QtCore import QEvent, QObject, QRunnable, Qt, Signal
+from qtpy.QtGui import QFont, QPalette
+from qtpy.QtWidgets import QFrame, QGridLayout, QLabel, QWidget
 
-from cryo_savanna.jobdefs.flags import Flag, FlagSource, ProgramFlags, parse_args, set_arg
+from cryo_savanna.jobdefs.cli_tools import is_input
+from cryo_savanna.jobdefs.flags import Flag, FlagSource, JobFlag, ProgramFlags, parse_args, set_arg
+from cryo_savanna.jobdefs.model import OptionDef
 
-COL_FLAG, COL_VALUE, COL_DEFAULT, COL_HELP = range(4)
-FLAG_ROLE = Qt.UserRole + 1
+NONE_DEFAULTS = ("None", "NULL")  # shown as an empty field (with the default as its placeholder)
+FIRST_FLAG_ROW = 3  # the box, the header line, the notice; then the flags
 
 
 class _FlagsSignals(QObject):
@@ -52,163 +49,217 @@ class FlagsTask(QRunnable):
         self.signals.done.emit(self.program, result)
 
 
-class FlagPanel(QWidget):
+_FILE_WORDS = re.compile(r"\b(file|files|mask|map|star|image|model|stack|directory)\b")
+
+
+def is_file(flag: Flag) -> bool:
+    """Whether a flag names a file (a field with a Browse button): an input, or one without a value by default
+    whose help names a file, a mask, a map..."""
+    if flag.is_switch:
+        return False
+    return is_input(flag) or ((flag.default or "") in ("", *NONE_DEFAULTS)
+                              and bool(_FILE_WORDS.search(flag.help.lower())))
+
+
+def flag_option(flag: Flag) -> OptionDef:
+    """A flag as an option of the form: a switch as Yes/No, a file as a file field, else a text field, with
+    the program's default."""
+    if flag.is_switch:
+        return OptionDef(flag.name, "boolean", flag.name, "No", flag.help)
+    default = "" if flag.default is None or flag.default in NONE_DEFAULTS else flag.default
+    return OptionDef(flag.name, "filename" if is_file(flag) else "any", flag.name, default, flag.help)
+
+
+class _Focus(QObject):
+    """Tells the panel which flag the mouse or the focus is on (its help is shown below the tabs)."""
+
+    def __init__(self, panel: "AdvancedPanel", flag: Flag):
+        super().__init__(panel)
+        self.panel, self.flag = panel, flag
+
+    def eventFilter(self, obj, ev):
+        if ev.type() in (QEvent.FocusIn, QEvent.Enter):
+            self.panel.flag_focused.emit(self.flag)
+        return False
+
+
+@dataclass
+class Section:
+    name: str
+    head: QLabel
+    line: QFrame
+    names: list[str]
+
+    def set_visible(self, on: bool) -> None:
+        self.head.setVisible(on)
+        self.line.setVisible(on)
+
+
+@dataclass
+class FlagRow:
+    flag: Flag
+    option: OptionDef
+    label: QLabel
+    widget: QWidget  # an OptionWidget of the job editor
+    marker: QLabel
+
+    def set_visible(self, on: bool) -> None:
+        for w in (self.label, self.widget, self.marker):
+            w.setVisible(on)
+
+
+class AdvancedPanel(QWidget):
     edited = Signal(str)  # the new additional-arguments text
     flag_focused = Signal(object)  # Flag
 
-    def __init__(self, parent=None):
+    def __init__(self, make_field: Callable[[OptionDef], QWidget], parent=None):
+        """``make_field``: the job editor's widget for an option (job_editor.make_widget)."""
         super().__init__(parent)
+        self.make_field = make_field
         self.program = ""
         self.flags: ProgramFlags | None = None
-        self.job_flags: dict[str, str] = {}
-        self.job_flags_from = ""
+        self.set_by_job: dict[str, JobFlag] = {}  # what the job writes itself (left out)
+        self.option_label: Callable[[str], str] = lambda k: k
         self.text = ""
-        self.items: dict[str, QTreeWidgetItem] = {}
+        self.rows: dict[str, FlagRow] = {}
+        self.sections: list[Section] = []
+        self._built: list[QWidget] = []  # what a rebuild replaces
+        self._stretch_row = FIRST_FLAG_ROW
         self._syncing = False
-        self._search = ""
+        self._editable = True
 
+        self.grid = QGridLayout(self)
+        self.grid.setColumnStretch(1, 1)
+        self.grid.setVerticalSpacing(4)
         self.header = QLabel()
         self.header.setWordWrap(True)
         self.header.setTextFormat(Qt.RichText)
         self.notice = QLabel()
         self.notice.setWordWrap(True)
+        self.notice.setTextFormat(Qt.RichText)
         self.notice.setVisible(False)
-        self.filter = QLineEdit()
-        self.filter.setPlaceholderText("Filter flags")
-        self.filter.setClearButtonEnabled(True)
-        self.filter.textChanged.connect(lambda _: self._apply_filter())
-        self.only_added = QCheckBox("Only added")
-        self.only_added.toggled.connect(lambda _: self._apply_filter())
+        self.grid.addWidget(self.header, 1, 0, 1, 3)
+        self.grid.addWidget(self.notice, 2, 0, 1, 3)
+        self.grid.setRowStretch(self._stretch_row, 1)
 
-        self.tree = QTreeWidget()
-        self.tree.setColumnCount(4)
-        self.tree.setHeaderLabels(["Flag", "Value", "Default", "Description"])
-        self.tree.setRootIsDecorated(False)
-        self.tree.setUniformRowHeights(True)
-        self.tree.setAlternatingRowColors(True)
-        self.tree.setEditTriggers(QTreeWidget.NoEditTriggers)  # only the Value column, see _on_clicked
-        self.tree.setMinimumHeight(320)
-        hdr = self.tree.header()
-        hdr.setStretchLastSection(True)
-        hdr.setSectionResizeMode(COL_FLAG, QHeaderView.ResizeToContents)
-        hdr.setSectionResizeMode(COL_VALUE, QHeaderView.Interactive)
-        hdr.setSectionResizeMode(COL_DEFAULT, QHeaderView.Interactive)
-        self.tree.setColumnWidth(COL_VALUE, 130)
-        self.tree.setColumnWidth(COL_DEFAULT, 120)
-        self.tree.itemChanged.connect(self._on_item_changed)
-        self.tree.itemClicked.connect(self._on_clicked)
-        self.tree.itemDoubleClicked.connect(self._on_clicked)
-        self.tree.currentItemChanged.connect(self._on_current)
-
-        bar = QHBoxLayout()
-        bar.addWidget(self.filter, 1)
-        bar.addWidget(self.only_added)
-        lay = QVBoxLayout(self)
-        lay.setContentsMargins(0, 4, 0, 0)
-        lay.addWidget(self.header)
-        lay.addWidget(self.notice)
-        lay.addLayout(bar)
-        lay.addWidget(self.tree, 1)
+    def place_box(self, label: QLabel, field: QWidget, marker: QLabel) -> None:
+        """The editor's "Additional arguments:" row, at the top."""
+        self.grid.addWidget(label, 0, 0)
+        self.grid.addWidget(field, 0, 1)
+        self.grid.addWidget(marker, 0, 2)
 
     # ------------------------------------------------------------------ content
-    def set_loading(self, program: str) -> None:
+    def set_program(self, program: str, set_by_job: dict[str, JobFlag], option_label: Callable[[str], str],
+                    loading: bool = False) -> None:
+        """The program that gets the arguments now, and the flags the job writes itself. ``loading``: its
+        --help is being read (set_flags follows)."""
         self.program, self.flags = program, None
+        self.set_by_job, self.option_label = set_by_job, option_label
         self._rebuild()
-        self.header.setText(f"Reading the flags of <b>{html.escape(program)}</b> …")
+        if loading:
+            self.header.setText(f"Reading the flags of <b>{html.escape(program)}</b> …")
 
     def set_flags(self, program: str, flags: ProgramFlags | None) -> None:
         self.program, self.flags = program, flags
         self._rebuild()
 
-    def set_job_flags(self, flags: dict[str, str], source_job: str) -> None:
-        """Flags (-> value) that the job's own options put on the command line, seen in ``source_job``."""
-        self.job_flags, self.job_flags_from = flags, source_job
-        self._rebuild()
-
-    def set_text(self, text: str) -> None:
-        """The additional-arguments box changed: tick and fill in the flags it names."""
-        self.text = text
-        given = parse_args(text)
-        self._syncing = True
-        for name, item in self.items.items():
-            flag: Flag = item.data(COL_FLAG, FLAG_ROLE)
-            on = name in given
-            item.setCheckState(COL_FLAG, Qt.Checked if on else Qt.Unchecked)
-            if not flag.is_switch:
-                item.setText(COL_VALUE, (given[name][0] if given[name] else "") if on else "")
-            f = item.font(COL_FLAG)
-            f.setBold(on)
-            item.setFont(COL_FLAG, f)
-        self._syncing = False
-        unknown = [n for n in given if n not in self.items]
-        self.notice.setVisible(bool(unknown) and self.flags is not None)
-        if unknown and self.flags is not None:
-            self.notice.setText(f"<span style='color:#c0392b'>Not a flag of {html.escape(self.program)}: "
-                                f"{html.escape(', '.join(unknown))}</span>")
-        self._apply_filter()
-
-    def set_search(self, text: str) -> None:
-        """The editor's "Find option" text, applied on top of the panel's own filter."""
-        self._search = text.strip().lower()
-        self._apply_filter()
-
-    def matches(self, text: str) -> bool:
-        text = text.strip().lower()
-        return bool(text) and any(text in f"{f.name} {f.help}".lower() for f in (self.flags.flags if self.flags else []))
+    def hidden(self) -> list[str]:
+        """The program's flags left out, as the job writes them itself (in the program's order)."""
+        return [f.name for f in (self.flags.flags if self.flags else []) if f.name in self.set_by_job]
 
     def _rebuild(self) -> None:
         self._syncing = True
-        self.tree.clear()
-        self.items.clear()
+        for w in self._built:
+            w.setParent(None)
+            w.deleteLater()
+        self._built.clear()
+        self.rows.clear()
+        self.sections.clear()
+        self.grid.setRowStretch(self._stretch_row, 0)
+        r = FIRST_FLAG_ROW
         if self.flags is None:
             self.header.setText(self._no_flags_text())
-            self._syncing = False
-            return
-        dim = QBrush(self.palette().color(QPalette.PlaceholderText))
-        section_item = None
-        for f in self.flags.flags:
-            if section_item is None or section_item.text(COL_FLAG) != (f.section or "Options"):
-                section_item = QTreeWidgetItem([f.section or "Options"])
-                font = QFont(self.tree.font())
-                font.setBold(True)
-                section_item.setFont(COL_FLAG, font)
-                section_item.setFlags(Qt.ItemIsEnabled)
-                self.tree.addTopLevelItem(section_item)
-                section_item.setFirstColumnSpanned(True)
-            item = QTreeWidgetItem([f.name, "", "", f.help])
-            item.setData(COL_FLAG, FLAG_ROLE, f)
-            flags = Qt.ItemIsEnabled | Qt.ItemIsSelectable | Qt.ItemIsUserCheckable
-            if not f.is_switch:
-                flags |= Qt.ItemIsEditable
-            item.setFlags(flags)
-            item.setCheckState(COL_FLAG, Qt.Unchecked)
-            if f.name in self.job_flags:
-                v = self.job_flags[f.name]
-                item.setText(COL_DEFAULT, f"job: {v}" if v else "job: on")
-                item.setToolTip(COL_DEFAULT, f"Set by the job's options: {v or 'on'} (seen in {self.job_flags_from}). "
-                                             "A value here overrides it: RELION uses the last one given.")
-                item.setForeground(COL_DEFAULT, QBrush(self.palette().color(QPalette.Highlight)))
-            else:
-                item.setText(COL_DEFAULT, "off" if f.is_switch else ("required" if f.default is None
-                                                                      else f.default or "—"))
-                item.setForeground(COL_DEFAULT, dim)
-            if f.is_switch:
-                item.setText(COL_VALUE, "")
-                item.setToolTip(COL_VALUE, "an on/off switch: tick it to add it")
-            else:
-                item.setToolTip(COL_VALUE, "click to type a value")
-            item.setToolTip(COL_FLAG, f.help)
-            item.setToolTip(COL_HELP, f.help)
-            self.tree.addTopLevelItem(item)
-            self.items[f.name] = item
-        n = len(self.flags.flags)
-        self.header.setText(
-            f"<b>{n}</b> flags of <b>{html.escape(self.program)}</b>. Tick one to add it to the box above, "
-            f"click its value to change it. <span style='color:gray'>From {html.escape(self.flags.source)}"
-            + (f"; 'job:' values come from {html.escape(self.job_flags_from)}" if self.job_flags else "")
-            + ".</span>")
+        else:
+            dim = self.palette().color(QPalette.PlaceholderText).name()
+            for f in self.flags.flags:
+                if f.name in self.set_by_job:
+                    continue
+                section = f.section or "Options"
+                if not self.sections or self.sections[-1].name != section:
+                    head = QLabel(section)
+                    head.setTextFormat(Qt.PlainText)
+                    font = QFont(self.font())
+                    font.setBold(True)
+                    head.setFont(font)
+                    head.setContentsMargins(0, 8 if self.sections else 2, 0, 0)
+                    line = QFrame()
+                    line.setFrameShape(QFrame.HLine)
+                    line.setFrameShadow(QFrame.Sunken)
+                    self.grid.addWidget(head, r, 0, 1, 3)
+                    self.grid.addWidget(line, r + 1, 0, 1, 3)
+                    self._built += [head, line]
+                    self.sections.append(Section(section, head, line, []))
+                    r += 2
+                opt = flag_option(f)
+                label = QLabel(f.name)
+                label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+                label.setToolTip(self._tooltip(f, opt))
+                w = self.make_field(opt)
+                w.setToolTip(self._tooltip(f, opt))
+                edit = getattr(w, "edit", None)
+                if edit is not None and not opt.default and f.default:
+                    edit.setPlaceholderText(f.default)  # "None": what the program takes without the flag
+                marker = QLabel()
+                marker.setFixedWidth(12)
+                w.changed.connect(lambda name=f.name: self._on_changed(name))
+                focus = _Focus(self, f)
+                for target in {w, w.focus_target(), label}:
+                    target.installEventFilter(focus)
+                self.grid.addWidget(label, r, 0)
+                self.grid.addWidget(w, r, 1)
+                self.grid.addWidget(marker, r, 2)
+                self._built += [label, w, marker]
+                self.rows[f.name] = FlagRow(f, opt, label, w, marker)
+                self.sections[-1].names.append(f.name)
+                r += 1
+            hidden = self.hidden()
+            left_out = ""
+            if hidden:
+                left_out = (f" Not listed: the <span style='text-decoration:underline dotted'>{len(hidden)} flags "
+                            "the job writes itself</span> (point here to see them).")
+            self.header.setText(
+                f"<b>{len(self.rows)}</b> flags of <b>{html.escape(self.program)}</b>, by the sections of its "
+                "--help. A changed one is added to the box above, and is in bold."
+                f"<span style='color:{dim}'>{left_out} From {html.escape(self.flags.source)}.</span>")
+            self.header.setToolTip(self._hidden_tooltip(hidden))
+        self._stretch_row = r
+        self.grid.setRowStretch(r, 1)
         self._syncing = False
+        self.set_editable(self._editable)
         self.set_text(self.text)
+
+    def _tooltip(self, f: Flag, opt: OptionDef) -> str:
+        default = "off" if f.is_switch else ("none (required)" if f.default is None else (f.default or "—"))
+        return f"{f.name}   (default: {default})\n\n{f.help}"
+
+    def _hidden_tooltip(self, hidden: list[str]) -> str:
+        if not hidden:
+            return ""
+        by_options, always = [], []
+        for name in hidden:
+            jf = self.set_by_job[name]
+            if jf.options:
+                labels = dict.fromkeys(self.option_label(k) for k in jf.options)
+                by_options.append(f"{name}: {', '.join(labels)}")
+            else:
+                always.append(name)
+        out = ["Flags the job writes itself, not listed here (typed in the box, a value overrides the job's: "
+               "RELION uses the last one given)."]
+        if by_options:
+            out += ["", "Set by the options on the other tabs:"] + ["  " + t for t in by_options]
+        if always:
+            out += ["", "Always written by the job: " + " ".join(always)]
+        return "\n".join(out)
 
     def _no_flags_text(self) -> str:
         if not self.program:
@@ -221,58 +272,88 @@ class FlagPanel(QWidget):
             return f"This job passes the additional arguments to <b>{p}</b>."
         return f"The flags of <b>{p}</b> could not be read (is RELION loaded?)."
 
-    # ------------------------------------------------------------------ editing
-    def _on_clicked(self, item: QTreeWidgetItem, column: int) -> None:
-        if column == COL_VALUE and item.flags() & Qt.ItemIsEditable and self.isEnabled():
-            self.tree.editItem(item, COL_VALUE)
+    # ------------------------------------------------------------------ the box <-> the rows
+    def set_text(self, text: str) -> None:
+        """The additional-arguments box changed: fill in the rows of the flags it names."""
+        self.text = text
+        given = parse_args(text)
+        accent = self.palette().color(QPalette.Highlight).name()
+        self._syncing = True
+        for name, row in self.rows.items():
+            on = name in given
+            w = row.widget
+            if not w.focus_target().hasFocus():  # not under the cursor of the one being typed in
+                if row.flag.is_switch:
+                    w.set_value("Yes" if on else "No")
+                else:
+                    w.set_value((given[name][0] if given[name] else "") if on else row.option.default)
+            font = row.label.font()
+            font.setBold(on)
+            row.label.setFont(font)
+            row.marker.setText(f"<span style='color:{accent}'>●</span>" if on else "")
+            row.marker.setToolTip("in the additional arguments" if on else "")
+        self._syncing = False
+        notes = []
+        if self.flags is not None:
+            unknown = [n for n in given if n not in self.rows and n not in self.set_by_job]
+            if unknown:
+                notes.append(f"<span style='color:#c0392b'>Not a flag of {html.escape(self.program)}: "
+                             f"{html.escape(', '.join(unknown))}</span>")
+            override = [n for n in given if n in self.set_by_job and self.flags.get(n) is not None]
+            if override:
+                notes.append("<span style='color:#d9861c'>Also written by the job (from its options or always); "
+                             f"the value here wins, as RELION uses the last one given: {html.escape(', '.join(override))}"
+                             "</span>")
+        self.notice.setText("<br>".join(notes))
+        self.notice.setVisible(bool(notes))
 
-    def _on_item_changed(self, item: QTreeWidgetItem, column: int) -> None:
+    def _on_changed(self, name: str) -> None:
         if self._syncing:
             return
-        flag: Flag | None = item.data(COL_FLAG, FLAG_ROLE)
-        if flag is None:
-            return
-        if column == COL_FLAG:
-            on = item.checkState(COL_FLAG) == Qt.Checked
-            value = self._value_for(flag, item.text(COL_VALUE)) if on else None
-        elif column == COL_VALUE:
-            typed = item.text(COL_VALUE).strip()
-            if not typed and flag.name not in parse_args(self.text):
-                return
-            value = self._value_for(flag, typed) if typed else None  # typing adds the flag, clearing removes it
+        row = self.rows[name]
+        f = row.flag
+        if f.is_switch:
+            value = "" if row.widget.value() == "Yes" else None
         else:
-            return
-        self.text = set_arg(self.text, flag.name, value, switch=flag.is_switch)
-        self.edited.emit(self.text)
+            typed = row.widget.value().strip()
+            value = typed if typed and typed != row.option.default else None  # the default: not passed
+        text = set_arg(self.text, name, value, switch=f.is_switch)
+        if text != self.text:
+            self.text = text
+            self.edited.emit(text)
 
-    def _value_for(self, flag: Flag, typed: str) -> str:
-        if flag.is_switch:
-            return ""
-        return typed or self.job_flags.get(flag.name) or flag.default or ""
+    def set_editable(self, on: bool) -> None:
+        """Like the box (continue mode, a read-only project): the flag rows can be changed or not."""
+        self._editable = on
+        for row in self.rows.values():
+            row.widget.setEnabled(on)
 
-    def _on_current(self, item: QTreeWidgetItem | None, _prev) -> None:
-        flag = item.data(COL_FLAG, FLAG_ROLE) if item is not None else None
-        if flag is not None:
-            self.flag_focused.emit(flag)
+    # ------------------------------------------------------------------ search
+    def apply_filter(self, text: str, only_changed: bool) -> int:
+        """Show the flags that match the editor's "Find option" text (and are in the box, with "Only
+        changed"); the number shown."""
+        given = parse_args(self.text) if only_changed else {}
+        shown = 0
+        for sec in self.sections:
+            any_shown = False
+            for name in sec.names:
+                row = self.rows[name]
+                show = (not text or text in self._hay(row.flag)) and (not only_changed or name in given)
+                row.set_visible(show)
+                any_shown |= show
+                shown += show
+            sec.set_visible(any_shown)
+        return shown
 
-    def _apply_filter(self) -> None:
-        own = self.filter.text().strip().lower()
-        only_added = self.only_added.isChecked()
-        section_visible: dict[int, bool] = {}
-        current_section = -1
-        for i in range(self.tree.topLevelItemCount()):
-            item = self.tree.topLevelItem(i)
-            flag: Flag | None = item.data(COL_FLAG, FLAG_ROLE)
-            if flag is None:
-                current_section = i
-                section_visible[i] = False
-                continue
-            hay = f"{flag.name} {flag.help} {flag.section}".lower()
-            show = all(t in hay for t in (own, self._search) if t)
-            if only_added:
-                show = show and item.checkState(COL_FLAG) == Qt.Checked
-            item.setHidden(not show)
-            if show:
-                section_visible[current_section] = True
-        for i, visible in section_visible.items():
-            self.tree.topLevelItem(i).setHidden(not visible)
+    @staticmethod
+    def _hay(f: Flag) -> str:
+        return f"{f.name} {f.help} {f.section}".lower()
+
+    def matches(self, text: str) -> bool:
+        """Whether a flag listed here matches the "Find option" text."""
+        return bool(text) and any(text in self._hay(r.flag) for r in self.rows.values())
+
+    def update_pipeline(self, fill: Callable[[QWidget], None]) -> None:
+        """Refresh the lists of the input fields (``fill(widget)``)."""
+        for row in self.rows.values():
+            fill(row.widget)

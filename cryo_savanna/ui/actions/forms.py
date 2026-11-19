@@ -18,7 +18,7 @@ from cryo_savanna.jobdefs.model import JobVariant
 from cryo_savanna.jobdefs.pytom_jobs import TITLES as PYTOM_TITLES
 from cryo_savanna.jobdefs.pytom_jobs import (EXTRACT as PYTOM_EXTRACT, MATCH as PYTOM_MATCH, PytomVariant,
                                              last_settings, quoted_values)
-from cryo_savanna.project import autocontinue
+from cryo_savanna.project import autocontinue, references
 from cryo_savanna.project.jobstar import JobStar, read_last_used
 from cryo_savanna.project.ops import OpsError, PipelineOps
 from cryo_savanna.project.pipeline import Pipeline
@@ -211,11 +211,12 @@ class FormActions(_Base):
 
         scratch: list[str | None] = [None]  # the job's own scratch directory, once given
         own_scratch = self.editor.own_scratch
+        refs = self.editor.reference_maps()  # several reference maps: their list goes in the job's directory
 
         def overwrite_and_run():
             if own_scratch:
                 scratch[0] = self._own_scratch(js, p)
-            res = pl.overwrite_job(job, js, alias or None)
+            res = pl.overwrite_job(job, js, alias or None, refs)
             rec = None if schedule_only else pl.run([res.job])
             return res, rec
 
@@ -316,11 +317,12 @@ class FormActions(_Base):
 
         scratch: list[str | None] = [None]  # the job's own scratch directory, once given
         own_scratch = self.editor.own_scratch
+        refs = self.editor.reference_maps()  # several reference maps: their list goes in the job's directory
 
         def add_and_run():
             if own_scratch:
                 scratch[0] = self._own_scratch(js, pipeline)
-            res = pl.add_job(js, alias or None)
+            res = pl.add_job(js, alias or None, refs)
             if cli is not None and res.job != predicted:  # outputs must go to its own directory
                 cli.make_jobstar(values, False, res.job, pipeline).write(project / res.job / "job.star")
             rec = None if schedule_only else pl.run([res.job])
@@ -364,6 +366,7 @@ class FormActions(_Base):
         cli = variant if isinstance(variant, CliVariant) else None  # its outputs go to the job's directory
         pipeline = self.editor.pipeline
         own_scratch = self.editor.own_scratch
+        refs = self.editor.reference_maps()  # several reference maps: each job gets its own list of them
 
         def add_and_run():
             added: list[str] = []
@@ -371,7 +374,8 @@ class FormActions(_Base):
                 for js, alias, values in jobs:
                     if own_scratch:
                         self._own_scratch(js, pipeline)
-                    res = pl.add_job(js, alias or None)
+                    own_refs = refs if references.is_list_path(js.options.get(references.KEY, "")) else None
+                    res = pl.add_job(js, alias or None, own_refs)
                     if cli is not None:  # outputs must go to its own directory (the one guessed may be taken)
                         cli.make_jobstar(values, False, res.job, pipeline).write(project / res.job / "job.star")
                     added.append(res.job)
