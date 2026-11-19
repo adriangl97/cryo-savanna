@@ -4,7 +4,8 @@
 
 Tilt series: the series of a set, the tilts of the selected one (angle, dose, defocus, CTF,
 motion, alignment), the selected tilt image (and its CTF spectrum), and its values against the
-tilt angle.
+tilt angle. For tomography CtfRefine and Polish, also how much each tilt's defocus, shifts and angles
+changed from the job's input tilt series, per tilt and against the tilt angle.
 
 Tomograms: the tomograms of a set with their particle counts; an XY slab (the average of a few
 sections) at full resolution, read from the file as the slider moves; XZ and YZ side views from a
@@ -48,15 +49,19 @@ from cryo_savanna.images.mrc import ImageRef, MrcReader, contrast_limits
 from cryo_savanna.images.volume import load_volume
 from cryo_savanna.results.tables import Table
 from cryo_savanna.results.tomo import (
+    CHANGE_COLUMNS,
     RAW_TOMOGRAM,
     SCORES,
     SERIES_COLUMNS,
     TILT_COLUMNS,
     TiltSeriesSet,
     TomoPicks,
+    change_figures,
+    changes_summary,
     read_tilt_series_set,
     read_tomo_picks,
     series_summary,
+    tilt_changes,
     tilt_figures,
     warp_tomogram_set,
 )
@@ -137,11 +142,14 @@ class NapariButton(QPushButton):
 
 class TiltSeriesViewer(QWidget):
     def __init__(self, project_dir: Path, star: str, cache=None, tool: str = "", tool_arg: str = "",
-                 request_tool=None, parent=None):
+                 request_tool=None, compare: str = "", parent=None):
+        """``compare``: the set the job started from (tomography CtfRefine, Polish): what changed from it."""
         super().__init__(parent)
-        self.project_dir, self.star = Path(project_dir), star
+        self.project_dir, self.star, self.compare = Path(project_dir), star, compare
         self.tasks = Tasks(self)
         self.set: TiltSeriesSet | None = None
+        self.before: TiltSeriesSet | None = None
+        self._changes: dict = {}  # per-tilt changes from ``compare`` of the series shown
         self.tilts: Table | None = None
         self.series = -1
         self._stamp: object = None
@@ -207,15 +215,28 @@ class TiltSeriesViewer(QWidget):
         project, star = self.project_dir, self.star
         self._stamp = _stamp(project / star)
 
+        compare = self.compare
+
         def read():
             ts = read_tilt_series_set(project, star)
+            before = None
+            if compare and (project / compare).is_file():
+                try:
+                    before = read_tilt_series_set(project, compare)
+                except (OSError, ValueError):
+                    before = None
             summaries = []
             for i in range(len(ts)):
                 try:
-                    summaries.append(series_summary(ts.tilts(i)))
+                    tilts = ts.tilts(i)
+                    s = series_summary(tilts)
+                    old = _before_tilts(before, ts.names[i])
+                    if old is not None:
+                        s.update(changes_summary(tilt_changes(tilts, old)))
+                    summaries.append(s)
                 except (OSError, ValueError):
                     summaries.append({})
-            return ts, summaries
+            return ts, before, summaries
 
         self.tasks.run(read, lambda r: self._on_loaded(r), channel="load")
 
@@ -227,19 +248,20 @@ class TiltSeriesViewer(QWidget):
         if isinstance(result, TaskError):
             self.info.setText(f"⚠ {result}")
             return
-        ts, summaries = result
+        ts, before, summaries = result
         keep = self.set.names[self.series] if self.set is not None and 0 <= self.series < len(self.set) else None
-        self.set = ts
+        self.set, self.before = ts, before
         cols = [("rlnTomoName", "Tilt series")]
         model_cols = cols + [(c, t) for c, t in SERIES_COLUMNS if ts.table.has(c)]
         self.series_model.set_table(ts.table, model_cols)
-        for key in ("Tilts", "Range (°)", "Defocus (µm)", "Max. res. (Å)"):
+        for key in ("Tilts", "Range (°)", "Defocus (µm)", "Max. res. (Å)", "|ΔDefocus| (Å)", "|ΔShift| (Å)"):
             vals = [s.get(key) for s in summaries]
             if any(v is not None for v in vals):
                 self.series_model.set_extra("_" + key, key, [v if v is not None else "" for v in vals])
         self.series_view.resizeColumnsToContents()
         n_tilts = sum(int(s.get("Tilts", 0)) for s in summaries)
-        self.info.setText(f"{len(ts)} tilt series, {n_tilts} tilt images   ·   {self.star}")
+        self.info.setText(f"{len(ts)} tilt series, {n_tilts} tilt images   ·   {self.star}"
+                          + (f"   ·   changes from {self.compare}" if before is not None else ""))
         row = ts.names.index(keep) if keep in ts.names else 0
         if len(ts):
             self.select_series(row)
@@ -254,8 +276,22 @@ class TiltSeriesViewer(QWidget):
             return
         i = self.series_proxy.mapToSource(cur).row()
         self.series = i
-        ts, name = self.set, self.set.names[i]
-        self.tasks.run(lambda: ts.tilts(i), lambda t: self._on_tilts(name, t), channel="tilts")
+        ts, before, name = self.set, self.before, self.set.names[i]
+
+        def read():
+            tilts = ts.tilts(i)
+            old = _before_tilts(before, name)
+            return tilts, (tilt_changes(tilts, old) if old is not None else {})
+
+        self.tasks.run(read, lambda r: self._on_read_tilts(name, r), channel="tilts")
+
+    def _on_read_tilts(self, name: str, result) -> None:
+        if isinstance(result, TaskError):
+            self._changes = {}
+            self._on_tilts(name, result)
+            return
+        tilts, self._changes = result
+        self._on_tilts(name, tilts)  # the tilt excluder decorates this one: (name, tilts)
 
     def _on_tilts(self, name: str, tilts) -> None:
         if isinstance(tilts, TaskError):
@@ -263,14 +299,18 @@ class TiltSeriesViewer(QWidget):
             self.tilt_model.set_table(None)
             return
         self.tilts = tilts
+        changes = self._changes
         image_col = "rlnMicrographName" if tilts.has("rlnMicrographName") else "rlnMicrographMovieName"
         cols = [(c, t) for c, t in TILT_COLUMNS if tilts.has(c)]
         if tilts.has(image_col):
             cols.append((image_col, "Image" if image_col == "rlnMicrographName" else "Movie"))
         self.tilt_model.set_table(tilts, cols)
+        for col, title in CHANGE_COLUMNS:
+            if col in changes:
+                self.tilt_model.set_extra("_d" + col, title, [f"{v:.4g}" if np.isfinite(v) else "" for v in changes[col]])
         self.tilt_view.resizeColumnsToContents()
         self.ctf.setVisible(tilts.has("rlnCtfImage"))
-        self.figures.set_figures(tilt_figures(tilts, name), columns=3)
+        self.figures.set_figures(change_figures(tilts, changes, name) + tilt_figures(tilts, name), columns=3)
         # start at the untilted image
         angles = tilts.numeric("rlnTomoNominalStageTiltAngle") if tilts.has("rlnTomoNominalStageTiltAngle") else None
         row = int(np.nanargmin(np.abs(angles))) if angles is not None and len(angles) else 0
@@ -290,6 +330,16 @@ class TiltSeriesViewer(QWidget):
         self.canvas.set_image(self.set.tilt_image(self.tilts, row), keep_view=True)
         if self.ctf.isVisible():
             self.ctf.set_image(self.set.ctf_image(self.tilts, row))
+
+
+def _before_tilts(before: TiltSeriesSet | None, name: str) -> Table | None:
+    """The tilts of a tilt series in the set a job started from, if it has it."""
+    if before is None or name not in before.names:
+        return None
+    try:
+        return before.tilts(before.index(name))
+    except (OSError, ValueError):
+        return None
 
 
 # ---------------------------------------------------------------------------- tomograms

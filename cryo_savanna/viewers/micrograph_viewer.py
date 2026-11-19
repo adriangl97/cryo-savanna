@@ -6,7 +6,8 @@ Optional side panels: the CTF power spectrum with its fit (CtfFind), the motion 
 and particle picks drawn as circles (AutoPick, ManualPick, or the particles of any job on their
 micrographs: Extract, Class2D/3D, Refine3D, Select, ...; for iterative jobs, of any iteration, the latest
 followed while the job runs), with a figure-of-merit threshold and, for particles of several classes,
-the classes to show.
+the classes to show. Bayesian polishing also draws each particle's track over the movie frames,
+magnified as in RELION's logfile.pdf.
 """
 
 from __future__ import annotations
@@ -29,6 +30,7 @@ from qtpy.QtWidgets import (
 from cryo_savanna.images.cache import ThumbCache
 from cryo_savanna.results.classes import particle_iterations
 from cryo_savanna.results.curves import motion_figure
+from cryo_savanna.results.polish import mean_track_length, read_tracks, track_lines, tracks_file
 from cryo_savanna.results.micrographs import (
     MicrographSet,
     PickSet,
@@ -49,10 +51,13 @@ class MicrographViewer(QWidget):
 
     def __init__(self, project_dir: Path, star: str = "", cache: ThumbCache | None = None, ctf: bool = False,
                  motion: bool = False, picks: str = "", diameter: float | None = None, box: str = "",
-                 job: str = "", final: list[str] | tuple = (), parent=None):
+                 job: str = "", final: list[str] | tuple = (), tracks: str = "", parent=None):
         """``job``: an iterative job (Class2D/3D, InitialModel, Refine3D), whose picks are those of the
-        iteration chosen (by default the latest, followed while the job runs) or its ``final`` particles."""
+        iteration chosen (by default the latest, followed while the job runs) or its ``final`` particles.
+        ``tracks``: a Polish job, whose particles' tracks (``<micrograph>_tracks.star``) are drawn."""
         super().__init__(parent)
+        self.tracks_job = tracks
+        self._tracks: list | None = None
         self.project_dir = Path(project_dir)
         self.star, self.picks_star = star, picks
         self.job, self.final = job, list(final)
@@ -110,6 +115,19 @@ class MicrographViewer(QWidget):
         self.min_fom.valueChanged.connect(lambda _: self._draw_picks())
         self.classes = ClassFilter()
         self.classes.changed.connect(self._on_classes)
+        self.show_tracks = QCheckBox("Tracks ×")
+        self.show_tracks.setChecked(True)
+        self.show_tracks.setToolTip("Each particle's motion over the movie frames, magnified (as in RELION's "
+                                    "logfile.pdf), from the polishing job's <micrograph>_tracks.star")
+        self.show_tracks.toggled.connect(lambda _: self._draw_tracks())
+        self.track_scale = QDoubleSpinBox()
+        self.track_scale.setRange(1, 500)
+        self.track_scale.setDecimals(0)
+        self.track_scale.setValue(20)
+        self.track_scale.setToolTip("Magnification of the tracks")
+        self.track_scale.valueChanged.connect(lambda _: self._draw_tracks())
+        for w in (self.show_tracks, self.track_scale):
+            w.setVisible(bool(tracks))
         self.pick_info = QLabel()
         self.iteration = QComboBox()
         self.iteration.setToolTip("Iteration whose particles are shown (the latest follows a running job)")
@@ -118,7 +136,8 @@ class MicrographViewer(QWidget):
         self.iteration.setVisible(bool(job))
         pb = QHBoxLayout()
         pb.setContentsMargins(0, 0, 0, 0)
-        for w in (self.iteration, self.show_picks, self.circle, self.min_fom, self.classes, self.pick_info):
+        for w in (self.iteration, self.show_picks, self.circle, self.min_fom, self.classes, self.show_tracks,
+                  self.track_scale, self.pick_info):
             pb.addWidget(w)
         pb.addStretch(1)
         self.pick_bar = QWidget()
@@ -319,7 +338,29 @@ class MicrographViewer(QWidget):
             self._picks = None
             self.canvas.set_points([], [], 1)
             self.tasks.run(lambda: ps.picks(name), self._on_picks, channel="picks")
+        if self.tracks_job:
+            self._tracks = None
+            self.canvas.set_lines([], [])
+            tracks = self.project_dir / tracks_file(self.tracks_job, ms.names[row])
+            self.tasks.run(lambda: read_tracks(tracks), self._on_tracks, channel="tracks")
         self.current_changed.emit(row)
+
+    def _on_tracks(self, tracks) -> None:
+        self._tracks = [] if isinstance(tracks, TaskError) else tracks
+        self._draw_picks()  # their mean length, under the picks
+        self._draw_tracks()
+
+    def _draw_tracks(self) -> None:
+        p, tracks = self._picks, self._tracks
+        px = (self.mics.pixel_size if self.mics else None) or (self.pickset.pixel_size if self.pickset else None)
+        if p is None or tracks is None or not self.show_tracks.isChecked() or not px:
+            self.canvas.set_lines([], [])
+            return
+        keep = p.in_classes(self.classes.selected())
+        n = min(len(p), len(tracks))
+        idx = [i for i in range(n) if keep[i]]
+        x, y = track_lines(p.x[idx], p.y[idx], [tracks[i] for i in idx], px, self.track_scale.value())
+        self.canvas.set_lines(x, y)
 
     def _on_motion(self, fig) -> None:
         if isinstance(fig, TaskError) or fig is None:
@@ -339,10 +380,12 @@ class MicrographViewer(QWidget):
         has_fom = picks.fom is not None and len(picks)
         self.min_fom.setEnabled(bool(has_fom))
         self._draw_picks()
+        self._draw_tracks()
 
     def _on_classes(self) -> None:
         """Other classes chosen: the picks on this micrograph, and the counts in the list."""
         self._draw_picks()
+        self._draw_tracks()
         if self.pickset is not None and self.mics is not None:
             self._count_picks()
 
@@ -363,5 +406,11 @@ class MicrographViewer(QWidget):
         shown, below = int(keep.sum()), int(in_classes.sum() - keep.sum())
         which = self.classes.describe()
         notes = [n for n in (which, f"{below} below the FOM threshold" if below else "") if n]
+        if self._tracks:
+            length = mean_track_length(self._tracks)
+            if length is not None:
+                notes.append(f"tracks {length:.1f} Å long on average")
+        elif self.tracks_job and self._tracks is not None:
+            notes.append("no tracks for this micrograph")
         self.pick_info.setText(f"{shown} picks" + (f" ({'; '.join(notes)})" if notes else ""))
 

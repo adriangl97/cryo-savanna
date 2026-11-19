@@ -69,7 +69,9 @@ class ImageCanvas(QWidget):
         self.detail.hide()
         self.points = pg.ScatterPlotItem(pxMode=False, brush=None, pen=pg.mkPen((60, 220, 60), width=2))
         self.points.setZValue(2)
-        for it in (self.item, self.detail, self.points):
+        self.lines = pg.PlotCurveItem(pen=pg.mkPen((255, 200, 40), width=1.5), connect="finite")
+        self.lines.setZValue(2)
+        for it in (self.item, self.detail, self.points, self.lines):
             self.view.addItem(it)
         self.message = pg.TextItem("", color=(220, 220, 220), anchor=(0.5, 0.5))
         self.message.setZValue(3)
@@ -261,6 +263,14 @@ class ImageCanvas(QWidget):
             pen = pg.mkPen(color, width=2)
         self.points.setData(x=np.asarray(x, float), y=np.asarray(y, float), size=size, symbol="o",
                             pen=pen, brush=None)
+
+    def set_lines(self, x: np.ndarray | list, y: np.ndarray | list) -> None:
+        """Polylines in image pixels, broken where x or y is NaN (particle tracks)."""
+        self.lines.prepareGeometryChange()
+        if len(x) == 0:
+            self.lines.setData([], [])
+            return
+        self.lines.setData(np.asarray(x, float), np.asarray(y, float), connect="finite")
 
     def _on_mouse(self, pos) -> None:
         if self.full_shape is None:

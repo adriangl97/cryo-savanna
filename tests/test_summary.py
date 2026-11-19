@@ -33,7 +33,9 @@ def test_spa_summaries(spa_project):
     assert s["Class3D/job009/"].lines() == ["600 particles · 12.50 Å", "K=4 · T=4 · C1"]
     assert s["Refine3D/job011/"].lines() == ["288 particles · 6.00 Å", "D2"]
     assert s["PostProcess/job013/"].lines() == ["3.20 Å", "B-factor -112 Å²"]
-    assert s["MaskCreate/job012/"].lines() == []
+    assert s["MaskCreate/job012/"].lines() == ["threshold 0.01 · extend 3 px · soft edge 3 px · lowpass 15 Å"]
+    assert s["CtfRefine/job014/"].lines() == [
+        "288 particles", "defocus (per-particle) · astigmatism (per-micrograph) · beam tilt · trefoil · 4th-order aberrations"]
 
 
 def test_tomo_summaries(tomo_project):
@@ -92,7 +94,9 @@ def test_finished_jobs_are_not_read_again(spa_project):
 def test_summary_lines_reserved_per_type():
     assert summary_lines("relion.motioncorr") == 3
     assert summary_lines("relion.class3d") == 2
-    assert summary_lines("relion.maskcreate") == 0
+    assert summary_lines("relion.maskcreate") == 1
+    assert summary_lines("relion.localres") == 2
+    assert summary_lines("relion.external") == 0
     assert summary_lines("relion.autopick.log") == 2  # subtype labels count as their type
 
 

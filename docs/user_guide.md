@@ -191,18 +191,22 @@ Each job gets the tabs that fit what it made:
 | Tab | For | What |
 |---|---|---|
 | Micrographs / Movies | Import, MotionCorr, CtfFind, Select | List with per-micrograph values (sort, filter); the image, zoomable to full detail; CTF spectrum, motion track |
-| Picks / On micrographs | AutoPick, ManualPick, Extract, and any job with particles (Class2D, Class3D, InitialModel, Refine3D, Select, CtfRefine, Polish, ...) | Particles as circles; FOM threshold, circle size; for particles of several classes, which classes to show (any set of them, each in its own colour) |
+| Picks / On micrographs | AutoPick, ManualPick, Extract, and any job with particles (Class2D, Class3D, InitialModel, Refine3D, Select, CtfRefine, Polish, ...) | Particles as circles; FOM threshold, circle size; for particles of several classes, which classes to show (any set of them, each in its own colour); Polish also draws each particle's track over the movie frames, magnified (×20 by default) |
+| Frame weights | Polish | The B-factor and the scale (Guinier intercept) of each movie frame, from bfactors.star |
 | CTF / Motion plots | CtfFind, MotionCorr | Histograms or scatter; a clicked point shows its micrograph |
 | Classes | Class2D, Class3D, InitialModel, Select | Class averages (or central sections) per iteration; sort, size, select |
 | Particles | any particle file | Paged grid |
-| Maps | InitialModel … LocalRes, any map | Three sections or projections, 3D surface (drag to rotate as in ChimeraX), mask outline, local-resolution colours, Open in ChimeraX; while a 3D job runs, its latest iteration's maps, updated as new iterations are written; the Iteration menu shows any earlier iteration |
-| FSC | Refine3D, MultiBody, PostProcess | Gold-standard FSC of the half maps; PostProcess also the Guinier plot |
+| Maps | InitialModel … LocalRes, Subtract (its mask on the map), any map | Three sections or projections, 3D surface (drag to rotate as in ChimeraX), mask outline, local-resolution colours, Open in ChimeraX; while a 3D job runs, its latest iteration's maps, updated as new iterations are written; the Iteration menu shows any earlier iteration |
+| FSC | Refine3D, MultiBody, PostProcess, tomography Reconstruct particle | Gold-standard FSC of the half maps; PostProcess also the Guinier plot; Reconstruct particle: the FSC of its half maps without a mask, computed by cryo-savanna, with its 0.143 resolution |
+| Local resolution | LocalRes | Histogram of the local resolution inside the mask (RELION or ResMap), with its median and 5–95% range |
+| Flexibility | MultiBody (flexibility analysis) | Variance explained by each principal component (and cumulative), and the histogram of the particles' projections on each of the first six |
+| Components | MultiBody (flexibility analysis) | The maps relion_flex_analyse made along the first components (analyse_component*_bin*.mrc) |
 | Convergence | Class2D, Class3D, InitialModel, Refine3D, MultiBody | Resolution, class occupancy, accuracies and changes per iteration |
 | Angular distribution | Refine3D, Class3D, InitialModel, MultiBody | The particles' viewing directions as a 2D map (tilt against rot), and in 3D: the map's surface with RELION's .bild cylinders around it (longer and redder: more particles), for the final map or any iteration and class; drag to rotate, wheel to zoom |
 | CTF refinement | CtfRefine | What the job fitted; mean, spread and range of the particles' defocus, astigmatism, B-factor and scale changes; per optics group beam tilt, magnification anisotropy and overall magnification (flagged when it changes the pixel size) and the Zernike coefficients, before and after; Open logfile.pdf |
 | Per-particle CTF | CtfRefine | Histograms or scatter of the new values and of their changes from the input particles; the particles of a micrograph at their positions, coloured by a value (as RELION's per-micrograph plots); the mean change on every micrograph (click one to show it) |
 | Aberrations | CtfRefine | Per optics group, the phase differences in Fourier space for beam tilt and trefoil, 4th-order aberrations and the magnification displacements: observed, fitted and residuals, at ±1 rad or ±π |
-| Tilt series | tomography Import … AlignTiltSeries | Tilt series, their tilts and values, the tilt image and CTF spectrum, values against tilt angle |
+| Tilt series | tomography Import … AlignTiltSeries, CtfRefine, Polish | Tilt series, their tilts and values, the tilt image and CTF spectrum, values against tilt angle; tomography CtfRefine and Polish also show how much each tilt's defocus, shifts and angles changed from the job's input (per tilt, against the tilt angle, and the median per tilt series), and the CTF scale |
 | Tomograms / Picks | ReconstructTomograms, Denoise, Pick, Extract, Class3D | Z slab with side views, denoised and raw side by side, particles where the slab cuts them (of the classes chosen) |
 | Scores | pytom template matching | Every tomogram's status (pending, running, done, failed), run time and pytom's search statistics, updated as the job goes; the score histogram of the tomogram chosen (with the score Gaussian noise passes once) and the maximum projection of its score map along z |
 | Tomograms | pytom template matching | The tomograms and their score maps, Z slab and side views, one beside the other |

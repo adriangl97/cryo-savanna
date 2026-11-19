@@ -210,7 +210,8 @@ Each job's results open as tabs next to its Overview and Options:
 - **Picks**: AutoPick and ManualPick picks as circles, with a figure-of-merit threshold. Extract
   jobs show their particles on their micrographs, and so does any other job with particles
   (Class2D, Class3D, InitialModel, Refine3D, Select, CtfRefine, Polish, Subtract, ...). For particles of several classes, "Classes" chooses which classes' picks
-  are shown (all, one, or any set of them), each class in its own colour.
+  are shown (all, one, or any set of them), each class in its own colour. Polish also draws
+  each particle's track over the movie frames, magnified as in its logfile.pdf.
 - **Classes**: the class averages of each Class2D iteration, and the central sections of 3D
   classes. They can be sorted by distribution, resolution, particles or class score, and selected.
 - **Particles**: any particle file, as a paged grid.
@@ -218,12 +219,14 @@ Each job's results open as tabs next to its Overview and Options:
   curves (PostProcess, Refine3D), Guinier, convergence per iteration (resolution, class
   occupancy, accuracies, changes), and the angular distribution: a 2D map of the viewing
   directions and, in 3D, the map's surface with RELION's `.bild` cylinders around it (final map or
-  any iteration and class).
-- **Maps** (InitialModel, Class3D, Refine3D, MaskCreate, PostProcess, LocalRes, any map output):
+  any iteration and class). Polish's B-factor and scale per movie frame. LocalRes's
+  histogram of local resolution inside the mask; MultiBody's flexibility analysis (variance per
+  principal component, histograms of the projections, and the maps along the components).
+- **Maps** (InitialModel, Class3D, Refine3D, MaskCreate, PostProcess, LocalRes, Subtract, any map output):
   - three sections that cross at one point, or projections; click a section to move the other two;
   - the isosurface, drawn by cryo-savanna itself (no OpenGL). Drag to rotate, wheel to zoom. The
     level starts at 1% of the box, or at 0.5 for masks;
-  - the job's mask as a red outline (PostProcess, MaskCreate, Refine3D/Class3D with a mask);
+  - the job's mask as a red outline (PostProcess, MaskCreate, Subtract, Refine3D/Class3D with a mask);
   - LocalRes colours the sections and the surface by local resolution, blue (best) to red;
   - "Open in ChimeraX" opens the same map, level, mask and colours there (ChimeraX from PATH or
     `$CRYO_SAVANNA_CHIMERAX`);
@@ -235,6 +238,8 @@ Each job's results open as tabs next to its Overview and Options:
 - **Tilt series** (tomography: Import, MotionCorr, CtfFind, ExcludeTiltImages, AlignTiltSeries):
   the tilt series of the set, the tilts of the selected one (angle, dose, defocus, CTF, motion,
   alignment), the tilt image and its CTF spectrum, and the per-tilt values against the tilt angle.
+  Tomography CtfRefine and Polish also show how much each tilt's defocus, shifts and angles changed
+  from the job's input.
 - **Tomograms** (ReconstructTomograms, Denoise, ...): an XY slab of a few averaged sections, moved
   with the Z slider, at full resolution; XZ and YZ side views; denoised and raw side by side.
 - **Picks** (Pick tomograms, Extract subtomos, tomography Class3D and Refine3D): the particles in

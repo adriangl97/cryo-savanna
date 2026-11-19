@@ -16,12 +16,14 @@ from pathlib import Path
 
 from cryo_savanna.project.summary import base_type
 from cryo_savanna.project.selection import interactive_kind
+from cryo_savanna.results import flex, polish
 from cryo_savanna.results.classes import iterations, latest_iteration_maps, particle_iterations
 from cryo_savanna.results.ctfrefine import aberration_images, fits_ctf
 from cryo_savanna.results.tomo import (
     TOMO_NAME,
     columns_of,
     has_tomograms,
+    input_tomograms,
     is_tomo_particles,
     is_warp_particles,
     tomograms_for_particles,
@@ -93,6 +95,18 @@ def _option_file(ctx: JobContext, *keys: str) -> str | None:
         if v and ctx.exists(v):
             return v
     return None
+
+
+def _refinement_map(ctx: JobContext, optimiser: str) -> str:
+    """The map of the refinement an optimiser file is from (Refine3D/job011/run_optimiser.star ->
+    run_class001.mrc; MultiBody: its first body), if it exists."""
+    if not optimiser.endswith("_optimiser.star"):
+        return ""
+    root = optimiser[: -len("optimiser.star")]
+    for name in ("class001.mrc", "body001.mrc"):
+        if ctx.exists(root + name):
+            return root + name
+    return ""
 
 
 def pick_diameter(ctx: JobContext) -> float | None:
@@ -307,6 +321,13 @@ def views_for(ctx: JobContext) -> list[ViewSpec]:
             add(PLOTS, "FSC", job=ctx.name, figures="model_fsc")
             add(PLOTS, "Convergence", job=ctx.name, figures="convergence")
             add(ANGLES, "Angular distribution", job=ctx.name)
+        if t == "relion.multibody":
+            if ctx.file(flex.PROJECTIONS):
+                add(PLOTS, "Flexibility", job=ctx.name, figures="flex")
+            components = flex.component_maps(ctx.job_dir)
+            if components:
+                maps = [ctx.name + n for n in components]
+                add(VOLUME, "Components", maps=maps, mask="", color="", masks=[])
     elif t == "relion.maskcreate":
         mask = ctx.output("Mask3D") or ""
         source = _option_file(ctx, "fn_in")
@@ -319,6 +340,32 @@ def views_for(ctx: JobContext) -> list[ViewSpec]:
     elif t == "relion.localres":
         locres = next((n for n, nt in ctx.outputs if nt.startswith("Image3D")), "")
         add_maps(density or [ctx.options.get("fn_in", "")], mask=ctx.options.get("fn_mask", ""), color=locres)
+        if ctx.exists(locres):
+            add(PLOTS, "Local resolution", figures="locres", star=locres, mask=_option_file(ctx, "fn_mask") or "")
+    elif t == "relion.polish":
+        if ctx.file(polish.BFACTORS):
+            add(PLOTS, "Frame weights", figures="polish", job=ctx.name)
+        shiny = ctx.output("ParticleGroupMetadata")
+        if shiny and is_spa_particles(ctx.project_dir / shiny):
+            # the particles on their micrographs, with the tracks of their motion
+            add(MICROGRAPHS, "Picks", star=_option_file(ctx, "fn_mic") or "", picks=shiny, tracks=ctx.name)
+            seen_files.discard(shiny)  # still gets its Particles tab below
+    elif t == "relion.subtract":
+        mask = _option_file(ctx, "fn_mask") or ""
+        ref = _refinement_map(ctx, ctx.options.get("fn_opt", ""))
+        if mask:
+            # what is kept: the mask on the map the particles were subtracted from
+            add_maps([ref, mask] if ref else [mask], mask=mask, masks=[mask])
+    elif t in ("relion.ctfrefinetomo", "relion.framealigntomo"):
+        tomos = ctx.output("TomogramGroupMetadata")
+        if tomos:
+            add(TILT_SERIES, "Tilt series", star=tomos,
+                compare=input_tomograms(ctx.project_dir, ctx.options) or "")
+    elif t == "relion.reconstructparticletomo":
+        add_maps([m for m in (ctx.file(n) for n in ("merged.mrc", "half1.mrc", "half2.mrc")) if m])
+        h1, h2 = ctx.file("half1.mrc"), ctx.file("half2.mrc")
+        if h1 and h2:
+            add(PLOTS, "FSC", figures="halfmap_fsc", star=h2, half1=h1, half2=h2)
     elif t == "relion.select":
         if interactive_kind(ctx.type_label, ctx.options) == "classes":
             add(SELECTION, "Selection", job=ctx.name, what="classes")

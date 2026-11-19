@@ -44,9 +44,10 @@ RESULT_TYPES = {
 SETTINGS_TYPES = {
     "relion.import", "relion.importtomo", "relion.motioncorr", "relion.autopick", "relion.extract",
     "relion.pseudosubtomo", "relion.class2d", "relion.class3d", "relion.initialmodel", "relion.refine3d",
-    "relion.reconstructtomograms", "relion.reconstructparticletomo",
+    "relion.reconstructtomograms", "relion.reconstructparticletomo", "relion.polish", "relion.subtract",
+    "relion.maskcreate", "relion.localres", "relion.ctfrefine", "relion.ctfrefinetomo", "relion.framealigntomo",
 }
-QUALITY_TYPES = {"relion.motioncorr", "relion.ctffind", "relion.postprocess"}
+QUALITY_TYPES = {"relion.motioncorr", "relion.ctffind", "relion.postprocess", "relion.localres", "relion.multibody"}
 
 _ITER_RE = re.compile(r"^run(?:_ct\d+)?_it(\d+)_(?:half1_)?model\.star$")  # also continued runs (run_ct5_...)
 _CONTINUED = re.compile(r"^run_ct(\d+)_")
@@ -257,6 +258,10 @@ class SummaryReader:
             self._iterative(t, pr, opts, s, running)
         else:
             self._counts_from_outputs(t, pr, pipeline, s)
+        if t == "relion.polish" and opts.get("do_param_optim") == "Yes":
+            from cryo_savanna.results.polish import trained_params
+            found = trained_params(jobdir)
+            s.result += [p.text() + (f" ({p.source})" if len(found) > 1 else "") for p in found]
         if t == "relion.postprocess":
             gen = self._head(pr.name + "postprocess.star", "general")
             if gen is not None:
@@ -376,6 +381,51 @@ class SummaryReader:
         elif t == "relion.refine3d":
             if o("sym_name"):
                 s.settings.append(o("sym_name"))
+        elif t == "relion.polish":
+            if o("do_param_optim") == "Yes":
+                s.settings.append("training")
+            else:
+                from cryo_savanna.results.polish import used_params
+                p = used_params(self.project_dir / pr.name, opts, self.project_dir)
+                if p is not None:
+                    s.settings.append(p.text())
+                first, last = _count(o("first_frame")), _float(o("last_frame"))
+                if (first or 1) > 1 or (last is not None and last > 0):
+                    s.settings.append(f"frames {first or 1}–{int(last) if last and last > 0 else 'last'}")
+        elif t == "relion.subtract":
+            if o("do_fliplabel") == "Yes":
+                s.settings.append("reverted to the original particles")
+            else:
+                if o("do_center_mask") == "Yes":
+                    s.settings.append("recentred on the mask")
+                elif o("do_center_xyz") == "Yes":
+                    s.settings.append(f"recentred on ({o('center_x')}, {o('center_y')}, {o('center_z')}) px")
+                if (_float(o("new_box")) or -1) > 0:
+                    s.settings.append(f"box {_fmt_num(o('new_box'))} px")
+        elif t == "relion.maskcreate":
+            parts = [f"threshold {_fmt_num(o('inimask_threshold'))}" if o("inimask_threshold") else "",
+                     f"extend {_fmt_num(o('extend_inimask'))} px" if o("extend_inimask") else "",
+                     f"soft edge {_fmt_num(o('width_mask_edge'))} px" if o("width_mask_edge") else ""]
+            if (_float(o("lowpass_filter")) or 0) > 0:
+                parts.append(f"lowpass {_fmt_num(o('lowpass_filter'))} Å")
+            s.settings += [x for x in parts if x]
+        elif t == "relion.localres":
+            s.settings.append("ResMap" if o("do_resmap_locres") == "Yes" and o("do_relion_locres") != "Yes" else "RELION")
+        elif t == "relion.ctfrefine":
+            from cryo_savanna.results.ctfrefine import fitted
+            for label, how in fitted(opts):
+                s.settings.append(label.lower() if how == "per optics group" else f"{label.lower()} ({how})")
+        elif t == "relion.ctfrefinetomo":
+            if o("do_defocus") == "Yes":
+                s.settings.append("defocus" + (" (regularised)" if o("do_reg_def") == "Yes" else ""))
+            if o("do_scale") == "Yes":
+                ways = [w for w, k in (("per frame", "do_frame_scale"), ("per tomogram", "do_tomo_scale")) if o(k) == "Yes"]
+                s.settings.append("scale" + (f" ({', '.join(ways)})" if ways else ""))
+        elif t == "relion.framealigntomo":
+            if o("do_shift_align") == "Yes":
+                s.settings.append(f"shifts ({(o('shift_align_type') or 'entire micrographs').lower()})")
+            if o("do_motion") == "Yes":
+                s.settings.append(f"motion σ vel {_fmt_num(o('sigma_vel'))} · σ div {_fmt_num(o('sigma_div'))}")
 
     def _extract_boxes(self, t: str, pr: Process, opts: dict) -> list[str]:
         """Initial and final (binned) box size and the final pixel size of extracted particles.
@@ -414,6 +464,25 @@ class SummaryReader:
         return out
 
     def _quality(self, t: str, pr: Process, pipeline: Pipeline, s: JobSummary) -> None:
+        if t == "relion.localres":
+            from cryo_savanna.results.mapstats import locres_stats
+            locres = next((n for n in pr.outputs if n in pipeline.nodes and pipeline.nodes[n].kind == "Image3D"), None)
+            if locres and (self.project_dir / locres).is_file():
+                try:
+                    opts = JobStar.read(self.project_dir / pr.name / "job.star").options
+                except (OSError, ValueError, KeyError):
+                    opts = {}
+                mask = opts.get("fn_mask", "")
+                st = locres_stats(self.project_dir / locres, self.project_dir / mask if mask else None)
+                if st is not None:
+                    s.quality.append(st.text())
+            return
+        if t == "relion.multibody":
+            from cryo_savanna.results.flex import logged_variance
+            var = logged_variance(self.project_dir / pr.name)  # not the projections: one line per particle
+            if var is not None and len(var) and math.isfinite(var[0]):
+                s.quality.append(f"component 1: {var[0]:.1f}% of the variance")
+            return
         mics = next((n for n in pr.outputs if n in pipeline.nodes and pipeline.nodes[n].kind == "MicrographGroupMetadata"),
                     None)
         tilts = next((n for n in pr.outputs if n in pipeline.nodes and pipeline.nodes[n].kind == "TomogramGroupMetadata"),
