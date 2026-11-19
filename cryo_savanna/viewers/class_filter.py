@@ -3,7 +3,8 @@
 """Which classes' picks to show: all, or any set of them, each in its own colour.
 
 Used by the Picks views (micrographs and tomograms) when the particles carry more than one class
-number (rlnClassNumber), as the particles of Class2D, Class3D and InitialModel jobs do.
+number (rlnClassNumber), as the particles of Class2D, Class3D and InitialModel jobs do (and of the
+jobs downstream of them that keep the class numbers, such as Select).
 """
 
 from __future__ import annotations

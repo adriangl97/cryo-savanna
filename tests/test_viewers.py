@@ -173,6 +173,47 @@ def test_no_class_choice_for_picks_of_one_class(window, spa_project, qtbot):
     assert not v.classes.isVisible() and v.classes.selected() is None
 
 
+def test_picks_of_any_particle_job(window, spa_project, qtbot):
+    w = window(spa_project)
+    v = open_view(w, qtbot, "Refine3D/job011/", "Picks")
+    assert len(v._picks) > 0 and not v.classes.isVisible()  # one class: nothing to choose
+    assert v.circle.value() == round(200 / 0.885)  # the particle diameter, in micrograph pixels
+    v = open_view(w, qtbot, "Select/job010/", "Picks")
+    assert len(v._picks) > 0 and v.circle.value() == 256  # no particle diameter: the particle box
+
+
+def test_picks_follow_the_iterations_of_a_running_job(spa_copy, qtbot):
+    job = spa_copy / "Class3D/job009"
+    data = (job / "run_it025_data.star").read_text()
+    (job / "run_it025_data.star").unlink()
+    (job / "run_it010_data.star").write_text(data)  # VDAM: particles only every few iterations
+    final = ["Class3D/job009/run_it025_data.star"]
+    v = MicrographViewer(spa_copy, job="Class3D/job009/", final=final, diameter=200.0)
+    qtbot.addWidget(v)
+    v.show()
+    settle(qtbot)
+    assert v.iteration.isVisible() and [v.iteration.itemText(i) for i in range(v.iteration.count())] == [
+        "Iteration 10"]
+    assert v.picks_star == "Class3D/job009/run_it010_data.star" and v._picks is not None
+    assert v.classes.isVisible()  # the classes to choose, as for the finished job
+    time.sleep(0.01)
+    (job / "run_it020_data.star").write_text(data)
+    v.refresh()
+    settle(qtbot)
+    assert v.iteration.currentText() == "Iteration 20" and v.picks_star.endswith("run_it020_data.star")
+    v.iteration.setCurrentIndex(0)  # an earlier iteration: it stays chosen as new ones come
+    settle(qtbot)
+    assert v.picks_star.endswith("run_it010_data.star") and v._picks is not None
+    time.sleep(0.01)
+    (job / "run_it025_data.star").write_text(data)
+    v.refresh()
+    settle(qtbot)
+    assert v.iteration.count() == 3 and v.iteration.currentText() == "Iteration 10"
+    v.iteration.setCurrentIndex(2)
+    settle(qtbot)
+    assert v.picks_star == final[0] and len(v._picks) > 0
+
+
 def test_class_gallery_sort_select_and_iterations(window, spa_project, qtbot):
     w = window(spa_project)
     v: ClassesView = open_view(w, qtbot, "Class2D/job006/", "Classes")

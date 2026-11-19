@@ -3,9 +3,10 @@
 """Micrographs (or movies): a sortable list with the per-micrograph values, and the selected one large.
 
 Optional side panels: the CTF power spectrum with its fit (CtfFind), the motion track (MotionCorr),
-and particle picks drawn as circles (AutoPick, ManualPick, or the particles of an Extract job on
-their micrographs), with a figure-of-merit threshold and, for particles of several classes, the
-classes to show.
+and particle picks drawn as circles (AutoPick, ManualPick, or the particles of any job on their
+micrographs: Extract, Class2D/3D, Refine3D, Select, ...; for iterative jobs, of any iteration, the latest
+followed while the job runs), with a figure-of-merit threshold and, for particles of several classes,
+the classes to show.
 """
 
 from __future__ import annotations
@@ -15,6 +16,7 @@ from pathlib import Path
 from qtpy.QtCore import Qt, Signal
 from qtpy.QtWidgets import (
     QCheckBox,
+    QComboBox,
     QDoubleSpinBox,
     QHBoxLayout,
     QLabel,
@@ -25,6 +27,7 @@ from qtpy.QtWidgets import (
 )
 
 from cryo_savanna.images.cache import ThumbCache
+from cryo_savanna.results.classes import particle_iterations
 from cryo_savanna.results.curves import motion_figure
 from cryo_savanna.results.micrographs import (
     MicrographSet,
@@ -45,10 +48,16 @@ class MicrographViewer(QWidget):
     current_changed = Signal(int)
 
     def __init__(self, project_dir: Path, star: str = "", cache: ThumbCache | None = None, ctf: bool = False,
-                 motion: bool = False, picks: str = "", diameter: float | None = None, box: str = "", parent=None):
+                 motion: bool = False, picks: str = "", diameter: float | None = None, box: str = "",
+                 job: str = "", final: list[str] | tuple = (), parent=None):
+        """``job``: an iterative job (Class2D/3D, InitialModel, Refine3D), whose picks are those of the
+        iteration chosen (by default the latest, followed while the job runs) or its ``final`` particles."""
         super().__init__(parent)
         self.project_dir = Path(project_dir)
         self.star, self.picks_star = star, picks
+        self.job, self.final = job, list(final)
+        self._its: list[tuple[str, str]] = []
+        self._job_stamp: object = None
         self.want_ctf, self.want_motion = ctf, motion
         self.diameter_A, self.box = diameter, box
         self.mics: MicrographSet | None = None
@@ -102,14 +111,19 @@ class MicrographViewer(QWidget):
         self.classes = ClassFilter()
         self.classes.changed.connect(self._on_classes)
         self.pick_info = QLabel()
+        self.iteration = QComboBox()
+        self.iteration.setToolTip("Iteration whose particles are shown (the latest follows a running job)")
+        self.iteration.setSizeAdjustPolicy(QComboBox.AdjustToContents)
+        self.iteration.currentIndexChanged.connect(self._on_iteration)
+        self.iteration.setVisible(bool(job))
         pb = QHBoxLayout()
         pb.setContentsMargins(0, 0, 0, 0)
-        for w in (self.show_picks, self.circle, self.min_fom, self.classes, self.pick_info):
+        for w in (self.iteration, self.show_picks, self.circle, self.min_fom, self.classes, self.pick_info):
             pb.addWidget(w)
         pb.addStretch(1)
         self.pick_bar = QWidget()
         self.pick_bar.setLayout(pb)
-        self.pick_bar.setVisible(bool(picks))
+        self.pick_bar.setVisible(bool(picks or job))
         self._picks = None
 
         # side panels: CTF spectrum and motion track
@@ -140,7 +154,10 @@ class MicrographViewer(QWidget):
         lay.addWidget(split, 1)
         self.status = QLabel("Reading…")
         lay.addWidget(self.status)
-        self.load()
+        if job:
+            self.set_iterations()  # loads the latest
+        else:
+            self.load()
 
     # ------------------------------------------------------------------ loading
     def _watched(self) -> tuple:
@@ -163,9 +180,44 @@ class MicrographViewer(QWidget):
         self.tasks.run(read, self._on_loaded, channel="load")
 
     def refresh(self) -> None:
-        """Read the lists again when their files changed (a running job adds micrographs)."""
+        """Read the lists again when their files changed (a running job adds micrographs, or iterations)."""
+        if self.job and _stamp(self.project_dir / self.job) != self._job_stamp and self.set_iterations():
+            return
         if self._watched() != self._stamps:
             self.load()
+
+    # ------------------------------------------------------------------ iterations
+    def set_iterations(self) -> bool:
+        """List the job's iterations again; True when that loaded other picks. The latest stays chosen when
+        it was (a new iteration replaces it), else the one chosen."""
+        self._job_stamp = _stamp(self.project_dir / self.job)
+        its = particle_iterations(self.project_dir, self.job, self.final)
+        if its == self._its:
+            return False
+        at_last = self.iteration.currentIndex() in (-1, len(self._its) - 1)
+        current = self.iteration.currentText()
+        self._its = its
+        self.iteration.blockSignals(True)
+        self.iteration.clear()
+        self.iteration.addItems([label for label, _ in its])
+        self.iteration.setMinimumWidth(self.iteration.sizeHint().width())  # not cut in a crowded bar
+        i = self.iteration.findText(current)
+        self.iteration.setCurrentIndex(len(its) - 1 if at_last or i < 0 else i)
+        self.iteration.blockSignals(False)
+        return self._on_iteration()
+
+    def _on_iteration(self, _index: int = -1) -> bool:
+        """Show the picks of the iteration chosen; True when they are other picks than those shown."""
+        i = self.iteration.currentIndex()
+        rel = self._its[i][1] if 0 <= i < len(self._its) else ""
+        if not rel:
+            self.status.setText("No particles written yet")
+            return False
+        if rel == self.picks_star:
+            return False
+        self.picks_star = rel
+        self.load()
+        return True
 
     def _on_loaded(self, result) -> None:
         if isinstance(result, TaskError):
@@ -209,6 +261,8 @@ class MicrographViewer(QWidget):
                 d = float(self.box)
             except ValueError:
                 d = None
+        elif self.pickset is not None and self.pickset.box_angst and px:
+            d = self.pickset.box_angst / px  # no particle diameter: the particle box
         self.circle.setValue(d or 100)
 
     def _count_picks(self) -> None:

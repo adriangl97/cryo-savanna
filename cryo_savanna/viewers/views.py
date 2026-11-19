@@ -638,7 +638,8 @@ def build_view(spec: R.ViewSpec, ctx: R.JobContext, cache: ThumbCache | None, re
     if spec.kind == R.MICROGRAPHS:
         return MicrographViewer(project, a.get("star", ""), cache, ctf=a.get("ctf", False),
                                 motion=a.get("motion", False), picks=a.get("picks", ""),
-                                diameter=a.get("diameter"), box=a.get("box", ""))
+                                diameter=a.get("diameter"), box=a.get("box", ""), job=a.get("job", ""),
+                                final=a.get("final", ()))
     if spec.kind == R.CLASSES:
         return ClassesView(project, job=a.get("job", ""), star=a.get("star", ""), tool=a.get("tool", ""),
                            request_tool=request_tool)

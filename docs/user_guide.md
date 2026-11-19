@@ -191,7 +191,7 @@ Each job gets the tabs that fit what it made:
 | Tab | For | What |
 |---|---|---|
 | Micrographs / Movies | Import, MotionCorr, CtfFind, Select | List with per-micrograph values (sort, filter); the image, zoomable to full detail; CTF spectrum, motion track |
-| Picks / On micrographs | AutoPick, ManualPick, Extract, Class2D, Class3D, InitialModel | Particles as circles; FOM threshold, circle size; for particles of several classes, which classes to show (any set of them, each in its own colour) |
+| Picks / On micrographs | AutoPick, ManualPick, Extract, and any job with particles (Class2D, Class3D, InitialModel, Refine3D, Select, CtfRefine, Polish, ...) | Particles as circles; FOM threshold, circle size; for particles of several classes, which classes to show (any set of them, each in its own colour) |
 | CTF / Motion plots | CtfFind, MotionCorr | Histograms or scatter; a clicked point shows its micrograph |
 | Classes | Class2D, Class3D, InitialModel, Select | Class averages (or central sections) per iteration; sort, size, select |
 | Particles | any particle file | Paged grid |

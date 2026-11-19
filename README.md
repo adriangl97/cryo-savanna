@@ -48,7 +48,7 @@ and can be used interchangeably, even at the same time, on the same project.
 **Results inside the GUI** (see [Results](#results) for the full list)
 
 - Micrographs with their per-micrograph values, CTF spectra and fits, motion tracks, and picks;
-  for classification jobs, the picks of any set of classes, coloured by class.
+  for particles of several classes, the picks of any set of classes, coloured by class.
 - 2D class averages and 3D class sections per iteration, sortable by distribution, resolution,
   particle count or class score.
 - Plots: CTF and motion histograms and scatter plots, FSC, Guinier, convergence per iteration,
@@ -208,8 +208,8 @@ Each job's results open as tabs next to its Overview and Options:
   astigmatism, max. resolution, FOM, picks), and the selected one large. CtfFind adds the power
   spectrum with its fit, MotionCorr the motion track.
 - **Picks**: AutoPick and ManualPick picks as circles, with a figure-of-merit threshold. Extract
-  jobs show their particles on their micrographs, and so do Class2D, Class3D and InitialModel jobs
-  with several classes. For particles of several classes, "Classes" chooses which classes' picks
+  jobs show their particles on their micrographs, and so does any other job with particles
+  (Class2D, Class3D, InitialModel, Refine3D, Select, CtfRefine, Polish, Subtract, ...). For particles of several classes, "Classes" chooses which classes' picks
   are shown (all, one, or any set of them), each class in its own colour.
 - **Classes**: the class averages of each Class2D iteration, and the central sections of 3D
   classes. They can be sorted by distribution, resolution, particles or class score, and selected.
