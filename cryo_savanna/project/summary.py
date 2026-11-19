@@ -220,10 +220,14 @@ class JobSummary:
             return f"{self.items_done or 0}/{self.items_total} {self.items_what}".rstrip()
         return ""
 
-    def progress_time(self, now: float | None = None) -> str:
-        """How long it has run and has left: "1 h 05 min · ~40 min left" ("" when not known)."""
+    def progress_time(self, now: float | None = None, elapsed: float | None = None) -> str:
+        """How long it has run and has left: "1 h 05 min · ~40 min left" ("" when not known). ``elapsed``: how long
+        it has run when that is known better than from its start in note.txt (its SLURM job's time used: note.txt
+        has when it was sent to the queue, so the time it waited there would count too)."""
         parts = []
-        if self.started is not None:
+        if elapsed is not None:
+            parts.append(duration(elapsed))
+        elif self.started is not None:
             parts.append(duration((now or time.time()) - self.started))
         left = self.time_left(now)
         if left is not None:
@@ -235,8 +239,8 @@ class JobSummary:
             parts.append(f"~{duration(per) if per >= 60 else f'{per:.0f} s'}/iter")
         return " · ".join(parts)
 
-    def progress(self, now: float | None = None) -> str:
-        return " · ".join(x for x in (self.progress_count(), self.progress_time(now)) if x)
+    def progress(self, now: float | None = None, elapsed: float | None = None) -> str:
+        return " · ".join(x for x in (self.progress_count(), self.progress_time(now, elapsed)) if x)
 
 
 def duration(s: float) -> str:

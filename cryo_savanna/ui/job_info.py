@@ -316,8 +316,9 @@ class JobInfoPanel(QTabWidget):
                                  ("Quality", summary.quality)):
                 if items:
                     rows.append((label, html.escape(" · ".join(items))))
-            if info.status == "Running" and summary.progress():
-                rows.append(("Progress", html.escape(summary.progress())))
+            progress = summary.progress(elapsed=style.slurm_elapsed(self.queue, name))
+            if info.status == "Running" and progress:
+                rows.append(("Progress", html.escape(progress)))
             if summary.failure:  # just under the status
                 at = next((i + 1 for i, (label, _) in enumerate(rows) if label == "Status"), len(rows))
                 rows.insert(at, ("Likely cause", self._failure_html(summary.failure, color)))

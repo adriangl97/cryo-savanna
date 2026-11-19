@@ -65,6 +65,11 @@ def card_lines(info: JobInfo, type_names: dict[str, str]) -> tuple[str, str | No
     return header, alias, summary_lines(pr.type_label)
 
 
+def _live(state, job: str):
+    """The slurm.QueueJob of a job in squeue (None: not there)."""
+    return state.live.get(job) if state is not None else None
+
+
 def card_progress_lines(info: JobInfo) -> int:
     """Lines under the job number and status of a running job's card: its iteration (or items) and its times
     (run so far, left), each on a line of its own; 0 when it does not run."""
@@ -94,6 +99,7 @@ class JobNodeItem(QGraphicsItem):
         self.queue_text = ""  # place in the SLURM queue
         self.stale = None  # staleness.Stale: a finished job that is out of date
         self.held = None  # pipeliner.Held: a run still going is to run this job
+        self.queue_job = None  # slurm.QueueJob: its SLURM job in squeue
         self.input_labels: list[str] = []  # the open job editor's fields that take this job's outputs
         self.setFlag(QGraphicsItem.ItemIsSelectable, True)
         self.setAcceptHoverEvents(True)
@@ -158,7 +164,10 @@ class JobNodeItem(QGraphicsItem):
         text = f"{number} · {info.status}" + ("*" if info.pending_update else "")
         if style.held_text(info.status, self.held):  # a scheduled job a run still going holds
             text += " · " + style.held_text(info.status, self.held)
-        if self.queue_text:
+        q = self.queue_job
+        if q is not None and q.elapsed_seconds() is not None and card_progress_lines(info):
+            text += " · on " + q.nodes if q.nodes else ""  # the time it has run is on the line below
+        elif self.queue_text:
             text += " · " + self.queue_text
         if self.stale is not None and info.status == "Succeeded":
             text += " · out of date"
@@ -171,7 +180,8 @@ class JobNodeItem(QGraphicsItem):
         n = card_progress_lines(info) if info is not None else 0
         if n == 0:
             return []
-        count, times = (s.progress_count(), s.progress_time()) if s is not None else ("", "")
+        elapsed = self.queue_job.elapsed_seconds() if self.queue_job is not None else None
+        count, times = (s.progress_count(), s.progress_time(elapsed=elapsed)) if s is not None else ("", "")
         return [count, times] if n == 2 else [times]
 
     def set_held(self, held) -> None:
@@ -189,7 +199,9 @@ class JobNodeItem(QGraphicsItem):
             self._update_tooltip()
             self.update()
 
-    def set_queue(self, text: str, details: str) -> None:
+    def set_queue(self, text: str, details: str, job=None) -> None:
+        """Its place in the SLURM queue: the text and details of style.queue_entry, and the slurm.QueueJob."""
+        self.queue_job = job
         if text != self.queue_text:
             self.queue_text = text
             self._queue_details = details
@@ -410,7 +422,7 @@ class JobGraphView(QGraphicsView):
             item = JobNodeItem(name, self, sizes[name])
             item.set_info(info)
             item.set_summary(self.summaries.get(name))
-            item.set_queue(*style.queue_entry(self.queue, name)[:2])
+            item.set_queue(*style.queue_entry(self.queue, name)[:2], _live(self.queue, name))
             item.set_stale(self.stale.get(name))
             item.set_held(self.held.get(name))
             item.set_inputs(self.inputs.get(name, []))
@@ -448,7 +460,7 @@ class JobGraphView(QGraphicsView):
         """Add each job's place in the SLURM queue to its card (a slurm.QueueState)."""
         self.queue = state
         for name, item in self.nodes.items():
-            item.set_queue(*style.queue_entry(state, name)[:2])
+            item.set_queue(*style.queue_entry(state, name)[:2], _live(state, name))
 
     def refresh_running(self) -> None:
         """Repaint running jobs, whose cards show elapsed time."""
