@@ -46,6 +46,8 @@ DEFAULTS = {
     "editor": "window",  # where the job editor opens (EDITOR_PLACES)
     "scratch_dir": "",  # default "Copy particles to scratch directory" of new jobs (as $RELION_SCRATCH_DIR)
     "scratch_own": False,  # each job a savanna_NNN subdirectory of its scratch directory (off: as RELION's GUI)
+    "gpu_queue": True,  # runs of jobs that use GPUs of this machine wait until those GPUs are free
+    "auto_continue": False,  # relion_refine jobs that hit the SLURM time limit are continued from their last iteration
 }
 
 SCRATCH_VAR = scratch.ENV_VAR
@@ -198,6 +200,23 @@ class PreferencesDialog(QDialog):
         holder = QWidget()
         holder.setLayout(row)
         form.addRow("", holder)
+        self.gpu_queue = QCheckBox("Runs on this machine wait until their GPUs are free")
+        self.gpu_queue.setChecked(setting(settings, "gpu_queue"))
+        self.gpu_queue.setToolTip(
+            "Jobs that use GPUs of this machine (not sent to a queue), started while their GPUs are in use by another "
+            "run of cryo-savanna (of anyone on the machine) or by a RELION job nvidia-smi lists (native or External; "
+            "other programs on the GPU are not waited for), wait for them instead of "
+            "starting on the same GPUs and running out of their memory. A waiting run shows as \"waiting for a GPU\" "
+            "and can be stopped with Job → Stop runs…. It keeps waiting when cryo-savanna is closed.")
+        form.addRow("Local GPU queue", self.gpu_queue)
+        self.auto_continue = QCheckBox("Continue jobs that hit the SLURM time limit")
+        self.auto_continue.setChecked(setting(settings, "auto_continue"))
+        self.auto_continue.setToolTip(
+            "Class2D, Class3D, InitialModel, Refine3D and MultiBody jobs that SLURM ended at their time limit are "
+            "continued from the last iteration they finished, with the same settings, at most 3 times per run of the "
+            "job. Only while cryo-savanna is open and looks at the queue. Off: the status bar says so, and "
+            "Job → Continue… has the last iteration filled in.")
+        form.addRow("SLURM", self.auto_continue)
         self._env = env
         buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         buttons.accepted.connect(self.accept)
@@ -265,6 +284,8 @@ class PreferencesDialog(QDialog):
         s.setValue("chimerax", self.chimerax.text().strip())
         s.setValue("scratch_dir", self.scratch.text().strip())
         s.setValue("scratch_own", self.scratch_own.isChecked())
+        s.setValue("gpu_queue", self.gpu_queue.isChecked())
+        s.setValue("auto_continue", self.auto_continue.isChecked())
         s.setValue("theme", self.theme.currentData())
         s.setValue("editor", self.editor.currentData())
         super().accept()

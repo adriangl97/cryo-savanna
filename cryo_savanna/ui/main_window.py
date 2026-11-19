@@ -257,6 +257,10 @@ class MainWindow(QMainWindow):
         self.actions.select.connect(self._select_soon)
         self.actions.runs.connect(self.tree.set_runs)
         self.actions.runs.connect(self.info.set_runs)
+        self.actions.runs.connect(self.graph.set_runs)
+        self.actions.stale_jobs.connect(self.tree.set_stale)
+        self.actions.stale_jobs.connect(self.graph.set_stale)
+        self.actions.stale_jobs.connect(self.info.set_stale)
         self.actions.message.connect(lambda m: self.statusBar().showMessage(m, 6000))
         self.actions.star.connect(self.set_star)
 
@@ -376,6 +380,8 @@ class MainWindow(QMainWindow):
         apply_relion_defaults(s, self.env)
         self._pipeliner_exe = self.env.which("relion_pipeliner")
         self.actions.editor.own_scratch = setting(s, "scratch_own")
+        self.actions.set_gpu_queue(setting(s, "gpu_queue"))
+        self.actions.auto_continue = setting(s, "auto_continue")
         self.actions.editor.refresh_defaults()  # an open editor shows the new scratch directory
         style.apply_theme(QApplication.instance(), setting(s, "theme"))
         self.actions.set_editor_place(setting(s, "editor"))
@@ -824,6 +830,8 @@ class MainWindow(QMainWindow):
             self.actions.editor_window.placed = self.actions.editor_window.restoreGeometry(s.value("editor_geometry"))
         self.actions.set_editor_place(setting(s, "editor"))
         self.actions.editor.own_scratch = setting(s, "scratch_own")
+        self.actions.set_gpu_queue(setting(s, "gpu_queue"))
+        self.actions.auto_continue = setting(s, "auto_continue")
         self.actions.hide_editor()
 
     def closeEvent(self, e) -> None:

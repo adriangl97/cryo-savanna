@@ -18,6 +18,7 @@ from cryo_savanna.jobdefs.model import JobVariant
 from cryo_savanna.jobdefs.pytom_jobs import TITLES as PYTOM_TITLES
 from cryo_savanna.jobdefs.pytom_jobs import (EXTRACT as PYTOM_EXTRACT, MATCH as PYTOM_MATCH, PytomVariant,
                                              last_settings, quoted_values)
+from cryo_savanna.project import autocontinue
 from cryo_savanna.project.jobstar import JobStar, read_last_used
 from cryo_savanna.project.ops import OpsError, PipelineOps
 from cryo_savanna.project.pipeline import Pipeline
@@ -153,6 +154,11 @@ class FormActions(_Base):
         except (OSError, ValueError, KeyError) as e:
             QMessageBox.warning(self.window, "Continue", f"Cannot read {job}job.star: {e}")
             return
+        if autocontinue.continuable(js.type_label):  # "Continue from here": the latest iteration it finished
+            latest = autocontinue.latest_optimiser(project, job)
+            current = js.options.get("fn_cont", "")
+            if latest and (not current or current.startswith(job)):  # (not a file of another job typed there)
+                js.options["fn_cont"] = latest
         self._edit("Continue", self.editor.continue_job, job, js, variant)
 
     def overwrite_job(self) -> None:

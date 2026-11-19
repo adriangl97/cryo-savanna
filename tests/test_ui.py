@@ -708,3 +708,52 @@ def test_a_run_still_going_shows_and_guards_its_jobs(window, spa_copy, monkeypat
     finally:
         proc.kill()
         proc.wait()
+
+
+def test_out_of_date_jobs_show_and_can_be_chosen_to_run_again(window, spa_copy):
+    """Extract's particles written again after the jobs that read them ran: those jobs and all after them are out
+    of date, in the list, on their cards and in the overview; the dialog offers them, the selected job's first."""
+    from qtpy.QtWidgets import QDialog
+
+    from cryo_savanna.ui.job_tree import COL_STATUS
+    later = time.time() + 60
+    os.utime(spa_copy / "Extract/job005/particles.star", (later, later))
+    w = window(spa_copy)
+    w.actions.look_at_project_now()
+    stale = w.actions.stale
+    assert "Class2D/job006/" in stale and stale["Class2D/job006/"].changed == ("Extract/job005/particles.star",)
+    assert stale["Refine3D/job011/"].upstream is not None  # further down
+    assert "Extract/job005/" not in stale and "Polish/job015/" not in stale  # not after it / not finished
+    assert w.tree._items["Class2D/job006/"][COL_STATUS].text().endswith("· out of date")
+    assert "out of date" in w.graph.nodes["Class3D/job009/"].job_line()
+    w.select_job("Class2D/job006/")
+    assert "its input from Extract/job005 was written again" in w.info.overview.toPlainText()
+    assert w.actions.act_rerun.isEnabled() == w.actions.pipeliner.available  # (needs relion_pipeliner)
+    seen = {}
+
+    def answer(dlg):
+        for i in range(dlg.list.count()):
+            it = dlg.list.item(i)
+            seen[it.data(Qt.UserRole)] = (bool(it.flags() & Qt.ItemIsEnabled), it.checkState() == Qt.Checked)
+        return QDialog.Rejected
+    w.actions.rerun_out_of_date(answer)
+    assert seen["Class2D/job006/"] == (True, True)
+    assert seen["Select/job007/"][0] is False  # an interactive selection: by hand
+    assert seen["Class3D/job009/"] == (True, True)  # after it: chosen too
+
+
+def test_cards_of_scheduled_jobs_say_what_their_run_waits_for(window, spa_copy):
+    from cryo_savanna.project.pipeliner import Held, RunRecord
+    w = window(spa_copy)
+    job = "Refine3D/job016/"  # Scheduled
+    rec = RunRecord("r1", [job], "cryo-savanna", 1, "host", "me", time.time(), [], gpus=["0"])
+    card = w.graph.nodes[job]
+    for held, text in ((Held(rec, True, [], ["0"]), "waiting for a GPU"),
+                       (Held(rec, True, ["Select/job010/particles.star"]), "waiting for input"),
+                       (Held(rec, False), "in a run")):
+        w.actions.runs.emit({job: held})
+        assert card.job_line().endswith("· Scheduled · " + text)
+        assert held.describe() in card.toolTip()
+        assert w.tree._status_text(w.snapshot.jobs[job]).endswith(text)  # the same words as the list
+    w.actions.runs.emit({})
+    assert card.job_line().endswith("· Scheduled")

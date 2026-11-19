@@ -168,6 +168,14 @@ def lost_text(a) -> str:
             "in a window that may change the project.")
 
 
+def held_text(status: str, held) -> str:
+    """What a run still going does with a scheduled job (a pipeliner.Held), for the list and the cards: "waiting
+    for a GPU", "waiting for input", "in a run"; "" when no run holds it."""
+    if status != "Scheduled" or held is None:
+        return ""
+    return "waiting for a GPU" if held.waiting_for_gpus else "waiting for input" if held.waiting else "in a run"
+
+
 def status_text(status: str, pending: bool) -> str:
     return f"{status} (pipeline not updated yet)" if pending else status
 

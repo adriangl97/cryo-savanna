@@ -128,6 +128,39 @@ polling interval (Preferences, or `--poll`), and views of running jobs read new 
   looking, by sacct's submit line (newer SLURM releases only). A submit template with
   `#SBATCH --job-name=XXXnameXXX` (RELION fills in the job directory) makes this direct, and squeue
   readable for everyone.
+- **Preview submission script…** (job editor, under "Standard submission script", while "Submit to queue?"
+  is Yes).
+- **Time left**: a running Class2D, Class3D or InitialModel job shows, after its iteration and how long it has
+  run, how long it has left (`iter 12/25 · 1 h 05 min · ~40 min left`), at the pace of its last few
+  iterations. Refine3D and
+  MultiBody run until they converge: they show the time per iteration instead (`~6 min/iter`). AreTomo3 and
+  pytom template matching show the tilt series or tomograms done and the time the rest may take. Every other RELION
+  job shows what RELION's own progress bar in run.out estimates (`~12 min left in this step`): for a program
+  with several steps (CTF refinement, ...), only the step it is at.
+- **Out of date**: a finished job whose input was written again after it ran (the job that made it was
+  continued, overwritten and run again, or a selection was saved again), or whose input job is being run
+  again, shows "out of date" with its status in the List, on its card in the Tree and in the Overview, which
+  says why. **Job → Run out-of-date jobs again…** lists them: each job ticked is overwritten (its files go to
+  Trash/, as Overwrite does) and runs again with its own settings, all in one run, each after the jobs it
+  reads from. Interactive jobs (manual picking, a selection made in a window) are listed but not run, run
+  them again by hand. Only jobs with RELION's exit file are looked at (not those marked finished by hand),
+  and inputs from imported files do not count.
+- **Continuing after the SLURM time limit**: a Class2D, Class3D, InitialModel, Refine3D or MultiBody job that
+  SLURM ended at its time limit is marked failed (see Queue above). **Continue…** then has "Continue from
+  here" filled in with the last iteration it finished (the same for any continue of these jobs). With
+  Preferences → SLURM → "Continue jobs that hit the SLURM time limit", cryo-savanna continues it itself,
+  once the run that sent it to the queue has seen it fail, with the same settings, at most 3 times per run
+  of the job (`.cryo-savanna/auto_continue.json`), and says so at the end of run.err. Only while
+  cryo-savanna is open and looks at the queue.
+- **Local GPU queue** (Preferences, on by default): jobs that use GPUs of this machine (not sent to a queue)
+  and are started while another run of cryo-savanna uses those GPUs, or
+  while nvidia-smi shows a RELION job computing on them (one started from RELION's own GUI or a script: a
+  RELION program, or a program started by an External job, such as AreTomo3 or pytom), wait for them. Any other
+  program on the GPU is not waited for. Such a job shows
+  "Scheduled · waiting for a GPU", its run says which GPUs it waits for in the Overview, and Job → Stop
+  runs… stops it (the job stays Scheduled). It starts when the GPUs are free, also when cryo-savanna is
+  closed. The locks are files in `/tmp/cryo-savanna-gpu-locks/` (else in
+  `~/.cache/cryo-savanna/`), released when the run's processes end, so nothing is left to clean up.
 
 ## Box sizes
 
@@ -440,6 +473,17 @@ deleted).
 
 The ChimeraX that "Open in ChimeraX" starts; empty, the one on PATH. A `$CRYO_SAVANNA_CHIMERAX` set
 in the shell wins over this preference.
+
+### Local GPU queue
+
+On by default: runs of jobs that use GPUs of this machine wait until those GPUs are free (see
+[Running jobs](#running-jobs)). Off: they start at once, as in RELION's GUI.
+
+### Continue jobs that hit the SLURM time limit
+
+Off by default. On: relion_refine jobs (Class2D, Class3D, InitialModel, Refine3D, MultiBody) that SLURM ended
+at their time limit are continued from their last iteration, at most 3 times per run of the job (see
+[Running jobs](#running-jobs)).
 
 ### Scratch directory
 

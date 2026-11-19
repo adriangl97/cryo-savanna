@@ -26,7 +26,7 @@ from cryo_savanna.project.failure_hints import Diagnosis, diagnose
 from cryo_savanna.project.jobstar import JobStar
 from cryo_savanna.project.pipeline import Pipeline, Process
 from cryo_savanna.project.snapshot import JobInfo, stamp
-from cryo_savanna.project.star import StarError, loop_rows, read_star_head
+from cryo_savanna.project.star import StarError, loop_rows, read_star, read_star_head
 from cryo_savanna.relion_consts import STATUS_FAILED, STATUS_RUNNING, job_type_for_label
 
 ITERATIVE = {"relion.class2d", "relion.class3d", "relion.initialmodel", "relion.refine3d", "relion.multibody"}
@@ -84,6 +84,92 @@ def current_iterations(files) -> dict[int, str]:
     return {it: n for it, (_, n) in sorted(out.items())}
 
 
+PACE_ITERATIONS = 4  # a running job's time per iteration is taken over this many of its latest iterations
+MIN_PACE_S = 1.0
+
+
+def _pace(jobdir: Path, models: dict[int, str], root: str) -> tuple[float | None, float | None]:
+    """(seconds per iteration, when the latest iteration was written) of a running iterative job, from the times
+    its latest model files were written. Only the files of its latest run count (``root``: "run", "run_ct5"): a
+    continued run's earlier iterations may be days older. VDAM writes its files every few iterations
+    (--grad_write_iter): the time between two files is divided by the iterations between them."""
+    times = []
+    for it, n in [(it, n) for it, n in models.items() if n.startswith(root + "_it")][-(PACE_ITERATIONS + 1):]:
+        st = stamp(jobdir / n)
+        if st is not None:
+            times.append((it, st[0] / 1e9))
+    if not times:
+        return None, None
+    (first_it, first_t), (last_it, last_t) = times[0], times[-1]
+    per = (last_t - first_t) / (last_it - first_it) if last_it > first_it else 0.0
+    # under a second: files written together (a job copied or restored), not the pace of its iterations
+    return (per if per >= MIN_PACE_S else None), last_t
+
+
+# The tables cryo-savanna's runners keep of the items they work through: (file, what the items are)
+ITEM_TABLES = (("aretomo3.star", "tilt series"), ("pytom_match.star", "tomograms"))
+# RELION's progress bar (src/time.cpp): "  3.12/  5.40 min ..........~~(,_,">", time so far / estimated total
+_BAR = re.compile(r"(\d+(?:\.\d+)?)\s*/\s*(\d+(?:\.\d+)?)\s+(sec|min|hrs?|hours?|days?)\s*\.*~~\(,_,\">")
+_UNIT_S = {"sec": 1, "min": 60, "hr": 3600, "hrs": 3600, "hour": 3600, "hours": 3600, "day": 86400, "days": 86400}
+BAR_TAIL_BYTES = 8192
+
+
+def _progress_bar(run_out: Path, s: "JobSummary") -> bool:
+    """When the step RELION's progress bar is at should end (s.ends_at, s.step), if the bar is the last thing the
+    program wrote and has not reached its end: run.out's time plus the estimated total less the time so far."""
+    try:
+        with open(run_out, "rb") as fh:
+            fh.seek(0, os.SEEK_END)
+            fh.seek(max(0, fh.tell() - BAR_TAIL_BYTES))
+            tail = fh.read().decode("utf-8", errors="replace")
+            written = os.fstat(fh.fileno()).st_mtime
+    except OSError:
+        return False
+    last = next((x for x in reversed(re.split(r"[\r\n]+", tail)) if x.strip()), "")
+    m = _BAR.search(last)
+    if m is None:
+        return False
+    done, total, unit = float(m.group(1)), float(m.group(2)), _UNIT_S[m.group(3)]
+    if total <= done:  # the step is done: what comes next is not known yet
+        return False
+    s.ends_at, s.step = written + (total - done) * unit, True
+    return True
+
+
+def _items(jobdir: Path, s: "JobSummary") -> bool:
+    """The items one of cryo-savanna's runners works through (its table: status and seconds per item): how many
+    are done, and when all should be, at the pace of those done in this run, as many at once as now run."""
+    for name, what in ITEM_TABLES:
+        path = jobdir / name
+        try:
+            blocks = read_star(path)
+            written = path.stat().st_mtime
+        except (OSError, StarError):
+            continue
+        b = next((b for b in blocks.values() if b.is_loop and any(c.endswith("Status") for c in b.columns)), None)
+        if b is None:
+            continue
+        si = next(i for i, c in enumerate(b.columns) if c.endswith("Status"))
+        ti = next((i for i, c in enumerate(b.columns) if c.endswith("Seconds")), None)
+        status = [r[si] for r in b.rows]
+        took = [f for r, st in zip(b.rows, status) if st == "done" and ti is not None
+                for f in [_float(r[ti])] if f is not None and f > 0]  # 0: done in an earlier run, skipped now
+        running, pending = status.count("running"), status.count("pending")
+        s.items_done, s.items_total, s.items_what = status.count("done"), len(status), what
+        if took and (running or pending):
+            per = sum(took) / len(took)
+            s.ends_at = written + (pending + 0.5 * running) * per / max(1, running)
+        return True
+    return False
+
+
+def progress_lines(type_label: str, program: str = "") -> int:
+    """Lines a running job's card has for its progress: how far (iteration, items) and the times, or the times."""
+    from cryo_savanna.jobdefs import aretomo_jobs, pytom_jobs
+    counted = set(aretomo_jobs.TITLES.values()) | set(pytom_jobs.TITLES.values())
+    return 2 if base_type(type_label) in ITERATIVE or program in counted else 1
+
+
 def summary_lines(type_label: str) -> int:
     """Number of summary lines a job of this type can show (0-3)."""
     t = base_type(type_label)
@@ -99,6 +185,16 @@ class JobSummary:
     total_iterations: int | None = None
     started: float | None = None  # start of the latest run (note.txt)
     failure: list[Diagnosis] = field(default_factory=list)  # a failed job: what its logs say, most likely first
+    # a running iterative job: how long its recent iterations took, and when its latest one was written
+    seconds_per_iteration: float | None = None
+    iteration_written: float | None = None
+    # a running job of other kinds: the items it works through (AreTomo3's tilt series, pytom's tomograms) and
+    # when it should be done: at their pace, or as RELION's progress bar of the current step estimates it
+    items_done: int | None = None
+    items_total: int | None = None
+    items_what: str = ""
+    ends_at: float | None = None
+    step: bool = False  # ends_at is the end of the step RELION's progress bar is at (a program may have several)
 
     def lines(self) -> list[str]:
         return [" · ".join(x) for x in (self.result, self.settings, self.quality) if x]
@@ -106,13 +202,41 @@ class JobSummary:
     def text(self) -> str:
         return " · ".join(self.result + self.settings + self.quality)
 
-    def progress(self, now: float | None = None) -> str:
-        parts = []
+    def time_left(self, now: float | None = None) -> float | None:
+        """Seconds until the last iteration is written, at the pace of the recent ones (None: not known, e.g.
+        Refine3D, which runs until it converges). Can be negative: an iteration slower than the ones before."""
+        if (self.iteration is None or not self.total_iterations or self.seconds_per_iteration is None
+                or self.iteration_written is None):
+            return None if self.ends_at is None else self.ends_at - (now or time.time())
+        remaining = max(0, self.total_iterations - self.iteration) * self.seconds_per_iteration
+        # never more than the iterations left take (a clock that differs from the file server's)
+        return min(self.iteration_written + remaining - (now or time.time()), remaining)
+
+    def progress_count(self) -> str:
+        """How far it is: "iter 12/25", "5/20 tilt series" ("" when not known)."""
         if self.iteration is not None:
-            parts.append(f"iter {self.iteration}" + (f"/{self.total_iterations}" if self.total_iterations else ""))
+            return f"iter {self.iteration}" + (f"/{self.total_iterations}" if self.total_iterations else "")
+        if self.items_total:
+            return f"{self.items_done or 0}/{self.items_total} {self.items_what}".rstrip()
+        return ""
+
+    def progress_time(self, now: float | None = None) -> str:
+        """How long it has run and has left: "1 h 05 min · ~40 min left" ("" when not known)."""
+        parts = []
         if self.started is not None:
             parts.append(duration((now or time.time()) - self.started))
+        left = self.time_left(now)
+        if left is not None:
+            what = " in this step" if self.step else ""
+            parts.append(f"~{duration(left)} left{what}" if left >= 60 else "finishing" + (" this step" if self.step
+                                                                                            else ""))
+        elif self.seconds_per_iteration is not None:  # no last iteration to count to: the pace
+            per = self.seconds_per_iteration
+            parts.append(f"~{duration(per) if per >= 60 else f'{per:.0f} s'}/iter")
         return " · ".join(parts)
+
+    def progress(self, now: float | None = None) -> str:
+        return " · ".join(x for x in (self.progress_count(), self.progress_time(now)) if x)
 
 
 def duration(s: float) -> str:
@@ -227,7 +351,8 @@ class SummaryReader:
 
     def _key(self, info: JobInfo) -> tuple:
         d = self.project_dir / info.name
-        return (info.status, stamp(d), stamp(d / "job.star"), stamp(d / "note.txt"))
+        # run.out: RELION's progress bar moves on in it (only a running job is read again on a change of it)
+        return (info.status, stamp(d), stamp(d / "job.star"), stamp(d / "note.txt"), stamp(d / "run.out"))
 
     # ------------------------------------------------------------------ files
     def _count(self, rel: str, block: str) -> int | None:
@@ -266,6 +391,8 @@ class SummaryReader:
             opts = {}
         if running:
             s.started = last_start(jobdir / "note.txt")
+            if t not in ITERATIVE:
+                _items(jobdir, s) or _progress_bar(jobdir / "run.out", s)
 
         if t in ITERATIVE:
             self._iterative(t, pr, opts, s, running)
@@ -306,6 +433,8 @@ class SummaryReader:
             s.total_iterations = _count(opts.get("nr_iter"))
         if not running:
             s.iteration = s.total_iterations = None  # progress is only shown while running
+        elif last is not None:
+            s.seconds_per_iteration, s.iteration_written = _pace(jobdir, models, root)
 
         data = "run_data.star" if "run_data.star" in names else (
             f"{root}_it{last:03d}_data.star" if last is not None else None)

@@ -114,6 +114,7 @@ class JobTreeView(QTreeView):
         self.setColumnHidden(COL_QUEUE, True)  # shown once SLURM is found
         self.queue = None  # slurm.QueueState
         self.held: dict = {}  # job -> pipeliner.Held: the jobs runs still going are to run
+        self.stale: dict = {}  # job -> staleness.Stale: the finished jobs that are out of date
         self._items: dict[str, list[QStandardItem]] = {}
         self._structure: tuple | None = None
         self._collapsed: set[str] = set()
@@ -186,6 +187,15 @@ class JobTreeView(QTreeView):
         if selected and selected in self._items:
             self.select_job(selected, scroll=False)
         self.verticalScrollBar().setValue(scroll)
+
+    def set_stale(self, stale: dict) -> None:
+        """The finished jobs that are out of date (project/staleness.py): shown with their status."""
+        old, self.stale = self.stale, stale
+        with self._many_changes():
+            for name in old.keys() | stale.keys():
+                if old.get(name) != stale.get(name) and name in self._items and self._snapshot is not None \
+                        and name in self._snapshot.jobs:
+                    self._fill_summary(self._items[name], self._snapshot.jobs[name], self.summaries.get(name))
 
     def set_runs(self, held: dict) -> None:
         """The jobs runs still going are to run (Pipeliner.held_jobs): shown with their status."""
@@ -351,15 +361,20 @@ class JobTreeView(QTreeView):
     def _status_text(self, info: JobInfo, now: float | None = None) -> str:
         text = info.status + ("*" if info.pending_update else "")
         held = self.held.get(info.name)
-        if info.status == "Scheduled" and held is not None:
-            text += " · waiting for input" if held.waiting else " · in a run"
+        if style.held_text(info.status, held):
+            text += " · " + style.held_text(info.status, held)
         s = self.summaries.get(info.name)
         if info.status == "Running" and s is not None and s.progress(now):
             text += " · " + s.progress(now)
+        if info.status == "Succeeded" and info.name in self.stale:
+            text += " · out of date"
         return text
 
     def _fill_summary(self, row: list[QStandardItem], info: JobInfo, s: JobSummary | None) -> None:
         row[COL_STATUS].setText(self._status_text(info))
+        stale = self.stale.get(info.name) if info.status == "Succeeded" else None
+        tip = style.status_text(info.status, info.pending_update)
+        row[COL_STATUS].setToolTip(tip + (f"\nOut of date: {stale.text()}" if stale is not None else ""))
         item = row[COL_SUMMARY]
         item.setText(s.text() if s is not None else "")
         item.setData(item.text(), SORT_ROLE)

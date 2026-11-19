@@ -460,6 +460,7 @@ class JobEditor(QWidget):
         # the compute suggestion (jobdefs/compute_advice.py): (the line under a row, that row's label)
         self.compute_hints: list[tuple[QLabel, QLabel]] = []
         self.advice: advice_rules.Advice | None = None
+        self.submit_preview_link: QLabel | None = None  # under "Standard submission script", while it is sent to a queue
         self.specs_cache = SPECS
         self._specs_ready.connect(lambda: self._update_compute_hints())
         self.rows: list[tuple[int, Row, list[QWidget]]] = []  # (tab index, row, widgets to show/hide)
@@ -663,6 +664,7 @@ class JobEditor(QWidget):
         self.box_warnings.clear()
         self.compute_hints.clear()
         self.advice = None
+        self.submit_preview_link = None
         box_keys = box_sizes.box_options(variant.key)
         advised = advice_rules.covered(variant.key, options)
         self.flag_panel = self.flags_toggle = None
@@ -732,6 +734,14 @@ class JobEditor(QWidget):
                     hint.linkActivated.connect(self._on_hint_link)
                     grid.addWidget(hint, r, 1, 1, 2)
                     self.compute_hints.append((hint, label))
+                    r += 1
+                if "qsubscript" in keys:  # the script RELION would write, before it does
+                    link = QLabel("<a href='preview'>Preview submission script…</a>")
+                    link.setToolTip("The run_submit.script RELION writes when it sends the job, from these settings, "
+                                    "and what may be wrong with it (partition, time limit, GPUs, empty fields)")
+                    link.linkActivated.connect(lambda _href: self.preview_submission())
+                    grid.addWidget(link, r, 1, 1, 2)
+                    self.submit_preview_link = link
                     r += 1
                 if keys == [EXTRA_ARGS] and not getattr(variant, "is_cli", False):
                     panel_row = r
@@ -1064,6 +1074,8 @@ class JobEditor(QWidget):
             self.flag_panel.setEnabled(self.widgets[EXTRA_ARGS].isEnabled())
         if self.selector is not None:
             self.selector.setEnabled(not self.readonly and interactive_kind(self.variant.label, vals) is not None)
+        if self.submit_preview_link is not None:
+            self.submit_preview_link.setVisible(vals.get("do_queue") == "Yes")
         self._update_box_warnings(vals)
         self._update_compute_hints(vals)
         self._update_inputs(vals)
@@ -1103,6 +1115,25 @@ class JobEditor(QWidget):
             self.inputs_changed.emit(inputs)
 
     # ------------------------------------------------------------------ compute suggestion
+    def preview_submission(self, dialog_hook=None):
+        """Show the submission script RELION would write for the job now in the editor (ui/submit_preview.py).
+        ``dialog_hook(dlg)`` (tests) instead of showing it; returns the dialog."""
+        from cryo_savanna.project.gpu_queue import job_gpu_ids
+        from cryo_savanna.project.submit_script import preview
+        from cryo_savanna.ui.submit_preview import SubmitPreviewDialog
+        if self.variant is None:
+            return None
+        vals, job, project = self.values(), self.job_dir(), self.project_dir
+        gpus = job_gpu_ids(self.jobstar(job), queued=True)
+        extras = max((ex.index for ex in self.env.qsub_extras()), default=0)
+        template = (vals.get("qsubscript") or "").strip()
+        dlg = SubmitPreviewDialog(job, lambda: preview(template, vals, job, extras, project, gpus), self)
+        if dialog_hook is not None:
+            dialog_hook(dlg)
+        else:
+            dlg.show()
+        return dlg
+
     def _job_specs(self, vals: dict[str, str]) -> Specs | str | None:
         """What the job runs on: this machine, or a node of the queue (SLURM) it is submitted to; a text
         when that cannot be told; None while it is being looked up."""

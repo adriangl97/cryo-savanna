@@ -76,6 +76,16 @@ and can be used interchangeably, even at the same time, on the same project.
   this machine (CPUs, RAM, the GPUs chosen) or, for a queued job, a node of the SLURM partition its
   submission script asks for. For refinements they come from the box size of the input particles, and
   values RELION would refuse (VDAM with MPI, an even MPI count for Refine3D) are flagged.
+- **Time left** for running jobs: Class2D, Class3D and InitialModel from the pace of their last iterations
+  (the time per iteration for Refine3D and MultiBody), AreTomo3 and pytom from the items done, every other
+  RELION job from RELION's own progress bar (its current step).
+- **Out-of-date jobs**: finished jobs whose inputs changed after they ran (the job before them was continued or
+  overwritten, a selection saved again), and the jobs after them, are marked, and **Run out-of-date jobs
+  again…** runs them again with their own settings, in order, in one run.
+- **Preview submission script…** in the job editor: the `run_submit.script`.
+- **Local GPU queue**: jobs started on this machine while their GPUs are in use by other RELION or external jobs will wait for them.
+- Jobs that hit the **SLURM time limit** are continued from their last iteration (Preferences; at most 3 times),
+  and Continue has the last iteration filled in.
 - Failed jobs show their **likely cause** in the Overview and the tree (GPU or RAM out of memory, the
   queue's time limit, a missing input, too few MPI processes, ...), with the log line it comes from.
 - RELION's command-line-only programs (`relion_image_handler`, `relion_reconstruct`, the

@@ -72,6 +72,9 @@ class JobActions(FormActions, SelectionActions, RunActions, PipelineActions, Act
                                        tip="Run the selected job again with new settings in its own directory "
                                            "(the current one goes to Trash/)")
         self.act_run = self._act("Run scheduled…", self.run_scheduled, "Ctrl+R", "Run scheduled jobs")
+        self.act_rerun = self._act("Run out-of-date jobs again…", lambda: self.rerun_out_of_date(),
+                                   tip="Run finished jobs again, with their own settings, whose inputs changed after "
+                                       "they ran (or that depend on such a job)")
         self.act_stop_runs = self._act("Stop runs…", self.stop_runs,
                                        tip="Stop a repeating run after its current job, or a run that waits for "
                                            "the input files of its next job")
@@ -132,7 +135,8 @@ class JobActions(FormActions, SelectionActions, RunActions, PipelineActions, Act
 
         self.job_menu = QMenu("Job", self.window)
         self.job_menu.addMenu(self.new_menu)
-        for a in (self.act_clone, self.act_continue, self.act_overwrite, self.act_run, self.act_stop_runs, None,
+        for a in (self.act_clone, self.act_continue, self.act_overwrite, self.act_run, self.act_rerun,
+                  self.act_stop_runs, None,
                   self.act_abort, self.act_alias, self.act_star, self.act_finished, self.act_failed, None,
                   self.act_gentle, self.act_harsh, None, self.act_delete, self.act_delete_all, self.act_undelete):
             self.job_menu.addSeparator() if a is None else self.job_menu.addAction(a)
@@ -142,7 +146,8 @@ class JobActions(FormActions, SelectionActions, RunActions, PipelineActions, Act
             self.select.emit(job)
         m = QMenu(self.window)
         m.addMenu(self.new_menu)
-        for a in (self.act_clone, self.act_continue, self.act_overwrite, self.act_run, None, self.act_abort, self.act_alias,
+        for a in (self.act_clone, self.act_continue, self.act_overwrite, self.act_run, self.act_rerun, None,
+                  self.act_abort, self.act_alias,
                   self.act_star, self.act_finished, self.act_failed, None, self.act_gentle, self.act_harsh, None,
                   self.act_delete, self.act_delete_all):
             m.addSeparator() if a is None else m.addAction(a)
@@ -166,6 +171,7 @@ class JobActions(FormActions, SelectionActions, RunActions, PipelineActions, Act
         self.act_overwrite.setEnabled(self.act_continue.isEnabled())
         scheduled = snap is not None and any(j.status == "Scheduled" for j in snap.jobs.values())
         self.act_run.setEnabled(writable and has_pipeliner and scheduled)
+        self.act_rerun.setEnabled(writable and has_pipeliner and bool(self.stale))
         self.act_stop_runs.setEnabled(writable and self._has_stoppable)
         self.act_abort.setEnabled(writable and status == "Running")
         for a in (self.act_alias, self.act_finished, self.act_failed, self.act_delete, self.act_delete_all):

@@ -20,11 +20,13 @@ from cryo_savanna.jobdefs import external_jobs
 from cryo_savanna.jobdefs.model import JobDefs
 from cryo_savanna.jobdefs.pytom_jobs import warm_defaults as warm_pytom_defaults
 from cryo_savanna.project import disk_usage
+from cryo_savanna.project.gpu_queue import GpuQueue
 from cryo_savanna.project.ops import OpsError, PipelineOps
 from cryo_savanna.project.pipeliner import Pipeliner, PipelinerError
 from cryo_savanna.project.rebuild import RebuildError
 from cryo_savanna.project.slurm import QueueState, SlurmMonitor
 from cryo_savanna.project.snapshot import ProjectSnapshot
+from cryo_savanna.project.staleness import StalenessChecker
 from cryo_savanna.ui import style
 from cryo_savanna.ui.job_editor import JobEditor
 
@@ -94,6 +96,7 @@ class ActionsBase(QObject):
     star = Signal(str, bool)  # star or unstar this job
     editor_inputs = Signal(object)  # {job: [field labels]} the shown job editor takes inputs from ({}: none, or closed)
     runs = Signal(object)  # {job: Held}: the jobs runs still going are to run (Pipeliner.held_jobs), at each look
+    stale_jobs = Signal(object)  # {job: Stale}: the finished jobs that are out of date (project/staleness.py)
 
     def __init__(self, window: QMainWindow, defs: JobDefs, env: RelionEnv, type_names: dict[str, str],
                  tomo: bool, readonly: bool, flag_source=None):
@@ -103,6 +106,11 @@ class ActionsBase(QObject):
         self.project_dir: Path | None = None
         self.pipeliner: Pipeliner | None = None
         self.ops: PipelineOps | None = None
+        self.staleness: StalenessChecker | None = None
+        self.stale: dict = {}  # job -> Stale, at the last look
+        self.gpu_queue_on = True  # Preferences → local GPU queue: runs here wait for their GPUs (set_gpu_queue)
+        self.auto_continue = False  # Preferences: continue relion_refine jobs that hit the SLURM time limit
+        self._continuing: dict[str, tuple[str, float]] = {}  # job -> (SLURM id, until when): to continue (running.py)
         self.snapshot: ProjectSnapshot | None = None
         self.current: str | None = None
         self.pool = QThreadPool(self)
@@ -168,7 +176,10 @@ class ActionsBase(QObject):
     def set_project(self, project_dir: Path) -> None:
         self.project_dir = Path(project_dir)
         self.pipeliner = Pipeliner(project_dir)
+        self.pipeliner.gpu_queue = GpuQueue() if self.gpu_queue_on else None
         self.ops = PipelineOps(project_dir)
+        self.staleness = StalenessChecker(project_dir)
+        self.stale = {}
         self.snapshot, self.current, self._structure, self._nodes = None, None, None, None
         self.editor.set_project(self.project_dir, None)
         self.hide_editor()
@@ -205,22 +216,28 @@ class ActionsBase(QObject):
             self._look_again = True
             return
         self._looking, self._look_again = True, False
-        project, ops, pl = self.project_dir, self.ops, self.pipeliner
+        project, ops, pl, checker = self.project_dir, self.ops, self.pipeliner, self.staleness
         pipeline = self.snapshot.pipeline if self.snapshot is not None else None  # not changed once made
-        self._look_pool.start(_Task(lambda: (project, *self._project_state(ops, pl, pipeline)), self._look_signals))
+        self._look_pool.start(_Task(lambda: (project, *self._project_state(ops, pl, pipeline, checker)),
+                                    self._look_signals))
 
     @staticmethod
-    def _project_state(ops: PipelineOps | None, pl: Pipeliner | None, pipeline=None) -> tuple[bool, bool, dict]:
-        """(anything to undelete, any run Stop runs can stop, the jobs runs still going hold)."""
+    def _project_state(ops: PipelineOps | None, pl: Pipeliner | None, pipeline=None,
+                       checker: StalenessChecker | None = None) -> tuple[bool, bool, dict, dict]:
+        """(anything to undelete, any run Stop runs can stop, the jobs runs still going hold, the jobs out of
+        date)."""
         held = pl.held_jobs(pipeline) if pl is not None else {}
-        stoppable = pl is not None and (bool(pl.repeating_runs()) or any(h.waiting for h in held.values()))
-        return ops is not None and bool(ops.trash()), stoppable, held
+        stoppable = pl is not None and (bool(pl.repeating_runs()) or any(h.stoppable for h in held.values()))
+        stale = checker.check(pipeline) if checker is not None and pipeline is not None else {}
+        return ops is not None and bool(ops.trash()), stoppable, held, stale
 
     def look_at_project_now(self) -> None:
         """_look_at_project, done at once (tests)."""
         pipeline = self.snapshot.pipeline if self.snapshot is not None else None
-        self._has_trash, self._has_stoppable, held = self._project_state(self.ops, self.pipeliner, pipeline)
+        self._has_trash, self._has_stoppable, held, self.stale = self._project_state(
+            self.ops, self.pipeliner, pipeline, self.staleness)
         self.runs.emit(held)
+        self.stale_jobs.emit(self.stale)
         self.update_state()
 
     def _held_now(self) -> dict:
@@ -234,15 +251,23 @@ class ActionsBase(QObject):
             return {}
 
     def _on_look(self, result) -> None:
-        """``result``: (project, has_trash, has_stoppable, held), or None when the look failed (kept as it was)."""
+        """``result``: (project, has_trash, has_stoppable, held, stale), or None when the look failed (kept as it
+        was)."""
         self._looking = False
-        project, has_trash, has_stoppable, held = result if result is not None else (None, False, False, {})
+        project, has_trash, has_stoppable, held, stale = result if result is not None else (None, False, False, {}, {})
         if result is not None and project == self.project_dir:  # not one of the project open before
-            self._has_trash, self._has_stoppable = has_trash, has_stoppable
+            self._has_trash, self._has_stoppable, self.stale = has_trash, has_stoppable, stale
             self.runs.emit(held)
+            self.stale_jobs.emit(stale)
             self.update_state()
         if self._look_again or (result is not None and project != self.project_dir):
             self._look_at_project()
+
+    def set_gpu_queue(self, on: bool) -> None:
+        """Preferences → local GPU queue: runs of jobs that use GPUs here wait until those GPUs are free."""
+        self.gpu_queue_on = on
+        if self.pipeliner is not None:
+            self.pipeliner.gpu_queue = GpuQueue() if on else None
 
     def set_slurm(self, monitor) -> None:
         self.slurm, self.queue = monitor, None

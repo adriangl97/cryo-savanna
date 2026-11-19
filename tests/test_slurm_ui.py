@@ -251,3 +251,38 @@ def test_a_refine_job_that_never_started_can_be_marked_failed_and_overwritten(wi
     w.load_now()
     w.select_job(job)
     assert w.snapshot.jobs[job].status == "Failed" and w.actions.act_overwrite.isEnabled()
+
+
+def test_a_refine_job_that_hit_the_time_limit_is_continued_from_its_last_iteration(window, spa_copy, slurm, monkeypatch):
+    """Preferences → "Continue jobs that hit the SLURM time limit": marked failed, then continued from the latest
+    iteration it finished, at most autocontinue.MAX_TIMES times per run of it."""
+    from cryo_savanna.project import autocontinue
+    from cryo_savanna.project.pipeline import Pipeline
+    state, _ = slurm
+    job = "Class3D/job009/"
+    i = _ended_in_slurm(spa_copy, state, job, "TIMEOUT")
+    w = window(spa_copy)
+    w.actions.auto_continue = True
+    continued = []
+    monkeypatch.setattr(w.actions.pipeliner, "continue_job", lambda j, js, **kw: continued.append((j, js)))
+    assert set(w.queue_now().lost) == {job}
+    deadline = time.time() + 20
+    while not continued and time.time() < deadline:
+        w.actions.wait(1000)
+        from qtpy.QtWidgets import QApplication
+        QApplication.processEvents()
+    assert [(j, js.is_continue, js.options["fn_cont"]) for j, js in continued] == \
+        [(job, True, "Class3D/job009/run_it025_optimiser.star")]
+    assert Pipeline.read(spa_copy).processes[job].status == "Failed"  # no run waited for it: marked failed first
+    assert autocontinue.times_continued(spa_copy, job) == 1
+    assert f"after SLURM job {i} hit its time limit (1 of at most 3 times)" in (spa_copy / job / "run.err").read_text()
+    for n in range(2, 4):
+        autocontinue.note_continued(spa_copy, job, f"{i}{n}")
+    assert w.actions._auto_continue(job, "999") == "limit"  # continued often enough
+
+
+def test_without_the_preference_the_continue_form_has_the_last_iteration(window, spa_copy, slurm):
+    w = window(spa_copy)
+    w.select_job("Class3D/job009/")
+    w.actions.continue_job()
+    assert w.actions.editor.values()["fn_cont"] == "Class3D/job009/run_it025_optimiser.star"

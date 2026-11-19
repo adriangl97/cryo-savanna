@@ -38,6 +38,7 @@ from pathlib import Path
 from cryo_savanna.env.child import external_environ
 from cryo_savanna.jobdefs import external_jobs
 from cryo_savanna.project import processes
+from cryo_savanna.project.gpu_queue import GpuQueue, is_waiting
 from cryo_savanna.project.jobstar import JobStar
 from cryo_savanna.project.lock import PipelineLock
 from cryo_savanna.project.ops import TRASH_DIR, PipelineOps, placeholder
@@ -70,6 +71,7 @@ class RunRecord:
     command: list[str]
     repeat: int = 1
     log: str = ""  # relative to the project
+    gpus: list[str] = field(default_factory=list)  # the GPUs of this machine it waits for and keeps (gpu_queue.py)
 
     def is_alive(self) -> bool | None:
         """True/False on the host that started it; None elsewhere (cannot tell)."""
@@ -110,16 +112,29 @@ class Held:
     run: RunRecord
     current: bool  # the job the run is at now (not one after it)
     waiting_for: list[str] = field(default_factory=list)  # its input files not there yet (RELION waits for them)
+    gpus_waiting: list[str] = field(default_factory=list)  # the run waits for these GPUs (the local GPU queue)
 
     @property
     def waiting(self) -> bool:
         """The run waits for this job's input files: it has not started it, and nothing of it runs."""
         return self.current and bool(self.waiting_for)
 
+    @property
+    def waiting_for_gpus(self) -> bool:
+        """The run waits for its GPUs (gpu_queue.py): its relion_pipeliner has not started yet."""
+        return self.current and bool(self.gpus_waiting)
+
+    @property
+    def stoppable(self) -> bool:
+        """Nothing of the job runs yet (its inputs or its GPUs are awaited): its run can be ended now."""
+        return self.waiting or self.waiting_for_gpus
+
     def describe(self) -> str:
         started = time.strftime("%d %b %H:%M", time.localtime(self.run.started))
         text = f"in a run started {started} (relion_pipeliner {self.run.pid} on {self.run.host})"
-        if self.waiting:
+        if self.waiting_for_gpus:
+            text += ", waiting for GPU " + ", ".join(self.gpus_waiting) + " (the local GPU queue)"
+        elif self.waiting:
             text += ", waiting for " + ", ".join(self.waiting_for)
         elif not self.current:
             text += ", after the job it runs now"
@@ -140,6 +155,7 @@ class Pipeliner:
         # settings: RELION's GUI tools (relion_display, napari for tomography) need OpenGL
         self.environ = environ if environ is not None else external_environ()
         self._records: dict[str, RunRecord] = {}  # run record file -> its record (see runs)
+        self.gpu_queue: GpuQueue | None = None  # runs that use GPUs here wait for them (Preferences; gpu_queue.py)
 
     @property
     def available(self) -> bool:
@@ -304,27 +320,61 @@ class Pipeliner:
         if not jobs:
             raise PipelinerError("no jobs to run")
         self._check_free(jobs)
+        jobstars = []
         for job in jobs:  # scheduled earlier, perhaps by another cryo-savanna (or the project's copy was removed)
             try:
-                self._runner_for(JobStar.read(self.project_dir / job / "job.star"))
+                js = JobStar.read(self.project_dir / job / "job.star")
             except (OSError, ValueError, KeyError):
-                pass
+                continue
+            jobstars.append(js)
+            self._runner_for(js)
         rid = time.strftime("%Y%m%d-%H%M%S-") + uuid.uuid4().hex[:6]
         schedule = SCHEDULE if repeat <= 1 else f"{SCHEDULE}_{rid}"
         cmd = [self._require(), "--RunJobs", " ".join(jobs), "--schedule", schedule, "--repeat", str(repeat),
                "--min_wait", str(min_wait), "--min_wait_before", str(min_wait_before),
                "--sec_wait_after", str(sec_wait_after)]
+        gpus = self.gpu_queue.gpus_of(jobstars, self.environ) if self.gpu_queue is not None else []
+        if gpus and self.gpu_queue is not None:  # waits for them, then becomes the relion_pipeliner
+            label = f"{', '.join(j.rstrip('/') for j in jobs)} in {self.project_dir} ({_user()})"
+            cmd = self.gpu_queue.command(cmd, gpus, label)
         runs = self._gui_dir("runs")
         log = runs / f"{rid}.log"
         with open(log, "ab") as out:
             proc = subprocess.Popen(cmd, cwd=self.project_dir, env=self.environ, stdin=subprocess.DEVNULL, stdout=out,
                                     stderr=subprocess.STDOUT, start_new_session=True, close_fds=True)
         rec = RunRecord(rid, list(jobs), schedule, proc.pid, socket.gethostname(), _user(), time.time(), cmd, repeat,
-                        str(log.relative_to(self.project_dir)))
+                        str(log.relative_to(self.project_dir)), gpus)
         tmp = runs / f"{rid}.json.tmp"  # complete or absent: runs() reads each record only once
         tmp.write_text(json.dumps(asdict(rec), indent=1))
         os.replace(tmp, runs / f"{rid}.json")
         return rec
+
+    def rerun(self, jobs: list[str]) -> tuple[list[str], RunRecord]:
+        """Run finished jobs again with their own settings (out of date: project/staleness.py): each is
+        overwritten (its files to Trash/, as Overwrite does), then all run in one relion_pipeliner, each after the
+        jobs of them it takes inputs from, waiting for their files. Returns (the jobs in that order, the run)."""
+        if not jobs:
+            raise PipelinerError("no jobs to run again")
+        from cryo_savanna.project.staleness import dependency_order
+        p = Pipeline.read(self.project_dir)
+        done: list[str] = []
+        for job in dependency_order(p, jobs):
+            pr = p.processes.get(job)
+            try:
+                if pr is None:
+                    raise PipelinerError(f"no such job: {job}")
+                js = JobStar.read(self.project_dir / job / "job.star")
+                why = rerun_refused(js)
+                if why:
+                    raise PipelinerError(f"{job.rstrip('/')} {why}")
+                js.is_continue = False  # from the start, with its inputs as they are now
+                alias = pr.alias.rstrip("/").split("/", 1)[-1] if pr.has_alias else None
+                done.append(self.overwrite_job(job, js, alias).job)
+            except Exception as e:
+                left = ", ".join(j.rstrip("/") for j in done)
+                raise PipelinerError(f"{e}" + (f"\n\nOverwritten before this, now scheduled (not run): {left}" if left
+                                               else "")) from e
+        return done, self.run(done)
 
     def continue_job(self, job: str, jobstar: JobStar, **run_args) -> RunRecord:
         """Continue an existing job with these (continue-mode) options."""
@@ -350,11 +400,12 @@ class Pipeliner:
                                                                                              STATUS_RUNNING)]
             if not ahead or rec.is_alive() is not True:
                 continue
+            gpus = rec.gpus if rec.gpus and is_waiting(_command_line(rec.pid)) else []
             for k, job in enumerate(ahead):
                 pr = p.processes[job]
                 missing = ([n for n in pr.inputs if not (self.project_dir / n).exists()]
                            if k == 0 and pr.status == STATUS_SCHEDULED else [])
-                out[job] = Held(rec, k == 0, missing)
+                out[job] = Held(rec, k == 0, missing, gpus if k == 0 else [])
         return out
 
     def _check_free(self, jobs: list[str]) -> None:
@@ -376,7 +427,7 @@ class Pipeliner:
         (its relion_pipeliner can be ended now: nothing of the job has started)."""
         out: dict[str, tuple[RunRecord, str]] = {r.id: (r, "repeating") for r in self.repeating_runs()}
         for held in self.held_jobs(pipeline).values():
-            if held.waiting and held.run.id not in out:
+            if held.stoppable and held.run.id not in out:
                 out[held.run.id] = (held.run, "waiting")
         return sorted(out.values(), key=lambda x: x[0].started, reverse=True)
 
@@ -485,6 +536,20 @@ def _command_line(pid: int) -> list[str] | None:
     except (OSError, subprocess.SubprocessError):
         return None
     return r.stdout.split() if r.returncode == 0 and r.stdout.strip() else None
+
+
+INTERACTIVE = {"relion.manualpick", "relion.picktomo", "relion.excludetilts"}  # they open a window to work in
+
+
+def rerun_refused(js: JobStar) -> str:
+    """Why a job cannot simply be run again with its own settings ("" when it can): one that someone works
+    in (picking by hand, a selection made in a window)."""
+    from cryo_savanna.project.selection import interactive_kind
+    jt = job_type_for_label(js.type_label)
+    label = jt.label if jt is not None else js.type_label
+    if label in INTERACTIVE or interactive_kind(js.type_label, js.options) is not None:
+        return "is interactive: run it again by hand (its window opens)"
+    return ""
 
 
 def _in_trash(job: str) -> str:

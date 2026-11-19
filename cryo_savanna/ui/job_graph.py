@@ -31,7 +31,7 @@ from qtpy.QtWidgets import (
 )
 
 from cryo_savanna.project.snapshot import JobInfo, ProjectSnapshot
-from cryo_savanna.project.summary import JobSummary, summary_lines
+from cryo_savanna.project.summary import JobSummary, progress_lines, summary_lines
 from cryo_savanna.ui import style
 from cryo_savanna.ui.graph_layout import ARROW, GraphLayout, layout_graph
 
@@ -65,12 +65,19 @@ def card_lines(info: JobInfo, type_names: dict[str, str]) -> tuple[str, str | No
     return header, alias, summary_lines(pr.type_label)
 
 
+def card_progress_lines(info: JobInfo) -> int:
+    """Lines under the job number and status of a running job's card: its iteration (or items) and its times
+    (run so far, left), each on a line of its own; 0 when it does not run."""
+    return progress_lines(info.process.type_label, info.program) if info.status == "Running" else 0
+
+
 def card_size(info: JobInfo, type_names: dict[str, str], fonts: CardFonts) -> tuple[float, float]:
     """Width fits the header and the full alias; height fits every line the card can show."""
     header, alias, n_summary = card_lines(info, type_names)
     w = max(MIN_CARD_W, fonts.fm_header.horizontalAdvance(header) + PAD_L + PAD_R + STAR_W,
             fonts.fm_body.horizontalAdvance(alias) + PAD_L + PAD_R if alias else 0)
-    lines = 2 + (alias is not None) + n_summary  # header, [alias], job number + status, summary
+    lines = 2 + (alias is not None) + card_progress_lines(info) + n_summary  # header, [alias], number + status,
+    # [progress], summary
     return float(w), lines * fonts.line + 2 * PAD_V
 
 
@@ -85,6 +92,8 @@ class JobNodeItem(QGraphicsItem):
         self.info: JobInfo | None = None
         self.summary: JobSummary | None = None
         self.queue_text = ""  # place in the SLURM queue
+        self.stale = None  # staleness.Stale: a finished job that is out of date
+        self.held = None  # pipeliner.Held: a run still going is to run this job
         self.input_labels: list[str] = []  # the open job editor's fields that take this job's outputs
         self.setFlag(QGraphicsItem.ItemIsSelectable, True)
         self.setAcceptHoverEvents(True)
@@ -117,6 +126,10 @@ class JobNodeItem(QGraphicsItem):
                 tip.append("Likely cause: " + self.summary.failure[0].text)
         if self.queue_text:
             tip.append(getattr(self, "_queue_details", self.queue_text))
+        if self.stale is not None and info.status == "Succeeded":
+            tip.append("Out of date: " + self.stale.text())
+        if self.held is not None and info.status == "Scheduled":
+            tip.append(self.held.describe())
         if self.input_labels:
             tip.append(style.input_text(self.input_labels))
         self.setToolTip("\n".join(tip))
@@ -143,11 +156,38 @@ class JobNodeItem(QGraphicsItem):
             return ""
         number = info.process.name.rstrip("/").split("/")[-1]
         text = f"{number} · {info.status}" + ("*" if info.pending_update else "")
-        if info.status == "Running" and self.summary is not None and self.summary.progress():
-            text += " · " + self.summary.progress()
+        if style.held_text(info.status, self.held):  # a scheduled job a run still going holds
+            text += " · " + style.held_text(info.status, self.held)
         if self.queue_text:
             text += " · " + self.queue_text
+        if self.stale is not None and info.status == "Succeeded":
+            text += " · out of date"
         return text
+
+    def progress_lines(self) -> list[str]:
+        """The lines a running job's card was sized for (card_progress_lines): iteration or items, then the times;
+        with one line, the times only."""
+        info, s = self.info, self.summary
+        n = card_progress_lines(info) if info is not None else 0
+        if n == 0:
+            return []
+        count, times = (s.progress_count(), s.progress_time()) if s is not None else ("", "")
+        return [count, times] if n == 2 else [times]
+
+    def set_held(self, held) -> None:
+        def shown(h) -> tuple[str, str]:
+            return (style.held_text("Scheduled", h), h.describe()) if h is not None else ("", "")
+        changed = shown(held) != shown(self.held)
+        self.held = held
+        if changed:
+            self._update_tooltip()
+            self.update()
+
+    def set_stale(self, stale) -> None:
+        if stale != self.stale:
+            self.stale = stale
+            self._update_tooltip()
+            self.update()
 
     def set_queue(self, text: str, details: str) -> None:
         if text != self.queue_text:
@@ -220,6 +260,8 @@ class JobNodeItem(QGraphicsItem):
         if alias is not None:
             line(alias, fonts.body, fonts.fm_body, pal.color(QPalette.Text), elide=False)  # card is sized to fit it
         line(self.job_line(), fonts.small, fonts.fm_small, color if self.info.status != "Succeeded" else dim)
+        for text in self.progress_lines():
+            line(text, fonts.small, fonts.fm_small, color)
         for text in (self.summary.lines() if self.summary is not None else [])[:n_summary]:
             line(text, fonts.small, fonts.fm_small, dim)
         if self.input_labels:
@@ -332,11 +374,15 @@ class JobGraphView(QGraphicsView):
         self.graph_layout: GraphLayout | None = None
         self.fonts = CardFonts(self.font())
         self.summaries: dict[str, JobSummary] = {}
+        self.stale: dict = {}  # job -> staleness.Stale
+        self.held: dict = {}  # job -> pipeliner.Held
         self.inputs: dict[str, list[str]] = {}  # the open job editor's input jobs (set_inputs)
         self.scene().selectionChanged.connect(self._on_selection)
 
     def set_snapshot(self, snap: ProjectSnapshot) -> None:
-        key = snap.structure_key()
+        # the running jobs too: their cards are taller (card_progress_lines), so the tree is laid out again when
+        # a job starts or stops running
+        key = (snap.structure_key(), tuple(n for n, j in snap.jobs.items() if j.status == "Running"))
         if key == self._structure:
             for name, info in snap.jobs.items():
                 self.nodes[name].set_info(info)
@@ -365,6 +411,8 @@ class JobGraphView(QGraphicsView):
             item.set_info(info)
             item.set_summary(self.summaries.get(name))
             item.set_queue(*style.queue_entry(self.queue, name)[:2])
+            item.set_stale(self.stale.get(name))
+            item.set_held(self.held.get(name))
             item.set_inputs(self.inputs.get(name, []))
             item.setPos(*lay.pos[name])
             scene.addItem(item)
@@ -382,6 +430,19 @@ class JobGraphView(QGraphicsView):
         for name, s in summaries.items():
             if name in self.nodes:
                 self.nodes[name].set_summary(s)
+
+    def set_runs(self, held: dict) -> None:
+        """The jobs runs still going are to run (Pipeliner.held_jobs): a scheduled job's card says whether its run
+        waits for its inputs or its GPUs, or will run it."""
+        self.held = held
+        for name, item in self.nodes.items():
+            item.set_held(held.get(name))
+
+    def set_stale(self, stale: dict) -> None:
+        """Mark the finished jobs that are out of date (project/staleness.py) on their cards."""
+        self.stale = stale
+        for name, item in self.nodes.items():
+            item.set_stale(stale.get(name))
 
     def set_queue(self, state) -> None:
         """Add each job's place in the SLURM queue to its card (a slurm.QueueState)."""

@@ -34,6 +34,7 @@ under the BSD 3-Clause License (see below):
 | `cryo_savanna/project/star.py`: reading and writing STAR files | `src/strings.cpp`, `src/metadata_table.cpp` |
 | `cryo_savanna/project/selection.py`: the files written by interactive Select and Exclude tilt images | `src/displayer.cpp`, `src/pipeline_jobs.cpp`, `src/multidim_array.h` (`centerOfMass`), `src/transformations.h` (`translateCenterOfMassToCenter`); for Exclude tilt images `src/tomography_python_programs/exclude_tilt_images/` and `_metadata_models/` (BSD 3-Clause, below) |
 | `cryo_savanna/project/disk_usage.py`: which files a gentle or harsh clean moves to Trash/ (`clean_targets`) | `src/pipeliner.cpp` (`PipeLine::cleanupJob`) |
+| `cryo_savanna/project/submit_script.py`: the submission script RELION writes for a queued job (`fill`) | `src/pipeline_jobs.cpp` (`RelionJob::saveJobSubmissionScript`) |
 | `cryo_savanna/jobdefs/model.py`, `cryo_savanna/jobdefs/flags.py`: applying the `RELION_*` environment to job options, and which program gets a job's additional arguments | `src/pipeline_jobs.cpp` (`RelionJob::initialise`, `RelionJob::getCommands*`) |
 | `cryo_savanna/ui/job_editor.py`: which pipeline nodes an input lists, RELION's file patterns | `src/filename.cpp`, `src/gui_entries.cpp` |
 | `cryo_savanna/env/relion_env.py`: reading `RELION_*` environment variables | `src/pipeline_jobs.cpp`, `src/pipeline_jobs.h` |
