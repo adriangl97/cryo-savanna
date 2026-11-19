@@ -319,3 +319,31 @@ def test_a_run_waiting_for_its_inputs_is_ended_under_the_lock(spa_copy, monkeypa
     finally:
         proc.kill()
         proc.wait()
+
+
+@pytest.fixture
+def non_english_dates():
+    """LC_TIME of a non-English locale, as Qt sets it from the user's (setlocale(LC_ALL, "") on start)."""
+    import locale
+    old = locale.setlocale(locale.LC_TIME)
+    for name in ("sv_SE.UTF-8", "de_DE.UTF-8", "es_ES.UTF-8", "fr_FR.UTF-8"):
+        try:
+            locale.setlocale(locale.LC_TIME, name)
+        except locale.Error:
+            continue
+        if time.strftime("%a %b", (2026, 3, 5, 0, 0, 0, 3, 64, -1)) != "Thu Mar":
+            break
+    else:
+        locale.setlocale(locale.LC_TIME, old)
+        pytest.skip("no non-English locale installed")
+    yield
+    locale.setlocale(locale.LC_TIME, old)
+
+
+def test_the_note_of_a_job_done_here_has_relions_dates_whatever_the_locale(spa_copy, non_english_dates):
+    from cryo_savanna.project.summary import last_start
+    job = next(n for n, pr in Pipeline.read(spa_copy).processes.items() if pr.status == "Succeeded")
+    before = time.time()
+    Pipeliner(spa_copy, exe="/nonexistent").finish_done_here(job, lambda _job: None, "relion_display ...")
+    started = last_start(spa_copy / job / "note.txt")  # " ++++ Executing new job on Thu Mar  5 10:00:00 2026"
+    assert started is not None and before - 2 <= started <= time.time() + 1

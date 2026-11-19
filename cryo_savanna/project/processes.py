@@ -92,10 +92,23 @@ def _output_is(job: str) -> re.Pattern:
 
 
 def _cwd(pid: int) -> Path | None:
+    """The working directory of a process: /proc (Linux), else lsof (macOS, which has no /proc); None when it
+    cannot be read. Without it, a process of another project that writes to a job directory of the same name
+    (--o Class3D/job009/) would be taken for one of this job's."""
     try:
         return Path(os.readlink(f"/proc/{pid}/cwd")).resolve()
     except OSError:
-        return None  # not Linux, or not ours to read
+        if os.path.isdir("/proc/self"):
+            return None  # Linux: gone, or not ours to read
+    try:
+        r = subprocess.run(["lsof", "-a", "-n", "-p", str(pid), "-d", "cwd", "-Fn"], capture_output=True, text=True,
+                           timeout=10, stdin=subprocess.DEVNULL)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    for line in r.stdout.splitlines():  # -F: one field per line, "n<path>" for the name
+        if line.startswith("n") and len(line) > 1:
+            return Path(line[1:]).resolve()
+    return None
 
 
 def _subtrees(roots: list[int], table: dict[int, Proc]) -> list[int]:
@@ -191,5 +204,5 @@ def kill(project_dir: str | os.PathLike, job: str, procs: list[Proc], term_wait_
     if marked:
         with open(d / "run.err", "a") as fh:  # where RELION's GUI and this window show why a job ended
             fh.write(f"\n ++++ cryo-savanna: force abort on {socket.gethostname()}, "
-                     f"{time.strftime('%a %b %d %H:%M:%S %Y')}: {len(procs)} process(es) killed, "
+                     f"{time.ctime()}: {len(procs)} process(es) killed, "
                      f"{RELION_JOB_EXIT_ABORTED} written\n")

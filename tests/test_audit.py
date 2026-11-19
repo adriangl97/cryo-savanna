@@ -382,3 +382,62 @@ def test_every_kind_of_external_job_is_known_in_one_place(tmp_path):
     class3d.options["fn_exe"] = "python3 .cryo-savanna/pytom_runner.py match"  # not an External job: not ours
     assert X.kind_of(class3d) is None
 
+
+
+@pytest.mark.parametrize("shape, max_px", [((16, 4092), 50), ((5, 4092), 256), ((1, 64), 2), ((4092, 16), 50)])
+def test_a_long_thin_image_is_downsampled(shape, max_px):
+    """A block never spans more than the short side (it left no pixel: the Fourier crop of nothing failed)."""
+    from cryo_savanna.images.mrc import downsample
+    img = np.random.default_rng(0).normal(5, 1, shape).astype(np.float32)
+    out, factor = downsample(img, max_px)
+    assert 0 < max(out.shape) <= max_px and min(out.shape) >= 1 and np.isfinite(out).all()
+    assert abs(float(out.mean()) - float(img.mean())) < 0.1
+    assert factor == pytest.approx(shape[1] / out.shape[1])
+
+
+def test_a_summary_that_cannot_be_read_is_not_read_again_on_every_pass(tmp_path, monkeypatch):
+    """Only when the job changes, or after RETRY_S (a pass comes at every poll while any job of the project runs)."""
+    from cryo_savanna.project.pipeline import Process
+    from cryo_savanna.project.snapshot import JobInfo
+    from cryo_savanna.project.summary import SummaryReader
+    (tmp_path / "Class2D" / "job005").mkdir(parents=True)
+    info = JobInfo(Process("Class2D/job005/", "None", "relion.class2d", "Succeeded"), None, [], status="Succeeded")
+    reader = SummaryReader(tmp_path)
+    calls = []
+
+    def broken(*args):
+        calls.append(1)
+        raise ValueError("half-written")
+    monkeypatch.setattr(reader, "_summarize", broken)
+    for _ in range(5):
+        if reader.needs_update(info):
+            reader.summarize(info, Pipeline())
+    assert len(calls) == 1
+    (tmp_path / "Class2D" / "job005" / "note.txt").write_text("continued\n")  # the job changed
+    assert reader.needs_update(info)
+    reader.summarize(info, Pipeline())
+    assert len(calls) == 2 and not reader.needs_update(info)
+    monkeypatch.setattr(SummaryReader, "RETRY_S", 0.0)  # and after a while
+    assert reader.needs_update(info)
+
+
+def test_the_fsc_of_half_maps_read_section_by_section_is_numpys(tmp_path):
+    """mapstats._rfft_map (section by section, a fraction of the memory) gives np.fft.rfftn of the map, and the
+    half-map FSC the curve of mapstats.fsc on the maps as arrays."""
+    import mrcfile
+
+    from cryo_savanna.results import mapstats as M
+    rng = np.random.default_rng(3)
+    base = rng.normal(size=(20, 18, 17)).astype(np.float32)
+    maps = [base + rng.normal(size=base.shape).astype(np.float32) for _ in range(2)]
+    paths = [tmp_path / "h1.mrc", tmp_path / "h2.mrc"]
+    for p, m in zip(paths, maps):
+        with mrcfile.new(p) as f:
+            f.set_data(m)
+            f.voxel_size = 2.0
+    f, voxel = M._rfft_map(paths[0])
+    assert voxel == pytest.approx(2.0)
+    assert np.allclose(f, np.fft.rfftn(maps[0]), atol=1e-4 * float(np.abs(f).max()))
+    fig = M.halfmap_fsc(*paths)
+    _, curve = M.fsc(*maps)
+    assert np.allclose(fig.curves[0].y, curve[1:], atol=1e-5)

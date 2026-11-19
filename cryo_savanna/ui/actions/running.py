@@ -262,7 +262,7 @@ class RunActions(_Base):
         details = style.lost_details(acct)
         with open(d / "run.err", "a") as fh:  # where RELION's GUI and this window show why a job failed
             fh.write(f"\n ++++ cryo-savanna: SLURM job {acct.id} ended {acct.state}{f' ({details})' if details else ''}, "
-                     f"without RELION's exit file: {marker} written, {time.strftime('%a %b %d %H:%M:%S %Y')}\n")
+                     f"without RELION's exit file: {marker} written, {time.ctime()}\n")
         (d / marker).touch()
 
     def clean(self, harsh: bool) -> None:

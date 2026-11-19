@@ -280,7 +280,7 @@ class Pipeliner:
         command = command(job) if callable(command) else command
         d = self.project_dir / job
         with open(d / "note.txt", "a") as fh:
-            fh.write(f" ++++ Executing new job on {time.strftime('%a %b %d %H:%M:%S %Y')}\n"
+            fh.write(f" ++++ Executing new job on {time.ctime()}\n"
                      f" ++++ with the following command(s): \n{command}\n"
                      f" ++++ (done interactively in cryo-savanna, which wrote the files this command writes)\n ++++ \n")
         (d / RELION_JOB_EXIT_SUCCESS).touch()

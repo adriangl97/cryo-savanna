@@ -34,25 +34,52 @@ def _box(path: Path) -> tuple[int, int, int]:
         return r.nz, r.ny, r.nx
 
 
+def _rfft_map(path: Path) -> tuple[np.ndarray, float]:
+    """(np.fft.rfftn of a map, its voxel size), read and transformed one section at a time, then along z one
+    row at a time: the transform and a section in memory. numpy's rfftn of the whole map, read whole, took
+    about seven times the map (1.8 GB for 400³ in float32) and twice as long."""
+    with MrcReader(path) as r:
+        if r.nz < 2:
+            raise ValueError(f"{path}: not a volume")
+        f = np.empty((r.nz, r.ny, r.nx // 2 + 1), np.complex64)  # float32 sections: what rfftn gives them
+        for z in range(r.nz):
+            f[z] = np.fft.rfft2(r.section(z))
+        voxel = r.voxel
+    for y in range(f.shape[1]):
+        f[:, y, :] = np.fft.fft(f[:, y, :], axis=0)
+    return f, voxel
+
+
 # ---------------------------------------------------------------------------- FSC
 
 def fsc(a: np.ndarray, b: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     """FSC per Fourier shell of two maps on the same cubic grid: (shell, FSC), shell 0 … box/2."""
     if a.shape != b.shape:
         raise ValueError(f"the half maps differ in size: {a.shape} and {b.shape}")
-    fa, fb = np.fft.rfftn(a), np.fft.rfftn(b)
-    n = min(a.shape)
-    freqs = [np.fft.fftfreq(s) * s for s in a.shape[:-1]] + [np.fft.rfftfreq(a.shape[-1]) * a.shape[-1]]
-    kz, ky, kx = np.meshgrid(*freqs, indexing="ij", sparse=True)
-    shell = np.rint(np.sqrt(kz ** 2 + ky ** 2 + kx ** 2)).astype(np.int64).ravel()
-    keep = shell <= n // 2
-    shell = shell[keep]
-    cross = np.bincount(shell, (fa * np.conj(fb)).real.ravel()[keep], minlength=n // 2 + 1)
-    pa = np.bincount(shell, (np.abs(fa) ** 2).ravel()[keep], minlength=n // 2 + 1)
-    pb = np.bincount(shell, (np.abs(fb) ** 2).ravel()[keep], minlength=n // 2 + 1)
+    return fsc_of_transforms(np.fft.rfftn(a), np.fft.rfftn(b), a.shape)
+
+
+def fsc_of_transforms(fa: np.ndarray, fb: np.ndarray, shape: tuple[int, ...]) -> tuple[np.ndarray, np.ndarray]:
+    """``fsc`` of the maps whose rfftn are ``fa`` and ``fb`` (maps of this ``shape``).
+
+    Added up one plane of the transforms at a time: the shell of every Fourier voxel and the products, as
+    whole arrays (and bincount's float64 copies of them), took several times the two transforms' memory
+    (2.3 GB for two 400³ half maps)."""
+    n = min(shape)
+    top = n // 2
+    rest = [np.fft.fftfreq(s, 1.0 / s) for s in shape[1:-1]] + [np.fft.rfftfreq(shape[-1], 1.0 / shape[-1])]
+    r2 = sum(k ** 2 for k in np.meshgrid(*rest, indexing="ij", sparse=True))  # one plane: |k|² but for the first axis
+    cross, pa, pb = np.zeros(top + 1), np.zeros(top + 1), np.zeros(top + 1)
+    for kz, za, zb in zip(np.fft.fftfreq(shape[0], 1.0 / shape[0]), fa, fb):
+        shell = np.rint(np.sqrt(r2 + kz * kz)).astype(np.intp).ravel()
+        keep = shell <= top
+        shell, za, zb = shell[keep], za.ravel()[keep], zb.ravel()[keep]
+        cross += np.bincount(shell, za.real * zb.real + za.imag * zb.imag, minlength=top + 1)
+        pa += np.bincount(shell, za.real ** 2 + za.imag ** 2, minlength=top + 1)
+        pb += np.bincount(shell, zb.real ** 2 + zb.imag ** 2, minlength=top + 1)
     with np.errstate(invalid="ignore", divide="ignore"):
         curve = cross / np.sqrt(pa * pb)
-    return np.arange(n // 2 + 1), np.nan_to_num(curve)
+    return np.arange(top + 1), np.nan_to_num(curve)
 
 
 def crossing(x: np.ndarray, y: np.ndarray, level: float) -> float | None:
@@ -77,12 +104,15 @@ def halfmap_fsc(half1: Path, half2: Path) -> Figure | None:
     hit = _fsc_cache.get(key)
     if hit is not None:
         return hit
-    if max(_box(half1)) > FSC_MAX_BOX:
+    shape = _box(half1)
+    if max(shape) > FSC_MAX_BOX:
         raise ValueError(f"{half1.name}: box larger than {FSC_MAX_BOX} voxels, FSC not computed here")
-    a, voxel = _read(half1)
-    b, _ = _read(half2)
-    shells, curve = fsc(a, b)
-    n = min(a.shape)
+    if _box(half2) != shape:
+        raise ValueError(f"the half maps differ in size: {shape} and {_box(half2)}")
+    fa, voxel = _rfft_map(half1)
+    fb, _ = _rfft_map(half2)
+    shells, curve = fsc_of_transforms(fa, fb, shape)
+    n = min(shape)
     if not voxel:
         voxel = 1.0
     x = shells / (n * voxel)  # 1/Å

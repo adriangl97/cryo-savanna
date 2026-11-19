@@ -171,20 +171,29 @@ def _fmt_num(v: str | None) -> str:
 
 
 class SummaryReader:
+    RETRY_S = 30.0  # a summary whose files could not be read is read again after this, or when the job changes
+
     def __init__(self, project_dir: str | os.PathLike):
         self.project_dir = Path(project_dir)
         self._cache: dict[str, tuple[tuple | None, JobSummary]] = {}
         self._counts: dict[str, tuple[tuple, int | None]] = {}  # file -> (stamp, rows)
+        self._failed: dict[str, tuple[tuple | None, float]] = {}  # job -> (its key, time.monotonic()) of a failed read
 
     def cached(self, name: str) -> JobSummary | None:
         hit = self._cache.get(name)
         return hit[1] if hit else None
 
     def needs_update(self, info: JobInfo) -> bool:
-        """Finished jobs are only read again when their status changes; running ones on every change."""
+        """Finished jobs are only read again when their status changes; running ones on every change. One whose
+        files could not be read, when it changes or after RETRY_S (a file written again in place changes none
+        of the stamps in its key): not on every pass, which comes every poll while any job of the project runs."""
         hit = self._cache.get(info.name)
-        if hit is None or hit[0] is None:
+        if hit is None:
             return True
+        if hit[0] is None:
+            failed = self._failed.get(info.name)
+            return (failed is None or time.monotonic() - failed[1] > self.RETRY_S
+                    or failed[0] != self._key(info))
         if info.status != STATUS_RUNNING and hit[0][0] == info.status:
             return False
         return hit[0] != self._key(info)
@@ -192,6 +201,7 @@ class SummaryReader:
     def clear(self) -> None:
         """Forget all summaries (not the row counts, which are keyed by file stamps)."""
         self._cache.clear()
+        self._failed.clear()
 
     def summarize(self, info: JobInfo, pipeline: Pipeline) -> JobSummary:
         key: tuple | None = self._key(info)
@@ -203,12 +213,15 @@ class SummaryReader:
             if info.status == STATUS_FAILED:
                 s.failure = diagnose(self.project_dir / info.name)
         except (OSError, ValueError, KeyError, IndexError, StarError):
-            s = JobSummary()  # half-written or unexpected files: try again on the next change
+            s = JobSummary()  # half-written or unexpected files: try again when it changes (needs_update)
+            self._failed[info.name] = (key, time.monotonic())
             key = None
         except Exception:  # noqa: BLE001 - a bug here must not stop the summaries of every other job
             print(f"cryo-savanna: cannot summarize {info.name}:", file=sys.stderr)
             traceback.print_exc()
             s = JobSummary()  # kept until the job changes: no traceback on every pass
+        else:
+            self._failed.pop(info.name, None)
         self._cache[info.name] = (key, s)
         return s
 
