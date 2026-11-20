@@ -13,7 +13,8 @@ pytest.importorskip("qtpy")
 pytest.importorskip("pytestqt")
 
 from qtpy.QtCore import QSettings, Qt  # noqa: E402
-from qtpy.QtWidgets import QHeaderView  # noqa: E402
+from qtpy.QtGui import QKeySequence  # noqa: E402
+from qtpy.QtWidgets import QHeaderView, QToolBar  # noqa: E402
 
 from cryo_savanna.project.lock import is_locked  # noqa: E402
 from cryo_savanna.project.snapshot import ProjectLoader  # noqa: E402
@@ -757,3 +758,79 @@ def test_cards_of_scheduled_jobs_say_what_their_run_waits_for(window, spa_copy):
         assert w.tree._status_text(w.snapshot.jobs[job]).endswith(text)  # the same words as the list
     w.actions.runs.emit({})
     assert card.job_line().endswith("· Scheduled")
+
+
+def _toolbar(w) -> list[str]:
+    tb = w.findChild(QToolBar, "main_toolbar")
+    texts = [a.text() or getattr(tb.widgetForAction(a), "text", lambda: "")() for a in tb.actions() if a.isVisible()]
+    return [t for t in texts if t]
+
+
+def test_toolbar_has_the_project_then_the_job_actions(window, spa_project):
+    w = window(spa_project)
+    assert _toolbar(w) == ["Open project…", "Refresh", "New job", "Clone…", "Continue…", "Run scheduled (1)…",
+                           "Stop runs…"]
+    assert not w.act_readonly.isVisible()  # only when read-only
+    # the tree's own controls are in the tree, the other programs in New job
+    assert w.all_links is w.graph.controls.all_links
+    w.all_links.setChecked(True)
+    assert w.graph.show_all_links
+    before = w.graph.transform().m11()
+    w.graph.controls.zoom_in.click()
+    assert w.graph.transform().m11() > before
+
+
+def test_toolbar_tooltips_give_the_shortcut_and_why_not(window, spa_project):
+    w = window(spa_project)
+    a = w.actions
+    assert QKeySequence("Ctrl+D").toString(QKeySequence.NativeText) in a.act_clone.toolTip()
+    w.select_job("Polish/job015/")  # running
+    assert not a.act_continue.isEnabled() and "Not now: The selected job is running" in a.act_continue.toolTip()
+    assert not a.act_stop_runs.isEnabled() and "No run that can be stopped" in a.act_stop_runs.toolTip()
+    w.select_job("Import/job001/")
+    assert "Not now" not in a.act_clone.toolTip()
+
+
+def test_readonly_shows_on_the_toolbar(qtbot, tmp_path, spa_project):
+    w = MainWindow(spa_project, poll_s=1000.0, readonly=True,
+                   settings=QSettings(str(tmp_path / "s.ini"), QSettings.IniFormat))
+    qtbot.addWidget(w)
+    w.load_now()
+    assert w.act_readonly.isVisible()
+    assert not w.actions.act_new.isEnabled() and "read-only" in w.actions.act_new.toolTip()
+
+
+def test_list_and_tree_switch(window, spa_project):
+    w = window(spa_project)
+    assert [w.view_switch.tabText(i) for i in range(w.view_switch.count())] == ["List", "Tree"]
+    w.view_switch.setCurrentIndex(1)
+    assert w.views.currentWidget() is w.graph
+    w.act_tree.trigger()
+    assert w.views.currentWidget() is w.tree and w.view_switch.currentIndex() == 0
+
+
+def test_new_job_menu_search_recent_and_other_programs(window, spa_project, monkeypatch):
+    from cryo_savanna.ui.job_actions import JobActions
+    started = []  # the menu's entries are made with the window: patched before
+    monkeypatch.setattr(JobActions, "new_job", lambda self, key: started.append(key))
+    monkeypatch.setattr(JobActions, "new_cli_job", lambda self, p: started.append(p))
+    w = window(spa_project)
+    a = w.actions
+    menu = a.new_menu
+    texts = [x.text() for x in menu.actions()]
+    assert "Other programs" in texts and "Recent" not in texts
+    assert any(x.menu() is a.new_cli_menu for x in menu.actions())  # RELION's command-line tools, a submenu
+    menu.search.setText("auto-refine")
+    found = [x.text() for x in menu.matches()]
+    assert found and all("auto-refine" in t.lower() for t in found)
+    menu.search.returnPressed.emit()  # Enter: the first one
+    assert started and "refine3d" in started[0]
+    menu._on_show()  # opened again: Recent first, the search cleared
+    texts = [x.text() for x in menu.actions() if x.text()]
+    assert texts[0] == "Recent" and texts[1] == found[0] and menu.search.text() == ""
+    menu.search.setText("image_handler")  # the command-line tools are searched too
+    assert [x.text() for x in menu.matches()] == ["relion_image_handler"]
+    menu.matches()[0].trigger()
+    assert started[-1] == "relion_image_handler"
+    # Recent is kept in the settings: the same in the next window (and every project)
+    assert w.settings.value("recent_new_jobs", "").split("\n")[:2] == ["cli:relion_image_handler", f"job:{started[0]}"]

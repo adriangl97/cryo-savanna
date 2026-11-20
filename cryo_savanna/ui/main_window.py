@@ -10,12 +10,11 @@ from html import escape as html_escape
 from pathlib import Path
 
 from qtpy.QtCore import QObject, QRunnable, QSettings, Qt, QThread, QThreadPool, QTimer, Signal, Slot
-from qtpy.QtGui import QKeySequence
+from qtpy.QtGui import QFont, QKeySequence
 from qtpy.QtWidgets import (
     QAction,
     QApplication,
     QCheckBox,
-    QToolButton,
     QComboBox,
     QFileDialog,
     QHBoxLayout,
@@ -24,8 +23,11 @@ from qtpy.QtWidgets import (
     QMainWindow,
     QMessageBox,
     QSplitter,
-    QTabWidget,
+    QSizePolicy,
+    QStackedWidget,
+    QTabBar,
     QToolBar,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
@@ -41,7 +43,7 @@ from cryo_savanna.project.snapshot import ProjectLoader, ProjectSnapshot, job_ty
 from cryo_savanna.project.stars import Stars
 from cryo_savanna.project.summary import JobSummary, SummaryReader
 from cryo_savanna.ui import style
-from cryo_savanna.ui.job_actions import JobActions
+from cryo_savanna.ui.job_actions import JobActions, explain
 from cryo_savanna.ui.job_graph import JobGraphView
 from cryo_savanna.ui.job_info import JobInfoPanel
 from cryo_savanna.ui.job_tree import STATUS_FILTERS, JobTreeView
@@ -224,16 +226,29 @@ class MainWindow(QMainWindow):
         self.status_filter.currentIndexChanged.connect(self._apply_filter)
         self.hide_failed.toggled.connect(self._apply_filter)
         self.starred_only.toggled.connect(self._apply_filter)
+        # List / Tree: a small switch at the end of the filter row (not a row of tabs of its own)
+        self.views = QStackedWidget()
+        self.views.addWidget(self.tree)
+        self.views.addWidget(self.graph)
+        self.view_switch = QTabBar()
+        self.view_switch.setObjectName("view_switch")
+        self.view_switch.setDrawBase(False)
+        self.view_switch.setExpanding(False)
+        self.view_switch.setDocumentMode(True)
+        for i, (name, keys) in enumerate((("List", "Ctrl+1"), ("Tree", "Ctrl+2"))):
+            self.view_switch.addTab(name)
+            self.view_switch.setTabToolTip(i, f"{name} ({QKeySequence(keys).toString(QKeySequence.NativeText)})")
+        self.view_switch.currentChanged.connect(self.views.setCurrentIndex)
+        self.views.currentChanged.connect(self.view_switch.setCurrentIndex)
+
         filt = QHBoxLayout()
         filt.setContentsMargins(0, 0, 0, 0)
         filt.addWidget(self.search, 1)
         filt.addWidget(self.status_filter)
         filt.addWidget(self.starred_only)
         filt.addWidget(self.hide_failed)
-
-        self.views = QTabWidget()
-        self.views.addTab(self.tree, "List")
-        self.views.addTab(self.graph, "Tree")
+        filt.addSpacing(8)
+        filt.addWidget(self.view_switch)
         left = QWidget()
         lv = QVBoxLayout(left)
         lv.setContentsMargins(4, 4, 0, 4)
@@ -253,6 +268,7 @@ class MainWindow(QMainWindow):
         self.actions = JobActions(self, self.defs, self.env, self.type_names, self.tomo, self.readonly,
                                   flag_source=self.flag_source)
         self.info.forms = self.actions.forms  # the editor's forms, also read-only
+        self.actions.new_menu.settings = self.settings  # New job's Recent, the same in every project
         self.actions.changed.connect(self._force_refresh)
         self.actions.select.connect(self._select_soon)
         self.actions.runs.connect(self.tree.set_runs)
@@ -268,32 +284,39 @@ class MainWindow(QMainWindow):
         tb.setObjectName("main_toolbar")
         tb.setMovable(False)
         self.addToolBar(tb)
+        # the project
         self.act_open = self._action(tb, "Open project…", QKeySequence.Open, self._choose_project)
         self.act_refresh = self._action(tb, "Refresh", QKeySequence.Refresh, self._force_refresh)
+        explain(self.act_open, "Open another RELION project")
+        explain(self.act_refresh, "Read the project again now (it is also read every few seconds)")
         tb.addSeparator()
-        new_btn = QToolButton()
-        new_btn.setText("New job")
-        new_btn.setMenu(self.actions.new_menu)
-        new_btn.setPopupMode(QToolButton.InstantPopup)
-        tb.addWidget(new_btn)
-        ext_btn = QToolButton()
-        ext_btn.setText("Additional external jobs")
-        ext_btn.setToolTip("Programs that are not RELION's (pytom template matching, AreTomo3, ...), run as RELION External jobs")
-        ext_btn.setMenu(self.actions.external_menu)
-        ext_btn.setPopupMode(QToolButton.InstantPopup)
-        tb.addWidget(ext_btn)
-        for a in (self.actions.act_clone, self.actions.act_continue, self.actions.act_run):
+        # its jobs
+        self.new_btn = QToolButton()
+        self.new_btn.setDefaultAction(self.actions.act_new)  # its text, tooltip and enabled state
+        self.new_btn.setMenu(self.actions.new_menu)
+        self.new_btn.setPopupMode(QToolButton.InstantPopup)
+        bold = QFont(self.new_btn.font())
+        bold.setBold(True)
+        self.actions.act_new.setFont(bold)  # the button may take the action's font when the action changes
+        self.new_btn.setFont(bold)
+        tb.addWidget(self.new_btn)
+        for a in (self.actions.act_clone, self.actions.act_continue, self.actions.act_run, self.actions.act_stop_runs):
             tb.addAction(a)
-        tb.addSeparator()
-        # List/Tree are reachable from the view tabs; keep them only in the View menu and as shortcuts
+        spacer = QWidget()
+        spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        tb.addWidget(spacer)
+        self.readonly_label = QLabel("Read-only")
+        self.readonly_label.setToolTip("Opened with --readonly: nothing in the project is changed (stars and main "
+                                       "inputs are kept for this session only)")
+        self.readonly_label.setStyleSheet("QLabel { color: white; background: #b26b00; border-radius: 4px; "
+                                          "padding: 2px 8px; font-weight: bold; }")
+        self.act_readonly = tb.addWidget(self.readonly_label)
+        self.act_readonly.setVisible(self.readonly)
+        # List/Tree: the switch above the job views (Ctrl+1, Ctrl+2); the tree's own controls are in its corner
         self.act_tree = self._action(None, "List", "Ctrl+1", lambda: self.views.setCurrentWidget(self.tree))
         self.act_graph = self._action(None, "Tree", "Ctrl+2", lambda: self.views.setCurrentWidget(self.graph))
-        self.act_fit = self._action(tb, "Fit tree", "Ctrl+0", self._fit_graph)
-        self.all_links = QCheckBox("All links")
-        self.all_links.setToolTip("Also draw links to references, masks and other secondary inputs of every job\n"
-                                  "(otherwise only for the selected job)")
-        self.all_links.toggled.connect(self.graph.set_show_all_links)
-        tb.addWidget(self.all_links)
+        self.act_fit = self._action(None, "Fit tree", "Ctrl+0", self._fit_graph)
+        self.all_links = self.graph.controls.all_links
         self._action(None, "Find", QKeySequence.Find, lambda: (self.search.setFocus(), self.search.selectAll()))
         act_quit = self._action(None, "Quit", QKeySequence.Quit, self.close)
 

@@ -297,8 +297,8 @@ def test_window_picks_the_tomo_job_menu(qtbot, tmp_path, tomo_project, spa_proje
         w.load_now()
         return w
 
-    def menu(w):
-        return [a.text() for a in w.actions.new_menu.actions() if a.text()]
+    def menu(w):  # RELION's jobs (the other programs, in both lists, have tilt series too)
+        return [a.text() for a in w.actions.new_menu.job_actions()]
 
     t = window(tomo_project)
     assert t.tomo and t.act_tomo.isChecked() and "[tomo]" in t.windowTitle()

@@ -41,13 +41,14 @@ sent, so a slow connection stays usable.
 
 ## The window
 
-- **Left: List / Tree** (Ctrl+1, Ctrl+2). In the list each job sits under the job its main input
+- **List / Tree** (the switch at the end of the filter row, or Ctrl+1, Ctrl+2). In the list each job sits under the job its main input
   came from: its tomography optimisation set, else its particle set, else the first input of its job
   window (for PostProcess, the half map rather than the mask). To place a job under another of its
   inputs, click "make main input" next to that input in the Overview; "use the default" undoes it.
   The choice is saved in the project (`.cryo-savanna/main_inputs.json`; with `--readonly`, for the
   session only). The tree draws the same links as a graph; references and masks are dashed, for the selected job or for all
-  with "All links". The filter (Ctrl+F) finds jobs by name, alias, type, the program of External
+  with "All links". The Tree's top-right corner has Fit (Ctrl+0), zoom out and in (or the mouse wheel) and
+  "All links". The filter (Ctrl+F) finds jobs by name, alias, type, the program of External
   jobs, and SLURM state or node; the status menu and "Hide failed/aborted" narrow it further.
   **Job → Star** (Ctrl+B, or right-click) marks a job with ★ in the list and on its card in the tree;
   "★ Starred" shows only the starred jobs and the jobs they come from. Stars are saved in the project
@@ -63,7 +64,10 @@ polling interval (Preferences, or `--poll`), and views of running jobs read new 
 
 ## Running jobs
 
-- **New job** (toolbar, Job menu, right-click): RELION's job list, SPA or tomography. The job
+- **New job** (toolbar, Job menu, right-click): RELION's job list, SPA or tomography, then the other programs
+  (see Additional external jobs below) and RELION's command-line tools (see CLI tools below). Type in its search
+  field to narrow the list (command-line tools too); Enter starts the first match. "Recent" at the top lists
+  the job types started last (kept for every project). The job
   editor (Ctrl+E) opens in its own window (or docked in the main window: Preferences → Job editor;
   an open editor moves at once), and closes once the job it runs has started. It has RELION's tabs and options, with its help below; changed options are marked,
   "Defaults" resets them. New jobs start from the settings last used in this project, like RELION.
@@ -118,12 +122,12 @@ polling interval (Preferences, or `--poll`), and views of running jobs read new 
   SIGKILL after 5 s), and marks the job aborted (RELION_JOB_EXIT_ABORTED, and a line at the end of run.err),
   so a run of several jobs stops as for an abort. Files the job was writing may be left incomplete. A job
   started on another machine is force-aborted from a cryo-savanna there.
-- **CLI tools**: RELION programs that RELION's GUI has no job for (relion_image_handler,
+- **CLI tools** (menu bar, and New job → RELION command-line tools): RELION programs that RELION's GUI has no job for (relion_image_handler,
   relion_reconstruct, …) as job forms; they run as External jobs and appear in the pipeline.
   With MPI they run locally only, with at most RELION_ERROR_LOCAL_MPI processes (default 32), as
   RELION allows for its own local jobs. Abort asks the program to stop; one that has not stopped
   after 30 s is terminated, and killed 30 s later.
-- **Additional external jobs** (toolbar, menu bar): programs that are not RELION's, run as External
+- **Additional external jobs** (New job → Other programs, and the menu bar): programs that are not RELION's, run as External
   jobs and in the pipeline like any job. See [pytom template matching](#pytom-template-matching),
   [Tomogram masks](#tomogram-masks-for-pytom) and [AreTomo3](#aretomo3-tilt-series-alignment-and-reconstruction).
 - **Queue:** "Submit to queue" uses the queue settings of the loaded RELION module (RELION_QSUB_*).
