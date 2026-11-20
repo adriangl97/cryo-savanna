@@ -16,8 +16,8 @@ from cryo_savanna.jobdefs import aretomo_jobs, external_jobs, tomomask_jobs
 from cryo_savanna.jobdefs.cli_tools import CliVariant
 from cryo_savanna.jobdefs.model import JobVariant
 from cryo_savanna.jobdefs.pytom_jobs import TITLES as PYTOM_TITLES
-from cryo_savanna.jobdefs.pytom_jobs import (EXTRACT as PYTOM_EXTRACT, MATCH as PYTOM_MATCH, PytomVariant,
-                                             last_settings, quoted_values)
+from cryo_savanna.jobdefs.pytom_jobs import MATCH as PYTOM_MATCH
+from cryo_savanna.jobdefs.pytom_jobs import PytomVariant, last_settings, quoted_values
 from cryo_savanna.project import autocontinue, references
 from cryo_savanna.project.jobstar import JobStar, read_last_used
 from cryo_savanna.project.ops import OpsError, PipelineOps
@@ -67,7 +67,7 @@ class FormActions(_Base):
                    f"{variant.description}. Options from {variant.source}.{mpi}")
 
     def new_pytom_job(self, kind: str) -> None:
-        """A pytom job (template matching or extraction): the form, with the pytom environment of the last one."""
+        """A pytom job (template matching and extraction): the form, with the pytom environment of the last one."""
         try:
             variant = self.pytom.variant(kind)
         except RelionEnvError as e:
@@ -412,14 +412,11 @@ class FormActions(_Base):
 
 
 def _newest_inputs(pipeline: Pipeline, kind: str) -> dict[str, str]:
-    """The newest tomogram set (template matching) or pytom match summary (extraction) of the pipeline."""
-    from cryo_savanna.pytom_runner import SUMMARY
+    """The newest tomogram set of the pipeline (template matching)."""
     for name in reversed(list(pipeline.nodes)):
         n = pipeline.nodes[name]
         if not n.producer:
             continue
         if kind == PYTOM_MATCH and n.kind == "TomogramGroupMetadata" and name.endswith("tomograms.star"):
             return {"in_tomograms": name}
-        if kind == PYTOM_EXTRACT and name.endswith("/" + SUMMARY):
-            return {"in_match": name}
     return {}

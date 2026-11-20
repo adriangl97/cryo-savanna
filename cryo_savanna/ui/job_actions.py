@@ -20,8 +20,7 @@ from cryo_savanna.jobdefs import aretomo_jobs, tomomask_jobs
 from cryo_savanna.jobdefs.cli_catalog import CATEGORIES, describe
 from cryo_savanna.jobdefs.model import JobDefs
 from cryo_savanna.jobdefs.pytom_jobs import DESCRIPTIONS as PYTOM_DESCRIPTIONS
-from cryo_savanna.jobdefs.pytom_jobs import EXTRACT as PYTOM_EXTRACT
-from cryo_savanna.jobdefs.pytom_jobs import MATCH as PYTOM_MATCH
+from cryo_savanna.jobdefs.pytom_jobs import MENU_TEXT as PYTOM_MENU_TEXT
 from cryo_savanna.ui.actions.base import ActionsBase, EditorWindow
 from cryo_savanna.ui.actions.forms import FormActions
 from cryo_savanna.ui.actions.pipeline_ops import PipelineActions
@@ -116,7 +115,7 @@ class JobActions(FormActions, SelectionActions, RunActions, PipelineActions, Act
         # programs that are not RELION's, run as External jobs (a button of their own in the main toolbar)
         self.external_menu = QMenu("Additional external jobs", self.window)
         self.external_menu.setToolTipsVisible(True)
-        for kind, text in ((PYTOM_MATCH, "pytom: template matching"), (PYTOM_EXTRACT, "pytom: extract candidates")):
+        for kind, text in PYTOM_MENU_TEXT.items():  # template matching, with the extraction of its candidates
             a = self.external_menu.addAction(text)
             a.setToolTip(PYTOM_DESCRIPTIONS[kind])
             a.setStatusTip(PYTOM_DESCRIPTIONS[kind])

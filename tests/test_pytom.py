@@ -1,7 +1,9 @@
 # Copyright (C) 2026 Adrián González-López
 # SPDX-License-Identifier: GPL-2.0-or-later
-"""pytom jobs: the forms, the runner (with a fake pytom on the PATH), the views, the threshold viewer."""
+"""pytom jobs: the form, the runner (template matching with the extraction of each tomogram as soon as it is
+matched, with a fake pytom on the PATH), the views, the threshold viewer."""
 
+import json
 import os
 import shutil
 import signal
@@ -16,6 +18,7 @@ import numpy as np
 import pytest
 
 from cryo_savanna import pytom_runner as P
+from cryo_savanna import runner_common as C
 from cryo_savanna.env.relion_env import RelionEnv
 from cryo_savanna.jobdefs.cli_tools import external_program
 from cryo_savanna.jobdefs.model import JobDefs
@@ -71,12 +74,20 @@ FAKE = {
                    "particle_diameter": 120.0, "n_rotations": 1000, "voxel_size": 6.75,
                    "job_stats": {"search_space": 6.5e7, "std": 0.02, "variance": 0.0004}},
                   open(os.path.join(dest, stem + "_job.json"), "w"))
+        open(os.environ["FAKE_LOG"], "a").write("end-match %s\\n" % stem)  # when it ends (not "match ...")
     """,
     "pytom_extract_candidates.py": """
-        import json, os, sys
+        import json, os, sys, time
         a = sys.argv[1:]
         open(os.environ["FAKE_LOG"], "a").write(" ".join(["extract"] + a) + "\\n")
         job = json.load(open(a[a.index("-j") + 1]))
+        open(os.environ["FAKE_LOG"] + ".gpus", "a").write(
+            "%s %s\\n" % (job["tomo_id"], os.environ.get("CUDA_VISIBLE_DEVICES", "-")))
+        if os.environ.get("FAKE_EXTRACT_SLEEP"):
+            time.sleep(float(os.environ["FAKE_EXTRACT_SLEEP"]))
+            open(os.environ["FAKE_LOG"], "a").write("end-extract %s\\n" % job["tomo_id"])
+        if os.environ.get("FAKE_EXTRACT_FAIL") == job["tomo_id"]:
+            sys.exit(4)
         n = int(a[a.index("-n") + 1])
         cut = float(a[a.index("--cut-off") + 1]) if "--cut-off" in a else 0.3
         out = job["output_dir"]
@@ -175,23 +186,21 @@ def run_runner(project, mode, job, values, threads=1, env=None, wait=True):
 def match_values(**kw):
     v = CATALOG.variant("match").default_values(ENV)
     v.update({"in_tomograms": "Tomograms/job006/tomograms.star", "fn_template": "ref.mrc", "pytom_env": "",
-              "particle_diameter": "120", "gpu_ids": "0:1", "cuda_module": ""})
+              "particle_diameter": "120", "gpu_ids": "0:1", "cuda_module": "", "n_particles": "20"})
     v.update(kw)
     return v
 
 
-def extract_values(**kw):
-    v = CATALOG.variant("extract").default_values(ENV)
-    v.update({"in_match": "External/job015/pytom_match.star", "pytom_env": "", "n_particles": "20", "cuda_module": ""})
-    v.update(kw)
-    return v
+def _calls(log, what):
+    """The fake pytom's calls of one program ("match", "extract", ...), as lists of words."""
+    return [c.split() for c in (log.read_text().splitlines() if log.exists() else []) if c.split()[0] == what]
 
 
 # ---------------------------------------------------------------------------- forms
 
 
 def test_forms_round_trip():
-    for kind in ("match", "extract"):
+    for kind in ("match",):
         v = CATALOG.variant(kind)
         assert v.label == "relion.external" and v.is_tomo and v.tabs[-1].label == "Running"
         for t in v.tabs:
@@ -236,10 +245,9 @@ def test_inputs_go_in_external_fields(tomo_project):
 
 def test_tree_follows_the_main_input(tomo_project, tmp_path):
     """A pytom job sits under the job of its form's main input: the tomograms (not the template, whatever
-    order the pipeline lists them in, or when only the template was linked), and the matching job of an
-    extraction added while the matching ran (its pytom_match.star was no pipeline node: nothing linked)."""
+    order the pipeline lists them in, or when only the template was linked)."""
     from cryo_savanna.project.lineage import primary_parents
-    from cryo_savanna.project.pipeline import Node, Process
+    from cryo_savanna.project.pipeline import Process
     dst = tmp_path / "tomo"
     shutil.copytree(tomo_project, dst, symlinks=True)
     p = Pipeline.read(dst)
@@ -255,16 +263,8 @@ def test_tree_follows_the_main_input(tomo_project, tmp_path):
 
     add("External/job015/", "match", match_values(fn_template=ref), [ref, tomos])  # pipeline order: the template first
     add("External/job016/", "match", match_values(fn_template=ref), [ref])  # the tomograms not linked
-    add("External/job017/", "extract", extract_values(), [])  # the matching job had no output nodes yet
-    add("External/job018/", "extract", extract_values(in_match="./External/job015/pytom_match.star"), [])
     parents = primary_parents(p, dst, JobDefs.load())
     assert parents["External/job015/"] == parents["External/job016/"] == "Tomograms/job006/"
-    assert parents["External/job017/"] == parents["External/job018/"] == "External/job015/"
-    # once the matching job's output is a node and linked, the extraction stays there
-    out = "External/job015/pytom_match.star"
-    p.nodes[out] = Node(out, P.NODE_SUMMARY, producer="External/job015/", consumers=["External/job017/"])
-    p.processes["External/job017/"].inputs.append(out)
-    assert primary_parents(p, dst, JobDefs.load())["External/job017/"] == "External/job015/"
     # a main input chosen in cryo-savanna still wins
     chosen = primary_parents(p, dst, JobDefs.load(), main_inputs={"External/job015/": ref})
     assert chosen["External/job015/"] == "Reconstruct/job010/"
@@ -272,8 +272,9 @@ def test_tree_follows_the_main_input(tomo_project, tmp_path):
 
 def test_names():
     assert pytom_kind("python3 .cryo-savanna/pytom_runner.py match") == "match"
+    assert pytom_kind("python3 .cryo-savanna/pytom_runner.py extract") is None  # the separate extraction: no more
     assert pytom_kind("python3 .cryo-savanna/cli_runner.py relion_image_handler") is None
-    assert external_program(runner_command("extract")) == "pytom candidate extraction"
+    assert external_program(runner_command("match")) == "pytom template matching"
 
 
 # ---------------------------------------------------------------------------- the runner
@@ -353,28 +354,26 @@ def test_match_and_extract(project, fake_pytom):
     assert m[m.index("--search-z") + 1:m.index("--search-z") + 3] == ["2", "14"]
     assert "--phase-shift" not in m and "--search-x" not in m
     nodes = read_star(d / P.OUTPUT_NODES)["output_nodes"].rows
-    assert [r[0] for r in nodes] == [job + P.SUMMARY, job + "template.mrc", job + "mask.mrc"]
+    assert [r[0] for r in nodes] == [job + P.SUMMARY, job + "template.mrc", job + "mask.mrc", job + P.PARTICLES,
+                                     job + P.OPTIMISATION_SET, job + P.CANDIDATES, job + P.THRESHOLDS]
+    assert dict(nodes)[job + P.PARTICLES] == P.NODE_PARTICLES
     summary = RP.read_match_summary(project, job + P.SUMMARY)
     assert summary.names == NAMES and set(summary.table.column(P.COL_STATUS)) == {"done"}
+    assert summary.counts(P.COL_EXTRACTION) == {"done": 5}
     assert summary.general[P.P + "TomogramsFile"] == "Tomograms/job006/tomograms.star"
     assert RP.job_stats(project / summary.value(0, P.COL_JOB))["std"] == 0.02
 
-    # again (continue): every tomogram is done
-    fake_pytom.unlink()
-    res = run_runner(project, "match", job, match_values())
-    assert res.returncode == 0 and "already done" in res.stdout
-    assert not any(c.startswith("match") for c in fake_pytom.read_text().splitlines())
-
-    # extraction, with candidates below the automatic cut-off (0.3 in the fake)
-    ex = "External/job016/"
-    res = run_runner(project, "extract", ex, extract_values(), threads=2)
-    assert res.returncode == 0, res.stderr + res.stdout
-    e = project / ex
-    calls = [c.split() for c in fake_pytom.read_text().splitlines() if c.startswith("extract")]
+    # every tomogram extracted in the same job, with candidates below the automatic cut-off (0.3 in the fake)
+    calls = _calls(fake_pytom, "extract")
     assert len(calls) == 10 and sum("--cut-off" in c for c in calls) == 5  # auto, then candidates
     low = next(c for c in calls if "--cut-off" in c)
     assert float(low[low.index("--cut-off") + 1]) == pytest.approx(0.21)
-    assert not list((d / "tm").glob("*_particles.star"))  # nothing written in the match job
+    job_file = low[low.index("-j") + 1]  # a copy of pytom's job.json, pointing at this job's tm/ (absolute)
+    assert job_file.startswith(job + "tm/") and job_file.endswith(P.EXTRACT_JOB)
+    assert os.path.realpath(json.loads((project / job_file).read_text())["output_dir"]) == os.path.realpath(d / "tm")
+    assert not list((d / "tm").glob("*_particles.star"))  # pytom's, renamed
+    assert (d / "logs/TS_01_extract.log").is_file() and (d / "logs/TS_01.log").is_file()
+    e, ex = d, job
     cands = read_star(e / P.CANDIDATES)["particles"]
     assert cands.columns[:4] == ["rlnTomoName"] + list(P.CENTERED) and "rlnAngleRot" in cands.columns
     assert len(cands.rows) == 5 * 15  # 0.5 down to 0.22
@@ -390,8 +389,6 @@ def test_match_and_extract(project, fake_pytom):
     assert opt.get("rlnTomoTomogramsFile") == "Tomograms/job006/tomograms.star"
     assert sorted(f.name for f in (e / "plots").iterdir())[:2] == ["TS_01_candidates_extraction.svg",
                                                                    "TS_01_extraction.svg"]
-    nodes = dict(read_star(e / P.OUTPUT_NODES)["output_nodes"].rows)
-    assert nodes[ex + P.PARTICLES] == P.NODE_PARTICLES
 
     # new thresholds, as the threshold viewer saves them
     cwd = os.getcwd()
@@ -403,26 +400,186 @@ def test_match_and_extract(project, fake_pytom):
     assert sel.auto["TS_01"] == pytest.approx(0.3)
     assert len(read_star(e / P.PARTICLES)["particles"].rows) == 3 + 0 + 3 * 11
 
+    # again (continue): every tomogram is matched and extracted, the thresholds chosen stay
+    fake_pytom.unlink()
+    res = run_runner(project, "match", job, match_values())
+    assert res.returncode == 0 and "already matched" in res.stdout and "already extracted" in res.stdout
+    assert not _calls(fake_pytom, "match") and not _calls(fake_pytom, "extract")
+    assert RP.read_selection(project, ex).threshold["TS_01"] == pytest.approx(0.45)
+
+
+def test_extraction_runs_beside_the_matching(project, fake_pytom):
+    """Each tomogram is extracted as soon as it is matched, while the next one is matched (one GPU, one
+    thread), and the particles of those extracted are there before the last one is matched."""
+    job = "External/job015/"
+    res = run_runner(project, "match", job, match_values(gpu_ids="0"), env={"FAKE_SLEEP": "1"})
+    assert res.returncode == 0, res.stderr + res.stdout
+    lines = [c.split() for c in fake_pytom.read_text().splitlines()]
+
+    def at(program, name):
+        return next(i for i, w in enumerate(lines) if w[0] == program and any(name in x for x in w))
+
+    for a, b in zip(NAMES, NAMES[1:]):  # a extracted after it was matched, before b's matching ends
+        assert at("end-match", a) < at("extract", a) < at("end-match", b)
+    assert res.stdout.index("TS_01: extracted; particles.star: 11 particle(s) in 1 tomogram(s) so far") < \
+        res.stdout.index("TS_54: matched in")
+
+
+def _gpus_seen(log):
+    """{tomogram: the CUDA_VISIBLE_DEVICES of each of its extraction calls}."""
+    out = {}
+    path = Path(str(log) + ".gpus")
+    for line in (path.read_text().splitlines() if path.exists() else []):
+        name, gpu = line.split()
+        out.setdefault(name, []).append(gpu)
+    return out
+
+
+def test_each_extraction_sees_the_gpu_that_matched_it(project, fake_pytom):
+    """pytom needs CUDA to extract: each extraction sees only the GPU of the job its tomogram was matched on
+    (the job's own CUDA_VISIBLE_DEVICES mapped, as a queue sets it)."""
+    job = "External/job015/"
+    res = run_runner(project, "match", job, match_values(gpu_ids="0:1"), env={"CUDA_VISIBLE_DEVICES": "5,7"})
+    assert res.returncode == 0, res.stderr + res.stdout
+    matched_on = {Path(w[w.index("-v") + 1]).stem: int(w[w.index("-g") + 1]) for w in _calls(fake_pytom, "match")}
+    assert sorted(matched_on) == NAMES and set(matched_on.values()) == {0, 1}
+    seen = _gpus_seen(fake_pytom)
+    assert seen == {n: [["5", "7"][matched_on[n]]] * 2 for n in NAMES}
+    assert "CUDA_VISIBLE_DEVICES=5 pytom_extract_candidates.py" in res.stdout or \
+        "CUDA_VISIBLE_DEVICES=7 pytom_extract_candidates.py" in res.stdout
+    log = (project / job / "logs/TS_01_extract.log").read_text()
+    assert "CUDA_VISIBLE_DEVICES=" in log  # the GPU it got, in its log too
+    assert C.cuda_device(1, {"CUDA_VISIBLE_DEVICES": "GPU-a1, GPU-b2"}) == "GPU-b2"
+    assert C.cuda_device(1, {}) == "1" and C.cuda_device(1, {"CUDA_VISIBLE_DEVICES": "NoDevFiles"}) == "1"
+
+
+def _most_at_once(log):
+    """The most extractions the fake pytom ran at once (FAKE_EXTRACT_SLEEP: each call logs its start and end)."""
+    now = most = 0
+    for w in (c.split() for c in log.read_text().splitlines()):
+        now += {"extract": 1, "end-extract": -1}.get(w[0], 0)
+        most = max(most, now)
+    return most
+
+
+def test_extractions_take_the_threads(done_jobs, fake_pytom):
+    """Every tomogram ready is extracted as soon as it is, as many at once as the job's threads: on a continue
+    that extracts the 5 tomograms matched before (nothing to match), 3 at a time with 3 threads, on the job's
+    GPUs in turn."""
+    job = "External/job015/"
+    res = run_runner(done_jobs, "match", job, match_values(gpu_ids="0:1", candidate_factor="0.5"), threads=3,
+                     env={"FAKE_EXTRACT_SLEEP": "0.5"})
+    assert res.returncode == 0, res.stderr + res.stdout
+    assert not _calls(fake_pytom, "match") and len(_calls(fake_pytom, "extract")) == 10
+    assert _most_at_once(fake_pytom) == 3 and "at most 3 at once" in res.stdout
+    assert [g[0] for g in (_gpus_seen(fake_pytom)[n] for n in NAMES)] == ["0", "1", "0", "1", "0"]
+    assert RP.read_selection(done_jobs, job).names == NAMES
+
+
+def test_extractions_leave_the_matching_its_threads(project, fake_pytom):
+    """While the GPUs match, extractions get the threads left: 2 GPUs and 3 threads, one extraction at a time
+    beside the two searches; with fewer threads than that, still one."""
+    job = "External/job015/"
+    res = run_runner(project, "match", job, match_values(gpu_ids="0:1"), threads=3,
+                     env={"FAKE_SLEEP": "1", "FAKE_EXTRACT_SLEEP": "0.5"})
+    assert res.returncode == 0, res.stderr + res.stdout
+    lines = [c.split()[0] for c in fake_pytom.read_text().splitlines()]
+    matching = extracting = 0
+    for w in lines:
+        matching += {"match": 1, "end-match": -1}.get(w, 0)
+        extracting += {"extract": 1, "end-extract": -1}.get(w, 0)
+        assert extracting <= max(1, 3 - matching), lines
+    fake_pytom.unlink()
+    res = run_runner(project, "match", "External/job016/", match_values(gpu_ids="0:1", tomo_names="TS_01 TS_03"),
+                     threads=1, env={"FAKE_EXTRACT_SLEEP": "0.5"})
+    assert res.returncode == 0, res.stderr + res.stdout
+    assert _most_at_once(fake_pytom) == 1 and len(_calls(fake_pytom, "extract")) == 4
+
+
+def test_thresholds_chosen_while_the_job_runs_are_kept(project, fake_pytom):
+    """A threshold saved in the Thresholds view while the rest is matched stays when the job writes the
+    particles of the next tomograms, and at its end."""
+    job = "External/job015/"
+    proc = run_runner(project, "match", job, match_values(gpu_ids="0"), env={"FAKE_SLEEP": "1"}, wait=False)
+    end = time.time() + 60
+    sel = None
+    while time.time() < end and (sel is None or "TS_01" not in sel.threshold):
+        try:
+            sel = RP.read_selection(project, job)
+        except (OSError, ValueError):
+            time.sleep(0.05)
+    assert sel is not None and "TS_54" not in sel.threshold  # the job still runs
+    RP.save_thresholds(project, job, {"TS_01": 0.45})
+    _, err = proc.communicate(timeout=120)
+    assert proc.returncode == 0, err
+    sel = RP.read_selection(project, job)
+    assert sel.names == NAMES and sel.threshold["TS_01"] == pytest.approx(0.45) and sel.counts("TS_01") == (15, 3)
+    assert sel.threshold["TS_03"] == pytest.approx(0.3)
+    assert len(read_star(project / job / P.PARTICLES)["particles"].rows) == 3 + 4 * 11
+
+
+def test_matching_only_then_extraction_on_continue(project, fake_pytom):
+    job = "External/job015/"
+    d = project / job
+    res = run_runner(project, "match", job, match_values(do_extract="No", tomo_names="TS_01 TS_03"))
+    assert res.returncode == 0, res.stderr + res.stdout
+    assert not _calls(fake_pytom, "extract") and not (d / P.CANDIDATES).exists()
+    assert [r[0] for r in read_star(d / P.OUTPUT_NODES)["output_nodes"].rows] == [
+        job + P.SUMMARY, job + "template.mrc", job + "mask.mrc"]
+    assert RP.read_match_summary(project, job + P.SUMMARY).counts(P.COL_EXTRACTION) == {}
+    # continued with the extraction: only extracted
+    fake_pytom.unlink()
+    res = run_runner(project, "match", job, match_values(tomo_names="TS_01 TS_03"))
+    assert res.returncode == 0, res.stderr + res.stdout
+    assert not _calls(fake_pytom, "match") and _extracted(fake_pytom) == {"TS_01": [20, 20], "TS_03": [20, 20]}
+    assert RP.read_selection(project, job).names == ["TS_01", "TS_03"]
+    assert job + P.PARTICLES in dict(read_star(d / P.OUTPUT_NODES)["output_nodes"].rows)
+
+
+def test_failed_extraction_and_continue(project, fake_pytom):
+    job = "External/job015/"
+    res = run_runner(project, "match", job, match_values(), env={"FAKE_EXTRACT_FAIL": "TS_03"})
+    assert res.returncode == 1 and "1 tomogram(s) failed: TS_03 (extraction)" in res.stderr
+    assert not (project / job / P.OUTPUT_NODES).exists()
+    s = RP.read_match_summary(project, job + P.SUMMARY)
+    assert s.counts() == {"done": 5} and s.counts(P.COL_EXTRACTION) == {"done": 4, "failed": 1}
+    assert RP.read_selection(project, job).names == [n for n in NAMES if n != "TS_03"]  # the others' particles
+    fake_pytom.unlink()
+    res = run_runner(project, "match", job, match_values())
+    assert res.returncode == 0, res.stderr + res.stdout
+    assert not _calls(fake_pytom, "match") and _extracted(fake_pytom) == {"TS_03": [20, 20]}
+    assert RP.read_selection(project, job).names == NAMES
+
+
+def test_extraction_options_are_checked_before_matching(project, fake_pytom):
+    job = "External/job015/"
+    for values, message in ((dict(cut_off_mode=P.CUT_FIXED), "fixed cut-off"),
+                            (dict(tomo_n_particles="TS_01"), "Max. particles of some tomograms"),
+                            (dict(particle_diameter="", angular_search="7"), "particle diameter for the extraction"),
+                            (dict(tomogram_mask_mode=P.TMASK_OTHER, extract_mask="nowhere/{name}.mrc"),
+                             "tomogram mask not found")):
+        res = run_runner(project, "match", job, match_values(**values))
+        assert res.returncode == 1 and message in res.stderr, (values, res.stderr)
+    assert not fake_pytom.exists()  # nothing ran
+
 
 def _extracted(log):
     """{tomogram: [-n of each extraction call]} from the fake pytom's log."""
     out = {}
-    for c in (log.read_text().splitlines() if log.exists() else []):
-        if c.startswith("extract"):
-            w = c.split()
-            name = Path(w[w.index("-j") + 1]).name[:-len("_job.json")]
-            out.setdefault(name, []).append(int(w[w.index("-n") + 1]))
+    for w in _calls(log, "extract"):
+        name = Path(w[w.index("-j") + 1]).name[:-len(P.EXTRACT_JOB)]
+        out.setdefault(name, []).append(int(w[w.index("-n") + 1]))
     return out
 
 
 def test_continue_extracts_only_changed_tomograms(done_jobs, fake_pytom):
-    ex = "External/job016/"
+    ex = "External/job015/"
     e = done_jobs / ex
     RP.save_thresholds(done_jobs, ex, {"TS_03": 0.45})  # a threshold chosen by hand
-    # again with the same settings: nothing is extracted, the threshold stays
-    res = run_runner(done_jobs, "extract", ex, extract_values())
+    # again with the same settings: nothing is matched or extracted, the threshold stays
+    res = run_runner(done_jobs, "match", ex, match_values())
     assert res.returncode == 0, res.stderr + res.stdout
-    assert _extracted(fake_pytom) == {} and "kept" in res.stdout
+    assert _extracted(fake_pytom) == {} and "kept" in res.stdout and not _calls(fake_pytom, "match")
     assert RP.read_selection(done_jobs, ex).threshold["TS_03"] == pytest.approx(0.45)
 
     # more particles for one tomogram, as the threshold viewer saves it: only that one again
@@ -431,9 +588,9 @@ def test_continue_extracts_only_changed_tomograms(done_jobs, fake_pytom):
     assert own["tomo_n_particles"] == "TS_01=30" and own["n_particles"] == "20"
     settings = RP.read_extract_settings(done_jobs, ex)
     assert settings.max_particles("TS_01") == 30 and settings.to_extract(NAMES) == ["TS_01"]
-    res = run_runner(done_jobs, "extract", ex, own)
+    res = run_runner(done_jobs, "match", ex, own)
     assert res.returncode == 0, res.stderr + res.stdout
-    assert _extracted(fake_pytom) == {"TS_01": [30, 30]}
+    assert _extracted(fake_pytom) == {"TS_01": [30, 30]} and not _calls(fake_pytom, "match")
     sel = RP.read_selection(done_jobs, ex)
     assert sel.counts("TS_01") == (15, 11) and sel.counts("TS_43") == (15, 11)  # the fake has no more above 0.21
     assert sel.threshold["TS_03"] == pytest.approx(0.45) and sel.counts("TS_03") == (15, 3)
@@ -442,12 +599,28 @@ def test_continue_extracts_only_changed_tomograms(done_jobs, fake_pytom):
     # another setting of the job (the candidate fraction): every tomogram again, with the new cut-off as
     # threshold; each keeps its own maximum
     fake_pytom.unlink()
-    res = run_runner(done_jobs, "extract", ex, dict(own, candidate_factor="0.5"))
+    res = run_runner(done_jobs, "match", ex, dict(own, candidate_factor="0.5"))
     assert res.returncode == 0, res.stderr + res.stdout
     calls = _extracted(fake_pytom)
     assert sorted(calls) == NAMES and calls["TS_01"] == [30, 30] and calls["TS_43"] == [20, 20]
+    assert not _calls(fake_pytom, "match")
     sel = RP.read_selection(done_jobs, ex)
     assert sel.counts("TS_43") == (18, 11) and sel.threshold["TS_03"] == pytest.approx(0.3)
+
+    # a tomogram matched again (its scores are new): extracted again, with its new cut-off as threshold; the
+    # tables have only the tomograms of the job now
+    RP.save_thresholds(done_jobs, ex, {"TS_43": 0.45, "TS_45": 0.45})
+    f = e / "tm/TS_43_job.json"  # matched a while ago (not in the same second as again below)
+    os.utime(f, (f.stat().st_atime - 100, f.stat().st_mtime - 100))
+    fake_pytom.unlink()
+    (e / "tm/TS_43_scores.mrc").unlink()  # TS_43 matched again
+    res = run_runner(done_jobs, "match", ex, dict(own, candidate_factor="0.5", tomo_names="TS_43 TS_45"))
+    assert res.returncode == 0, res.stderr + res.stdout
+    assert [Path(w[w.index("-v") + 1]).stem for w in _calls(fake_pytom, "match")] == ["TS_43"]
+    assert _extracted(fake_pytom) == {"TS_43": [20, 20]}
+    sel = RP.read_selection(done_jobs, ex)
+    assert sel.names == ["TS_43", "TS_45"]
+    assert sel.threshold["TS_43"] == pytest.approx(0.3) and sel.threshold["TS_45"] == pytest.approx(0.45)
 
 
 def test_per_tomogram_option_errors():
@@ -460,15 +633,20 @@ def test_per_tomogram_option_errors():
 def test_failed_tomogram_and_continue(project, fake_pytom):
     job = "External/job015/"
     res = run_runner(project, "match", job, match_values(gpu_ids="0"), env={"FAKE_FAIL": "TS_43"})
-    assert res.returncode == 1 and "TS_43" in res.stderr and "Continue the job" in res.stderr
+    assert res.returncode == 1 and "1 tomogram(s) failed: TS_43 (matching)" in res.stderr
+    assert "Continue the job" in res.stderr
     s = RP.read_match_summary(project, job + P.SUMMARY)
     status = dict(zip(s.names, s.table.column(P.COL_STATUS)))
     assert status["TS_43"] == "failed" and status["TS_54"] == "done"  # the others went on
+    extraction = dict(zip(s.names, s.table.column(P.COL_EXTRACTION)))
+    assert extraction["TS_43"] == "pending" and extraction["TS_54"] == "done"  # and were extracted
+    assert RP.read_selection(project, job).names == [n for n in NAMES if n != "TS_43"]
     fake_pytom.unlink()
     res = run_runner(project, "match", job, match_values(gpu_ids="0"))
     assert res.returncode == 0
-    assert [c.split()[c.split().index("-v") + 1] for c in fake_pytom.read_text().splitlines()
-            if c.startswith("match")] == [job + "inputs/TS_43/TS_43.mrc"]
+    assert [w[w.index("-v") + 1] for w in _calls(fake_pytom, "match")] == [job + "inputs/TS_43/TS_43.mrc"]
+    assert _extracted(fake_pytom) == {"TS_43": [20, 20]}
+    assert RP.read_selection(project, job).names == NAMES
 
 
 def test_abort(project, fake_pytom):
@@ -532,17 +710,15 @@ def test_gaussian_cut_off():
 
 @pytest.fixture(scope="module")
 def _done_jobs_once(tomo_project, tmp_path_factory):
-    """A project with a finished match and a finished extract job, run once for the tests that only look
-    at their results (each gets a copy: done_jobs)."""
+    """A project with a finished pytom job (matched and extracted), run once for the tests that only look
+    at its results (each gets a copy: done_jobs)."""
     tmp = tmp_path_factory.mktemp("pytom_done")
     project = _project(tomo_project, tmp)
     with pytest.MonkeyPatch.context() as mp:
         _fake_pytom(tmp, mp)
         assert run_runner(project, "match", "External/job015/", match_values()).returncode == 0
-        assert run_runner(project, "extract", "External/job016/", extract_values()).returncode == 0
-    for job, kind in (("External/job015/", "match"), ("External/job016/", "extract")):
-        vals = match_values() if kind == "match" else extract_values()
-        CATALOG.variant(kind).make_jobstar(vals, False, job, None).write(project / job / "job.star")
+    CATALOG.variant("match").make_jobstar(match_values(), False, "External/job015/", None).write(
+        project / "External/job015/job.star")
     return project
 
 
@@ -560,13 +736,67 @@ def _ctx(project, job):
 
 def test_registry(done_jobs):
     views = R.views_for(_ctx(done_jobs, "External/job015/"))
-    assert [v.title for v in views][:3] == ["Scores", "Tomograms", "Maps"]
-    views = R.views_for(_ctx(done_jobs, "External/job016/"))
     titles = [v.title for v in views]
-    assert titles[:4] == ["Thresholds", "Picks", "pytom plots", "Particle plots"]
-    picks = views[1]
+    assert titles[:7] == ["Scores", "Thresholds", "Tomograms", "Picks", "Maps", "pytom plots", "Particle plots"]
+    thresholds, picks = views[1], views[3]
+    assert thresholds.args == {"job": "External/job015/", "summary": "External/job015/pytom_match.star",
+                               "diameter": 120.0}
     assert picks.args["star"] == "External/job015/pytom_match.star"
-    assert picks.args["picks"] == "External/job016/particles.star"
+    assert picks.args["picks"] == "External/job015/particles.star"
+    # a job that only matches: no Thresholds
+    js = CATALOG.variant("match").make_jobstar(match_values(do_extract="No"), False, "External/job015/", None)
+    for f in ("candidates.star", "thresholds.star", "particles.star"):
+        (done_jobs / "External/job015" / f).unlink()
+    titles = [v.title for v in R.views_for(R.JobContext(done_jobs, "External/job015/", "relion.external",
+                                                        "Succeeded", [], js.options))]
+    assert "Thresholds" not in titles and "Picks" not in titles and titles[:2] == ["Scores", "Tomograms"]
+
+
+def _old_extraction_job(project):
+    """External/job016/: a candidate extraction job as earlier cryo-savannas made them (a job of its own, from
+    job015's pytom_match.star), with the files it left."""
+    old, job = project / "External/job016", "External/job016/"
+    old.mkdir()
+    for f in (P.CANDIDATES, P.THRESHOLDS, P.PARTICLES, P.OPTIMISATION_SET):
+        shutil.copy(project / "External/job015" / f, old / f)
+    shutil.copytree(project / "External/job015/plots", old / "plots")
+    js = CATALOG.variant("match").make_jobstar(match_values(), False, job, None)
+    js.options["fn_exe"] = "python3 .cryo-savanna/pytom_runner.py extract"
+    js.options["other_args"] = encode({"in_match": "External/job015/pytom_match.star", "n_particles": "20",
+                                       "particle_diameter": "", "do_candidates": "Yes"},
+                                      ["in_match", "n_particles", "particle_diameter", "do_candidates"])
+    js.write(old / "job.star")
+    return job
+
+
+def test_old_extraction_jobs_can_still_be_viewed(qtbot, done_jobs, fake_pytom):
+    """An extraction job of an earlier cryo-savanna is a plain External job now (no form, it cannot run), but
+    its results keep their views, and its thresholds can still be chosen and saved."""
+    from cryo_savanna.jobdefs.external_jobs import kind_of, program_title
+    from cryo_savanna.viewers.pytom_view import PytomThresholdView
+    job = _old_extraction_job(done_jobs)
+    js = JobStar.read(done_jobs / job / "job.star")
+    assert kind_of(js) is None and pytom_kind_of(js) is None
+    assert program_title(js.options["fn_exe"]) == "pytom candidate extraction (old)"
+    views = R.views_for(_ctx(done_jobs, job))
+    assert [v.title for v in views][:4] == ["Thresholds", "Picks", "pytom plots", "Particle plots"]
+    assert views[0].args == {"job": job, "summary": "External/job015/pytom_match.star", "diameter": None,
+                             "continuable": False}
+    assert views[1].args["star"] == "External/job015/pytom_match.star" and views[1].args["picks"] == job + P.PARTICLES
+    v = PytomThresholdView(done_jobs, job, "External/job015/pytom_match.star", continuable=False)
+    qtbot.addWidget(v)
+    assert v.tasks.wait()
+    assert v.table.rowCount() == 5 and v.diameter == 120.0  # the matching job's
+    assert v.settings is None and not v.max_spin.isEnabled()  # no maximum to set for a continue
+    v.set_threshold(0.45)
+    assert v.save(ask=False)
+    assert RP.read_selection(done_jobs, job).counts("TS_01") == (15, 3)
+    # continued anyway (RELION's GUI): the job says what to do instead
+    install_runner(done_jobs)
+    res = subprocess.run(f"{js.options['fn_exe']} --o {job} --j 1 {js.options['other_args']}", shell=True,
+                         cwd=done_jobs, capture_output=True, text=True, timeout=60)
+    assert res.returncode != 0 and "cannot run any more" in res.stderr and "Extract candidates?" in res.stderr
+    assert (done_jobs / job / P.FAILURE).exists()
 
 
 def test_last_settings(done_jobs):
@@ -576,7 +806,7 @@ def test_last_settings(done_jobs):
     vals = match_values(pytom_env="my_pytom")
     CATALOG.variant("match").make_jobstar(vals, False, "External/job015/", None).write(
         done_jobs / "External/job015/job.star")
-    assert last_settings(done_jobs, p, "extract") == {"cuda_module": "", "pytom_env": "my_pytom", "conda": ""}
+    assert last_settings(done_jobs, p, "match") == {"cuda_module": "", "pytom_env": "my_pytom", "conda": ""}
 
 
 def test_scores_view(qtbot, done_jobs):
@@ -584,11 +814,11 @@ def test_scores_view(qtbot, done_jobs):
     v = PytomScoresView(done_jobs, "External/job015/")
     qtbot.addWidget(v)
     assert v.tasks.wait()
-    assert v.table.rowCount() == 5 and v.table.item(0, 1).text() == "done"
+    assert v.table.rowCount() == 5 and v.table.item(0, 1).text() == "done" and v.table.item(0, 2).text() == "done"
     assert v.tasks.wait()
     assert v._score is not None and v._score.peak == pytest.approx(0.5)
     assert len(v.figures.figures) == 2 and v.figures.figures[0].vlines
-    assert "5 done" in v.info.text()
+    assert "5 done" in v.info.text() and "extraction: 5 done" in v.info.text()
 
 
 def test_tomogram_viewer_scores_beside(qtbot, done_jobs):
@@ -608,7 +838,7 @@ def test_tomogram_viewer_scores_beside(qtbot, done_jobs):
 
 def test_threshold_view(qtbot, done_jobs, monkeypatch):
     from cryo_savanna.viewers.pytom_view import PytomThresholdView
-    v = PytomThresholdView(done_jobs, "External/job016/", "External/job015/pytom_match.star")
+    v = PytomThresholdView(done_jobs, "External/job015/", "External/job015/pytom_match.star")
     qtbot.addWidget(v)
     assert v.tasks.wait()
     assert v.viewer is not None and v.diameter == 120.0  # the matching job's
@@ -624,7 +854,7 @@ def test_threshold_view(qtbot, done_jobs, monkeypatch):
     assert v.table.item(1, 4).text() == "11"
     v.set_threshold(0.41)  # only the tomogram shown, now
     assert v.save(ask=False)
-    assert len(read_star(done_jobs / "External/job016/particles.star")["particles"].rows) == 5 + 4 * 11
+    assert len(read_star(done_jobs / "External/job015/particles.star")["particles"].rows) == 5 + 4 * 11
     v.refresh()  # its own save: not read again
     assert not v.tasks.busy()
 
@@ -646,13 +876,13 @@ def test_threshold_view(qtbot, done_jobs, monkeypatch):
     v.table.selectRow(1)
     assert v.max_spin.value() == 20
     assert v.save(ask=False) and not v.save_btn.isEnabled()
-    own = decode(JobStar.read(done_jobs / "External/job016/job.star").options["other_args"])[0]
+    own = decode(JobStar.read(done_jobs / "External/job015/job.star").options["other_args"])[0]
     assert own["tomo_n_particles"] == "TS_01=50" and own["n_particles"] == "20"  # the rest as it was
 
 
 def test_svg_view(qtbot, done_jobs):
     from cryo_savanna.viewers.pytom_view import SvgPlotsView
-    v = SvgPlotsView(done_jobs, "External/job016/")
+    v = SvgPlotsView(done_jobs, "External/job015/")
     qtbot.addWidget(v)
     assert v.list.count() == 10 and v.info.text().endswith(".svg")
 
@@ -665,12 +895,16 @@ def test_new_pytom_job_in_window(qtbot, done_jobs, tmp_path):
     qtbot.addWidget(w)
     w.load_now()
     titles = [a.text() for a in w.actions.external_menu.actions()]
-    assert titles[:2] == ["pytom: template matching", "pytom: extract candidates"]
+    assert titles[:2] == ["pytom: template matching and extraction", "Tomogram masks (for pytom)"]
     w.actions.new_pytom_job("match")
     ed = w.actions.editor
     assert ed.variant.kind == "match" and "pytom template matching" in ed.title.text()
     assert [ed.tabs.tabText(i) for i in range(ed.tabs.count())] == \
-        ["Inputs and template", "Weighting and CTF", "Picking", "Compute", "Running"]
+        ["Inputs and template", "Weighting and CTF", "Picking", "Extraction", "Compute", "Running"]
+    assert ed.widgets["n_particles"].isEnabled()
+    ed.widgets["do_extract"].set_value("No")
+    ed._on_changed("do_extract")
+    assert not ed.widgets["n_particles"].isEnabled() and not ed.widgets["candidate_factor"].isEnabled()
     assert ed.values()["in_tomograms"].endswith("tomograms.star")
     assert not ed.widgets["template_box"].isEnabled() or ed.values()["do_prep_template"] == "Yes"
     ed.widgets["do_prep_template"].set_value("No")
@@ -694,7 +928,7 @@ def test_options_tab_shows_the_pytom_form(qtbot):
     panel._fill_options()
     tree = panel.options
     tabs = [tree.topLevelItem(i).text(0) for i in range(tree.topLevelItemCount())]
-    assert tabs[:4] == ["Inputs and template", "Weighting and CTF", "Picking", "Compute"]
+    assert tabs[:5] == ["Inputs and template", "Weighting and CTF", "Picking", "Extraction", "Compute"]
     assert "Running" in tabs and tabs[-1] == "Not options of this form"
     rows = {tree.topLevelItem(i).child(j).text(0): tree.topLevelItem(i).child(j)
             for i in range(tree.topLevelItemCount()) for j in range(tree.topLevelItem(i).childCount())}

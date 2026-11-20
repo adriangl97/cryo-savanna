@@ -105,16 +105,29 @@ with open(os.path.join(out, name + "_Vol.mrc"), "wb") as fh:
 print("AreTomo3 stand-in:", " ".join(a))
 """
 PYTOM_STANDIN = r"""#!/usr/bin/env python3
-import os, sys
+import json, os, sys
 a = sys.argv[1:]
 tomo, dest = a[a.index("-v") + 1], a[a.index("-d") + 1]
 stem = os.path.splitext(os.path.basename(tomo))[0]
-for suffix in ("_scores.mrc", "_angles.mrc", "_job.json"):
+for suffix in ("_scores.mrc", "_angles.mrc"):
     with open(os.path.join(dest, stem + suffix), "w") as fh:
-        fh.write("{}")
+        fh.write("")
+with open(os.path.join(dest, stem + "_job.json"), "w") as fh:
+    json.dump({"tomo_id": stem, "output_dir": dest}, fh)
 with open(os.path.join(dest, "arguments.txt"), "a") as fh:
     fh.write(" ".join(a) + "\n")
 print("pytom_match_template.py stand-in:", " ".join(a))
+"""
+PYTOM_EXTRACT_STANDIN = r"""#!/usr/bin/env python3
+import json, os, sys
+a = sys.argv[1:]
+job = json.load(open(a[a.index("-j") + 1]))
+cols = ["rlnCoordinateX", "rlnCoordinateY", "rlnCoordinateZ", "rlnAngleRot", "rlnAngleTilt", "rlnAnglePsi",
+        "rlnLCCmax", "rlnCutOff"]
+with open(os.path.join(job["output_dir"], job["tomo_id"] + "_particles.star"), "w") as fh:
+    fh.write("data_particles\n\nloop_\n" + "".join("_%s #%d\n" % (c, i + 1) for i, c in enumerate(cols)))
+    fh.write("4 4 2 10 20 30 0.5 0.3\n")
+print("pytom_extract_candidates.py stand-in:", " ".join(a))
 """
 
 
@@ -394,7 +407,7 @@ class PipelinerChecks:
 
     def t_wrappers(self):
         """The "Additional external jobs" through RELION: AreTomo3 on a tiny tilt series, tomogram masks on
-        its tomogram, pytom template matching with those masks. AreTomo3 and pytom are stand-ins (WRAPPER
+        its tomogram, pytom template matching (and extraction) with those masks. AreTomo3 and pytom are stand-ins (WRAPPER
         stand-ins below) that write the files the real programs write: what is checked is that RELION starts
         cryo-savanna's runners with the arguments they expect, takes their output nodes, and links the jobs."""
         from cryo_savanna import aretomo_runner, mask_runner, pytom_runner
@@ -403,7 +416,8 @@ class PipelinerChecks:
         from cryo_savanna.project.star import StarBlock
         d, bindir = self.proj / "wrap", self.proj / "wrap" / "bin"
         bindir.mkdir(parents=True, exist_ok=True)
-        for name, text in (("AreTomo3", ARETOMO_STANDIN), ("pytom_match_template.py", PYTOM_STANDIN)):
+        for name, text in (("AreTomo3", ARETOMO_STANDIN), ("pytom_match_template.py", PYTOM_STANDIN),
+                           ("pytom_extract_candidates.py", PYTOM_EXTRACT_STANDIN)):
             (bindir / name).write_text(text)
             (bindir / name).chmod(0o755)
         tilts = []
@@ -448,6 +462,7 @@ class PipelinerChecks:
         self._succeeded(match)
         p = self.pipeline()
         assert match + pytom_runner.SUMMARY in p.processes[match].outputs, p.processes[match].outputs
+        assert match + pytom_runner.PARTICLES in p.processes[match].outputs, p.processes[match].outputs
         assert set(p.parents(match)) == {aretomo, masks}, f"parents of {match}: {p.parents(match)}"
         given = (self.proj / match / pytom_runner.TM_DIR / "arguments.txt").read_text()
         assert "--tomogram-mask" in given and "TS_1_mask.mrc" in given, f"pytom did not get the mask: {given}"

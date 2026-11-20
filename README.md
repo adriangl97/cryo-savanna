@@ -92,10 +92,10 @@ and can be used interchangeably, even at the same time, on the same project.
   `relion_tomo_*` tools, ...) can be run from the **CLI tools** menu. They appear in the pipeline
   as ordinary External jobs, with their inputs and outputs.
 - **Additional external jobs**: cryo-savanna has additional wrappers.
-  - pytom-match-pick template matching and candidate extraction (from
+  - pytom-match-pick template matching and candidate extraction in one job (from
   its own conda environment), with pytom's inputs written from RELION 5's tomograms.star, one
-  tomogram per GPU, results while it runs, thresholds chosen interactively, and a RELION 5
-  particles.star.
+  tomogram per GPU, each tomogram's candidates extracted as soon as it is matched, results while it
+  runs, thresholds chosen interactively, and a RELION 5 particles.star.
   - Tomogram masks for pytom, drawn on the tomograms in the viewer: a polygon in XY, through all Z or
   between two planes that can be tilted to follow the lamella, the same for all tomograms or each
   its own, written as `<rlnTomoName>_mask.mrc` (identical masks as links to one file) in the folder
@@ -184,7 +184,7 @@ External jobs through `cryo_savanna/cli_runner.py`, which is copied into the pro
 
 ### Additional external jobs
 
-pytom's template matching and extraction run as External jobs through `cryo_savanna/pytom_runner.py`,
+pytom's template matching and extraction run as one External job through `cryo_savanna/pytom_runner.py`,
 copied into the project as `.cryo-savanna/pytom_runner.py`. It only runs pytom's programs (from the
 conda environment named in the job): cryo-savanna does not include or import pytom.
 AreTomo3 jobs run through `cryo_savanna/aretomo_runner.py` (copied as `.cryo-savanna/aretomo_runner.py`),

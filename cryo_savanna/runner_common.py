@@ -359,14 +359,21 @@ class Supervisor(object):
             except OSError:
                 pass
 
-    def start(self, cmd, log_path):
-        line = " ".join(shlex.quote(c) for c in cmd)
+    def start(self, cmd, log_path, env=None):
+        """Start a command, its output into log_path. ``env``: variables it gets besides the runner's own
+        (e.g. CUDA_VISIBLE_DEVICES: the one GPU it may use)."""
+        line = "".join("%s=%s " % (k, shlex.quote(v)) for k, v in sorted((env or {}).items()))
+        line += " ".join(shlex.quote(c) for c in cmd)
         say("running: " + line)
         fh = open(log_path, "a")
         fh.write("\n ++++ %s\n ++++ %s\n" % (time.strftime("%Y-%m-%d %H:%M:%S"), line))
         fh.flush()
+        full = None
+        if env:
+            full = dict(os.environ)
+            full.update(env)
         try:
-            proc = subprocess.Popen(cmd, stdout=fh, stderr=subprocess.STDOUT, start_new_session=True)
+            proc = subprocess.Popen(cmd, stdout=fh, stderr=subprocess.STDOUT, start_new_session=True, env=full)
         except OSError as e:
             fh.write("cannot start %s: %s\n" % (cmd[0], e))
             fh.close()
@@ -416,49 +423,89 @@ class Supervisor(object):
             time.sleep(POLL_S)
 
 
-def run_parallel(sup, tasks, slots, on_change=None):
-    """Run tasks in parallel slots. A task is (key, factory); factory(slot) returns a generator that
-    yields (command, log file), gets each command's exit code back, and returns its result. Returns
-    {key: result}, None for a task that failed (an exception in it is printed)."""
-    pending, running, results = list(tasks), {}, {}
+class Pool(object):
+    """Slots of one kind (the GPUs of one step) and the tasks waiting for one of them, for run_pools. A task is
+    (key, factory), as for run_parallel. ``slots`` None: no slots, a task starts as soon as it is added
+    (factory(None)), unless ``most`` says enough of them run: most({pool name: its tasks running}) is how many
+    of this pool's may run now (e.g. the threads the other pools leave)."""
 
-    def advance(si, key, gen, rc):
+    def __init__(self, name, slots=None, tasks=(), most=None):
+        self.name, self.pending, self.most = name, list(tasks), most
+        self.slots = None if slots is None else list(slots)
+
+    def add(self, key, factory):
+        """One more task: it starts as soon as a slot of this pool is free (also while run_pools runs)."""
+        self.pending.append((key, factory))
+
+
+def run_pools(sup, pools, on_change=None):
+    """Run the tasks of several pools at once, each task in a free slot of its own pool (in the order they
+    were added). factory(slot) returns a generator that yields (command, log file) or (command, log file,
+    {variable: value} the command gets besides the runner's environment), gets each command's exit code back,
+    and returns its result. on_change(pool, key, result) is called as each task ends; it may add
+    tasks to any pool (Pool.add), e.g. the next step of what a task did. Returns {(pool name, key): result},
+    None for a task that failed (an exception in it is printed)."""
+    running, results = {}, {}  # (pool index, slot index) -> (key, generator, process)
+    started = [0]  # the tasks of pools without a limit: (pool index, -1 - how many started before)
+
+    def advance(at, key, gen, rc):
         try:
-            cmd, log = gen.send(rc) if rc is not None else next(gen)
-            running[si] = (key, gen, sup.start(cmd, log))
+            step = gen.send(rc) if rc is not None else next(gen)
+            running[at] = (key, gen, sup.start(step[0], step[1], step[2] if len(step) > 2 else None))
+            return
         except StopIteration as e:
-            results[key] = e.value if e.value is not None else True
-            running.pop(si, None)
-            if on_change:
-                on_change(key, results[key])
+            result = e.value if e.value is not None else True
         except (Usage, OSError, ValueError, KeyError) as e:
             print("ERROR: %s: %s" % (key, e), file=sys.stderr, flush=True)
-            results[key] = None
-            running.pop(si, None)
-            if on_change:
-                on_change(key, None)
+            result = None
         except Exception:
             traceback.print_exc()
             sys.stderr.flush()
-            results[key] = None
-            running.pop(si, None)
-            if on_change:
-                on_change(key, None)
+            result = None
+        pool = pools[at[0]]
+        results[(pool.name, key)] = result
+        running.pop(at, None)
+        if on_change:
+            on_change(pool, key, result)
 
-    while pending or running:
-        for si, slot in enumerate(slots):
-            if si not in running and pending:
-                key, factory = pending.pop(0)
-                advance(si, key, factory(slot), None)
-        for si in list(running):
-            key, gen, proc = running[si]
+    def busy():
+        return dict((p.name, sum(1 for at in running if at[0] == i)) for i, p in enumerate(pools))
+
+    def room(pool):
+        if pool.most is None:
+            return True
+        counts = busy()
+        return counts[pool.name] < pool.most(counts)
+
+    while running or any(p.pending for p in pools):
+        for pi, pool in enumerate(pools):  # in the order given: the first pools' tasks start first
+            while pool.slots is None and pool.pending and room(pool):
+                key, factory = pool.pending.pop(0)
+                started[0] += 1
+                advance((pi, -started[0]), key, factory(None), None)
+            for si, slot in enumerate(pool.slots or ()):
+                if (pi, si) not in running and pool.pending:
+                    key, factory = pool.pending.pop(0)
+                    advance((pi, si), key, factory(slot), None)
+        for at in list(running):
+            key, gen, proc = running[at]
             rc = sup.finished(proc)
             if rc is not None:
-                advance(si, key, gen, rc)
+                advance(at, key, gen, rc)
         sup.check()
         if running:
             time.sleep(POLL_S)
     return results
+
+
+def run_parallel(sup, tasks, slots, on_change=None):
+    """Run tasks in parallel slots (run_pools with one pool). A task is (key, factory); factory(slot) returns
+    a generator that yields (command, log file), gets each command's exit code back, and returns its result.
+    on_change(key, result) as each ends. Returns {key: result}, None for a task that failed (an exception in
+    it is printed)."""
+    pool = Pool("", slots, tasks)
+    changed = (lambda _pool, key, result: on_change(key, result)) if on_change else None
+    return dict((key, r) for (_, key), r in run_pools(sup, [pool], changed).items())
 
 
 def _touch(path):
@@ -560,6 +607,15 @@ def gpu_ids(opts):
         return [int(i) for i in ids]
     except ValueError:
         raise Usage("GPU ids: whole numbers separated by colons, e.g. 0:1:2:3 (got %r)" % text(opts, "gpu_ids"))
+
+
+def cuda_device(gpu, environ=None):
+    """The CUDA_VISIBLE_DEVICES that shows a program only GPU ``gpu`` of the job (its number among the GPUs the
+    job sees, as gpu_ids counts them): that entry of the job's own CUDA_VISIBLE_DEVICES (a queue's, or the
+    local GPU queue's: numbers, UUIDs or MIG names), else the number itself."""
+    vis = (os.environ if environ is None else environ).get("CUDA_VISIBLE_DEVICES", "").strip()
+    devices = [v.strip() for v in vis.split(",") if v.strip()] if vis not in ("", "NoDevFiles", "-1") else []
+    return devices[gpu] if 0 <= gpu < len(devices) else str(gpu)
 
 
 def _first_error(lines, most=60):

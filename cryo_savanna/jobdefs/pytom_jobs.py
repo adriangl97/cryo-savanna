@@ -1,12 +1,13 @@
 # Copyright (C) 2026 Adrián González-López
 # SPDX-License-Identifier: GPL-2.0-or-later
-"""pytom-match-pick as jobs ("Additional external jobs"): template matching and candidate extraction.
+"""pytom-match-pick as a job ("Additional external jobs"): template matching, with the candidates of each
+tomogram extracted as soon as it is matched.
 
-Both are RELION External jobs (relion.external, tomo), so relion_pipeliner runs them (locally or through
-the queue, as any job), the pipeline links them to their inputs and outputs, and RELION's own GUI can
-open, continue and rerun them. The executable is "python3 .cryo-savanna/pytom_runner.py match|extract"
-(a copy of cryo_savanna/pytom_runner.py in the project, with the runner_common.py it imports, put there
-before such a job is added or run).
+It is a RELION External job (relion.external, tomo), so relion_pipeliner runs it (locally or through the
+queue, as any job), the pipeline links it to its inputs and outputs, and RELION's own GUI can open,
+continue and rerun it. The executable is "python3 .cryo-savanna/pytom_runner.py match" (a copy of
+cryo_savanna/pytom_runner.py in the project, with the runner_common.py it imports, put there before such a
+job is added or run).
 Every option of the form is written to External's "Additional arguments" as ``--key value`` (shell
 quoted), which the runner reads after RELION's ``--j``; the form reads them back from there (clone,
 continue, overwrite). Pipeline files among the inputs also go in External's input fields, so the job
@@ -38,13 +39,13 @@ from cryo_savanna.project.pipeline import Pipeline
 RUNNER = str(Path(R.__file__).resolve())
 RUNNER_IN_PROJECT = ".cryo-savanna/pytom_runner.py"
 EXTERNAL = "relion.external"
-MATCH, EXTRACT = R.MATCH, R.EXTRACT
-TITLES = {MATCH: "pytom template matching", EXTRACT: "pytom candidate extraction"}
+MATCH = R.MATCH
+TITLES = {MATCH: "pytom template matching"}
+MENU_TEXT = {MATCH: "pytom: template matching and extraction"}
 DESCRIPTIONS = {
-    MATCH: "Template matching in RELION 5 tomograms with pytom-match-pick (pytom_match_template.py), "
-           "on one or more GPUs",
-    EXTRACT: "Particles from a pytom template matching job (pytom_extract_candidates.py), with thresholds "
-             "chosen interactively, as a RELION 5 particles.star (needs a GPU machine, like matching)",
+    MATCH: "Template matching in RELION 5 tomograms with pytom-match-pick (pytom_match_template.py), on one "
+           "or more GPUs, with the candidates of each tomogram extracted as soon as it is matched "
+           "(pytom_extract_candidates.py) into a RELION 5 particles.star, thresholds chosen interactively",
 }
 ENV_VAR = "CRYO_SAVANNA_PYTOM_ENV"  # default conda environment of pytom
 CUDA_ENV_VAR = "CRYO_SAVANNA_CUDA_MODULE"  # default CUDA module
@@ -258,8 +259,9 @@ def match_options() -> tuple[list[OptionDef], list[Tab], dict[int, Group]]:
                "needed, each pytom process gets one GPU). Each tomogram over all GPUs: pytom splits every "
                "search over the GPUs (-g with all of them), one tomogram at a time."),
         _yn("skip_done", "Skip tomograms already done?", "Yes", "When the job runs again (continue), tomograms "
-            "with score maps are not searched again: after a failure only the rest run."),
-    ] + ENV_OPTIONS
+            "with score maps are not searched again: after a failure only the rest run (and only the tomograms "
+            "matched again, or whose extraction settings changed, are extracted again)."),
+    ] + extraction_options() + ENV_OPTIONS
     tabs = [
         Tab("Inputs and template", (
             Row(("in_tomograms",)), Row(("tomo_kind",)), Row(("tomo_names",)), Row(("tilt_source",)),
@@ -279,27 +281,44 @@ def match_options() -> tuple[list[OptionDef], list[Tab], dict[int, Group]]:
         Tab("Picking", tuple(Row((k,)) for k in (
             "particle_diameter", "angular_search", "z_symmetry", "non_spherical", "random_phase", "rng_seed", "half_precision", "volume_split", "search_x",
             "search_y", "search_z", "tomogram_mask", "match_args"))),
+        Tab("Extraction", (
+            Row(("do_extract",)),
+            Row(("n_particles",), group=6), Row(("tomo_n_particles",), group=6), Row(("extract_diameter",), group=6),
+            Row(("cut_off_mode",), group=6), Row(("n_false_positives",), group=7), Row(("cut_off",), group=8),
+            Row(("do_candidates",), group=6), Row(("candidate_factor",), group=9), Row(("tophat",), group=6),
+            Row(("tophat_connectivity",), group=10), Row(("tophat_bins",), group=10), Row(("plot_bins",), group=6),
+            Row(("tomogram_mask_mode",), group=6), Row(("extract_mask",), group=11), Row(("do_roc",), group=6),
+            Row(("roc_particles",), group=12), Row(("roc_bins",), group=12), Row(("roc_crop",), group=12),
+            Row(("orientations",), group=6), Row(("extract_args",), group=6))),
         Tab("Compute", tuple(Row((k,)) for k in ("gpu_ids", "gpu_mode", "skip_done", "cuda_module", "pytom_env", "conda",
                                                    "log_level"))),
     ]
     groups = {1: Group(1, None, "do_prep_template"), 2: Group(2, None, "mask_source", R.MASK_FILE),
               3: Group(3, 2, "do_prep_mask"), 4: Group(4, None, "mask_source", R.MASK_CREATE),
-              5: Group(5, None, "use_ctf")}
+              5: Group(5, None, "use_ctf"),
+              6: Group(6, None, "do_extract"), 7: Group(7, 6, "cut_off_mode", R.CUT_AUTO),
+              8: Group(8, 6, "cut_off_mode", R.CUT_FIXED), 9: Group(9, 6, "do_candidates"),
+              10: Group(10, 6, "tophat"), 11: Group(11, 6, "tomogram_mask_mode", R.TMASK_OTHER),
+              12: Group(12, 6, "do_roc")}
     return opts, tabs, groups
 
 
-def extract_options() -> tuple[list[OptionDef], list[Tab], dict[int, Group]]:
-    opts = [
-        _o("in_match", "Template matching job:", "", "The pytom_match.star of a pytom template matching job "
-           "(it may still be running: the tomograms it finished are used).", kind="inputnode",
-           node_type="ProcessData.star", pattern="pytom match (*pytom_match.star)"),
-        TOMO_NAMES,
+def extraction_options() -> list[OptionDef]:
+    """The Extraction tab of the matching form: pytom_extract_candidates.py on each tomogram once matched."""
+    return [
+        _yn("do_extract", "Extract candidates?", "Yes", "Run pytom_extract_candidates.py on each tomogram as soon "
+            "as it is matched, beside the matching of the others (as many at once as the job's threads leave; "
+            "each sees only the GPU that matched it, as pytom needs CUDA, though extracting is mostly CPU work), "
+            "into a RELION 5 particles.star; its thresholds can be chosen in the job's Thresholds view "
+            "while the rest is matched. No: only the score maps (continuing the job with Yes extracts every "
+            "tomogram matched, without matching it again)."),
         _o("n_particles", "Max. particles per tomogram:", "1000", "-n: at most this many peaks per tomogram."),
         _o("tomo_n_particles", "Max. particles of some tomograms:", "", "Another maximum for some tomograms, "
            "as <rlnTomoName>=<number> separated by spaces (e.g. TS_01=3000); the Thresholds view sets it. When "
-           "the job is continued, only the tomograms whose settings changed are extracted again."),
-        _o("particle_diameter", "Particle diameter (Å):", "", "Peaks closer than half of it to a higher one are "
-           "left out. Empty: the matching job's."),
+           "the job is continued, only the tomograms whose maximum or other extraction settings changed are "
+           "extracted again (none is matched again)."),
+        _o("extract_diameter", "Particle diameter for extraction (Å):", "", "Peaks closer than half of it to a "
+           "higher one are left out. Empty: the particle diameter of the matching (Picking tab)."),
         _radio("cut_off_mode", "Cut-off:", (R.CUT_AUTO, R.CUT_FIXED), R.CUT_AUTO,
                "Automatic: pytom's cut-off from the score statistics, for the number of false positives below. "
                "Fixed: a score (LCC) cut-off."),
@@ -317,9 +336,9 @@ def extract_options() -> tuple[list[OptionDef], list[Tab], dict[int, Group]]:
         _o("tophat_bins", "Tophat histogram bins:", "50", "--tophat-bins"),
         _o("plot_bins", "Plot histogram bins:", "20", "--plot-bins, for pytom's extraction plot."),
         _radio("tomogram_mask_mode", "Tomogram mask:", (R.TMASK_JOB, R.TMASK_OTHER, R.TMASK_IGNORE), R.TMASK_JOB,
-               "Which tomogram mask limits the peaks: the one used for matching (if any), other masks, or none "
-               "(--ignore_tomogram_mask)."),
-        _o("tomogram_mask", "Tomogram masks folder:", "", "A folder with a mask per tomogram, named "
+               "Which tomogram mask limits the peaks: the one of the matching (Tomogram masks folder on the "
+               "Picking tab, if any), other masks, or none (--ignore_tomogram_mask)."),
+        _o("extract_mask", "Extraction masks folder:", "", "A folder with a mask per tomogram, named "
            "<rlnTomoName>_mask.mrc (the masks/ folder of a Tomogram masks job); peaks where the mask is not above 0 "
            "are left out. Also accepted: a path with {name} for the rlnTomoName, or one mask file.", kind="folder"),
         _yn("do_roc", "Estimate the ROC?", "No", "Also run pytom_estimate_roc.py (a Gaussian fit of the score "
@@ -332,23 +351,7 @@ def extract_options() -> tuple[list[OptionDef], list[Tab], dict[int, Group]]:
                "--relion5-compat writes them), as the subtomogram orientation (rlnTomoSubtomogramRot/Tilt/Psi), "
                "or not at all."),
         _o("extract_args", "More pytom_extract_candidates.py arguments:", "", "Added to its command line."),
-    ] + ENV_OPTIONS
-    tabs = [
-        Tab("Input", (Row(("in_match",)), Row(("tomo_names",)))),
-        Tab("Extraction", (
-            Row(("n_particles",)), Row(("tomo_n_particles",)), Row(("particle_diameter",)), Row(("cut_off_mode",)),
-            Row(("n_false_positives",), group=1), Row(("cut_off",), group=2), Row(("do_candidates",)),
-            Row(("candidate_factor",), group=3), Row(("tophat",)), Row(("tophat_connectivity",), group=4),
-            Row(("tophat_bins",), group=4), Row(("plot_bins",)), Row(("tomogram_mask_mode",)),
-            Row(("tomogram_mask",), group=5), Row(("do_roc",)), Row(("roc_particles",), group=6),
-            Row(("roc_bins",), group=6), Row(("roc_crop",), group=6))),
-        Tab("Output", (Row(("orientations",)), Row(("extract_args",)))),
-        Tab("Compute", tuple(Row((k,)) for k in ("cuda_module", "pytom_env", "conda", "log_level"))),
     ]
-    groups = {1: Group(1, None, "cut_off_mode", R.CUT_AUTO), 2: Group(2, None, "cut_off_mode", R.CUT_FIXED),
-              3: Group(3, None, "do_candidates"), 4: Group(4, None, "tophat"),
-              5: Group(5, None, "tomogram_mask_mode", R.TMASK_OTHER), 6: Group(6, None, "do_roc")}
-    return opts, tabs, groups
 
 
 # ---------------------------------------------------------------------------- the form
@@ -447,9 +450,9 @@ class PytomVariant(JobVariant):
                 if k == "fn_mask" and values.get("mask_source") != R.MASK_FILE:
                     continue
                 files.append(v)
-        masks = self._masks_node(values, pipeline)
-        if masks and masks not in files:
-            files.append(masks)
+        for masks in self._mask_nodes(values, pipeline):
+            if masks not in files:
+                files.append(masks)
         free = [k for k, _ in INPUT_SLOTS]
         left = []
         for f in files:
@@ -464,14 +467,22 @@ class PytomVariant(JobVariant):
             if free:
                 o[free.pop(0)] = f
 
-    def _masks_node(self, values: dict[str, str], pipeline: Pipeline) -> str | None:
-        """The output of the Tomogram masks job whose folder is the tomogram masks (so the job hangs under it)."""
-        if "tomogram_mask" not in self.own_keys:
-            return None
-        if self.kind == EXTRACT and values.get("tomogram_mask_mode") != R.TMASK_OTHER:
-            return None
+    def _mask_nodes(self, values: dict[str, str], pipeline: Pipeline) -> list[str]:
+        """The outputs of the Tomogram masks jobs whose folders are the tomogram masks the job uses (the
+        matching's, the extraction's other ones), so that the job hangs under them."""
+        keys = [k for k in ("tomogram_mask",) if k in self.own_keys]
+        if "extract_mask" in self.own_keys and values.get("do_extract") == "Yes" and \
+                values.get("tomogram_mask_mode") == R.TMASK_OTHER:
+            keys.append("extract_mask")
+        if not keys:
+            return []
         from cryo_savanna.jobdefs.tomomask_jobs import masks_job_of
-        return masks_job_of(values.get("tomogram_mask", ""), pipeline)
+        out: list[str] = []
+        for k in keys:
+            node = masks_job_of(values.get(k, ""), pipeline)
+            if node and node not in out:
+                out.append(node)
+        return out
 
     def values_from_jobstar(self, js: JobStar, env: RelionEnv) -> tuple[dict[str, str], list[str]]:
         values = self.default_values(env)
@@ -496,24 +507,38 @@ def runner_command(kind: str) -> str:
     return f"python3 {RUNNER_IN_PROJECT} {kind}"
 
 
-def pytom_kind(fn_exe: str) -> str | None:
-    """match / extract for an External executable made by runner_command, else None."""
+def _runner_mode(fn_exe: str) -> str | None:
+    """The mode of an External executable that runs pytom_runner.py (its last word), else None."""
     parts = fn_exe.split()
-    if len(parts) >= 2 and parts[-1] in (MATCH, EXTRACT) and \
-            any(Path(p.strip("'\"")).name == "pytom_runner.py" for p in parts[:-1]):
+    if len(parts) >= 2 and any(Path(p.strip("'\"")).name == "pytom_runner.py" for p in parts[:-1]):
         return parts[-1]
     return None
+
+
+def pytom_kind(fn_exe: str) -> str | None:
+    """match for an External executable made by runner_command, else None."""
+    mode = _runner_mode(fn_exe)
+    return mode if mode in TITLES else None
+
+
+# the separate candidate extraction job of earlier cryo-savannas (now part of the matching job): such jobs are
+# plain External jobs now (no form, they cannot run again), but their results still get their views
+OLD_EXTRACT, OLD_EXTRACT_TITLE = "extract", "pytom candidate extraction (old)"
+
+
+def is_old_extraction(fn_exe: str) -> bool:
+    return _runner_mode(fn_exe) == OLD_EXTRACT
 
 
 def pytom_kind_of(js: JobStar) -> str | None:
     return pytom_kind(js.options.get("fn_exe", "")) if js.type_label == EXTERNAL else None
 
 
-MAIN_INPUTS = {MATCH: "in_tomograms", EXTRACT: "in_match"}  # the form's field with the data the job works on
+MAIN_INPUTS = {MATCH: "in_tomograms"}  # the form's field with the data the job works on
 
 
 def pytom_main_input(js: JobStar) -> str | None:
-    """The file in a pytom job's main input field (its tomograms / its matching job), else None (also for
+    """The file in a pytom job's main input field (its tomograms), else None (also for
     jobs that are not pytom's). It places the job in the job tree, whichever External field it went in."""
     kind = pytom_kind_of(js)
     if kind is None:
@@ -550,7 +575,7 @@ def add_running_tab(options: dict[str, OptionDef], tabs: list[Tab], groups: dict
 
 
 class PytomCatalog:
-    """The two forms, built once per RELION environment (its queue settings and RELION_QSUB_EXTRA fields)."""
+    """The form, built once per RELION environment (its queue settings and RELION_QSUB_EXTRA fields)."""
 
     def __init__(self, defs: JobDefs, env: RelionEnv):
         self.defs, self.env = defs, env
@@ -564,22 +589,19 @@ class PytomCatalog:
     def _build(self, kind: str) -> PytomVariant:
         external = self.defs.variant(EXTERNAL, True)
         ext = external.resolved_options(self.env)
-        own, tabs, groups = match_options() if kind == MATCH else extract_options()
+        if kind not in TITLES:
+            raise KeyError(f"no pytom job {kind!r}")
+        own, tabs, groups = match_options()
         options = {o.key: o for o in own}
         options["pytom_env"] = replace(options["pytom_env"], default=default_env())
         options["cuda_module"] = replace(options["cuda_module"], default=_warmed_cuda_module())
-        if kind == EXTRACT:
-            options["nr_threads"] = replace(ext["nr_threads"], label="Tomograms at a time:", help=(
-                "Extractions run in parallel, each one pytom process. Also the number of threads a queue "
-                "script reserves (XXXthreadsXXX). pytom's programs look for a GPU when they start, so the "
-                "job needs a machine with a GPU and its NVIDIA driver even to extract: submit it to a GPU "
-                "queue (ask for one GPU in the submission script, e.g. --gres=gpu:1) or run it on a GPU "
-                "workstation; on a machine without one, every tomogram fails with "
-                "'cudaErrorInsufficientDriver'."))
-        else:
-            options["nr_threads"] = replace(ext["nr_threads"], help=(
-                "CPU threads to reserve on the queue (XXXthreadsXXX in the submission script). pytom's matching "
-                "runs on the GPUs."))
+        options["nr_threads"] = replace(ext["nr_threads"], default="2", help=(
+            "The most programs the job runs at once, and the threads a queue script reserves (XXXthreadsXXX): "
+            "one per GPU for the matching, the rest for extractions (each tomogram extracted as soon as it is "
+            "matched, beside the matching of the next; at least one at a time, even with fewer threads). An "
+            "extraction takes far less time than a search, so 2 per GPU is plenty while matching (2 for one "
+            "GPU, 8 for four); a continue that extracts many tomograms matched before runs as many at once as "
+            "there are threads."))
         tabs, groups = add_running_tab(options, tabs, groups, ext)
         return PytomVariant(key=f"pytom:{kind}", label=EXTERNAL, proc_id=external.proc_id,
                             dirname=external.dirname, is_tomo=True, options=options, tabs=tabs, groups=groups,

@@ -105,6 +105,8 @@ def program_title(fn_exe: str) -> str:
     found = kind_of_exe(fn_exe)
     if found is not None:
         return found[0].title(found[1])
+    if pytom_jobs.is_old_extraction(fn_exe):
+        return pytom_jobs.OLD_EXTRACT_TITLE
     parts = fn_exe.split()
     return Path(parts[0]).name if parts else ""
 
