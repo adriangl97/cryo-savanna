@@ -1,11 +1,12 @@
 # Copyright (C) 2026 Adrián González-López
 # SPDX-License-Identifier: GPL-2.0-or-later
 """What pytom jobs wrote, read for the viewers (no Qt): the match summary, pytom's job.json, score maps,
-the candidates and thresholds of an extraction.
+the candidates and thresholds of the extraction.
 
 The files are those of cryo_savanna/pytom_runner.py (the runner the jobs run): pytom_match.star (one row
-per tomogram: the tomograms.star columns, the score maps and the status), tm/<tomogram>_job.json
-(pytom's own), candidates.star / thresholds.star / particles.star of an extraction.
+per tomogram: the tomograms.star columns, the score maps, the status of its matching and extraction),
+tm/<tomogram>_job.json (pytom's own), candidates.star / thresholds.star / particles.star of the tomograms
+extracted so far.
 """
 
 from __future__ import annotations
@@ -47,10 +48,12 @@ class MatchSummary:
     def value(self, i: int, label: str) -> str:
         return self.table.column(label)[i] if self.table.has(label) else ""
 
-    def counts(self) -> dict[str, int]:
+    def counts(self, label: str = P.COL_STATUS) -> dict[str, int]:
+        """How many tomograms have each status: of their matching, or of another column (P.COL_EXTRACTION)."""
         out: dict[str, int] = {}
-        for s in self.table.column(P.COL_STATUS) if self.table.has(P.COL_STATUS) else []:
-            out[s] = out.get(s, 0) + 1
+        for s in self.table.column(label) if self.table.has(label) else []:
+            if s:
+                out[s] = out.get(s, 0) + 1
         return out
 
 
@@ -140,7 +143,7 @@ def histogram(values: np.ndarray, bins: int = 120) -> tuple[np.ndarray, np.ndarr
 
 @dataclass
 class Selection:
-    """The candidates of an extraction job (LCC per tomogram, in the file's order) and their thresholds."""
+    """The candidates a pytom job extracted (LCC per tomogram, in the file's order) and their thresholds."""
     job: str
     lcc: dict[str, np.ndarray]
     auto: dict[str, float | None] = field(default_factory=dict)
@@ -184,7 +187,7 @@ def save_thresholds(project_dir: Path, job: str, thresholds: dict[str, float | N
 
 @dataclass
 class ExtractSettings:
-    """The maximum number of particles (-n) of each tomogram of an extraction job: ``n_particles`` and
+    """The maximum number of particles (-n) of each tomogram of a job's extraction: ``n_particles`` and
     ``per_tomogram`` are the job's options (job.star: what a continue uses), ``used`` what each tomogram was
     extracted with (thresholds.star; None: not known, a job of an older cryo-savanna)."""
     n_particles: int

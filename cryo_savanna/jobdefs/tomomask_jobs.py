@@ -41,8 +41,9 @@ def mask_options() -> tuple[list[OptionDef], list[Tab], dict[int, Group]]:
     opts = [
         _o("in_tomograms", "Input tomograms:", "", "The tomograms.star of a RELION 5 Reconstruct tomograms (or "
            "Denoise, or AreTomo3) job. Each tomogram gets a mask of its size and voxel size, "
-           "masks/<rlnTomoName>_mask.mrc in the job: the folder to give pytom's template matching or "
-           "extraction ('Tomogram masks folder'). Use the tomograms pytom searches (they need the same size).",
+           "masks/<rlnTomoName>_mask.mrc in the job: the folder to give pytom's template matching ('Tomogram "
+           "masks folder') or only its extraction ('Extraction masks folder'). Use the tomograms pytom searches "
+           "(they need the same size).",
            kind="inputnode", node_type="TomogramGroupMetadata.star.relion", pattern="Tomogram set STAR file (*.star)"),
         _radio("tomo_kind", "Tomograms:", tuple(RC.TOMOGRAM_KINDS), "Reconstructed",
                "Which tomogram of each row the masks are drawn on and take their size from (the denoised ones "

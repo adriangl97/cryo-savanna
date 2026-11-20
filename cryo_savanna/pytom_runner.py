@@ -13,11 +13,12 @@
 # the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public
 # License for more details. You should have received a copy of the GNU General Public License along with
 # this program; if not, see <https://www.gnu.org/licenses/old-licenses/gpl-2.0.html>.
-"""Run pytom-match-pick (template matching in tomograms) as a RELION External job.
+"""Run pytom-match-pick (template matching in tomograms, and the extraction of its candidates) as a RELION
+External job.
 
 cryo-savanna's "Additional external jobs" menu makes External jobs whose executable is
 
-    python3 .cryo-savanna/pytom_runner.py match|extract
+    python3 .cryo-savanna/pytom_runner.py match
 
 (a copy of this file in the project, beside a copy of runner_common.py, the helpers it shares with the other
 runners). RELION runs it as
@@ -37,21 +38,28 @@ tomogram's voxel size) in inputs/<tomogram>/, optionally prepares the template
 pytom_create_mask.py), and runs pytom_match_template.py. Several GPUs: either one tomogram per GPU at
 a time (no MPI is needed: each pytom process gets one GPU), or every tomogram split over all of them
 (pytom's own -g). pytom_match.star (one row per tomogram, the tomograms.star columns and the score
-maps, with the status of each tomogram) is rewritten as tomograms finish, so the results can be looked
-at while the job runs. Tomograms already done are skipped when the job is run again (continue).
+maps, with the status of each tomogram's matching and extraction) is rewritten as tomograms finish, so the
+results can be looked at while the job runs. Tomograms already done are skipped when the job is run again
+(continue).
 
-extract: runs pytom_extract_candidates.py on the tomograms of a match job (in this job's own directory:
-the match job's score maps are linked, its job.json copied with output_dir changed), with pytom's
-automatic cut-off (number of false positives), or a fixed one; optionally also further candidates below
-it (to choose thresholds interactively in cryo-savanna) and pytom_estimate_roc.py. The candidates go into
+With do_extract, each tomogram is extracted (pytom_extract_candidates.py, on a copy of its job.json with
+output_dir this job's tm/ as an absolute path) as soon as it is matched, beside the matching of the others,
+as many at once as the job's threads (--j) leave beside the matching (one per GPU slot matching), at least
+one: those matched before, on a continue, as many as that at the start. pytom's programs
+need CUDA even to extract, which is mostly CPU work: each extraction sees only the GPU that matched its
+tomogram (CUDA_VISIBLE_DEVICES; those matched before take the job's GPUs in turn), so it runs on the job's
+GPUs, beside their matching, and on no other GPU of the machine. pytom's
+automatic cut-off (number of false positives), or a fixed one; optionally also further candidates below it
+(to choose thresholds interactively in cryo-savanna) and pytom_estimate_roc.py. The candidates go into
 candidates.star (RELION 5: rlnTomoName, rlnCenteredCoordinate[XYZ]Angst, angles, rlnLCCmax, ...), the
 thresholds per tomogram into thresholds.star, the particles above them into particles.star (with
-optimisation_set.star) for RELION 5's Extract subtomos. write_selection() rewrites particles.star for
-new thresholds (cryo-savanna's threshold viewer calls it). thresholds.star also keeps, per tomogram, the
-maximum number of particles it was extracted with and a key of the other settings: when the job runs
-again (continue), only the tomograms whose settings changed are extracted again (e.g. a larger maximum
-for one tomogram, tomo_n_particles, set in the threshold viewer); the others keep their candidates and
-the thresholds chosen for them.
+optimisation_set.star) for RELION 5's Extract subtomos; the four are rewritten as each tomogram is
+extracted, keeping the thresholds chosen meanwhile in cryo-savanna's Thresholds view. write_selection()
+rewrites particles.star for new thresholds (the Thresholds view calls it). thresholds.star also keeps, per
+tomogram, the maximum number of particles it was extracted with and a key of the extraction's other
+settings and of its matching: when the job runs again (continue), only the tomograms matched again or whose
+extraction settings changed are extracted again (e.g. a larger maximum for one tomogram, tomo_n_particles,
+set in the Thresholds view); the others keep their candidates and the thresholds chosen for them.
 
 Like every External job it writes RELION_JOB_EXIT_SUCCESS / _FAILURE / _ABORTED and, before success,
 RELION_OUTPUT_NODES.star. RELION_JOB_ABORT_NOW and SIGTERM/SIGINT/SIGHUP (scancel) stop the pytom
@@ -88,16 +96,18 @@ _f, tomogram_rows, tomogram_of, gpu_ids = C._f, C.tomogram_rows, C.tomogram_of, 
 _first_error, _show_tail, _fail = C._first_error, C._show_tail, C._fail
 
 WHO = "pytom"  # say(): " ++++ pytom: ..."
-MATCH, EXTRACT = "match", "extract"
+MATCH = "match"
 
 
 # files of the jobs
-SUMMARY = "pytom_match.star"  # match: one row per tomogram
-CANDIDATES = "candidates.star"  # extract: every candidate, RELION 5 coordinates
-THRESHOLDS = "thresholds.star"  # extract: threshold per tomogram
-PARTICLES = "particles.star"  # extract: the candidates above the thresholds
+SUMMARY = "pytom_match.star"  # one row per tomogram
+CANDIDATES = "candidates.star"  # every candidate, RELION 5 coordinates
+THRESHOLDS = "thresholds.star"  # threshold per tomogram
+PARTICLES = "particles.star"  # the candidates above the thresholds
 OPTIMISATION_SET = "optimisation_set.star"
 TM_DIR, INPUTS_DIR, LOG_DIR, PLOTS_DIR = "tm", "inputs", "logs", "plots"
+EXTRACT_JOB = "_extract_job.json"  # tm/<stem>_extract_job.json: the copy of pytom's job.json extraction reads
+EXTRACT_LOG = "_extract.log"  # logs/<tomogram>_extract.log (logs/<tomogram>.log: its matching)
 
 # node types of the outputs (RELION_OUTPUT_NODES.star)
 NODE_SUMMARY = "ProcessData.star.pytom.match"
@@ -113,6 +123,7 @@ P = "savannaPytom"
 COL_TOMOGRAM, COL_VOXEL = P + "Tomogram", P + "VoxelSize"
 COL_SCORES, COL_ANGLES, COL_JOB = P + "Scores", P + "Angles", P + "JobFile"
 COL_STATUS, COL_SECONDS, COL_LOG = P + "Status", P + "Seconds", P + "Log"
+COL_EXTRACTION = P + "Extraction"  # pytom_match.star: the status of the tomogram's extraction ("": none)
 COL_AUTO, COL_THRESHOLD = P + "AutoCutOff", P + "Threshold"
 COL_CANDIDATES, COL_SELECTED = P + "Candidates", P + "Selected"
 COL_MAX, COL_SETTINGS = P + "MaxParticles", P + "Settings"
@@ -128,7 +139,7 @@ ORIENTATIONS = {  # how the candidates' angles are written
 GPU_PER_TOMOGRAM, GPU_SPLIT = "One tomogram per GPU", "Each tomogram over all GPUs"
 MASK_FILE, MASK_CREATE = "Input file", "Create sphere or ellipsoid"
 CUT_AUTO, CUT_FIXED = "Automatic (false positives)", "Fixed cut-off"
-TMASK_JOB, TMASK_OTHER, TMASK_IGNORE = "The match job's", "Other mask(s)", "None (ignore masks)"
+TMASK_JOB, TMASK_OTHER, TMASK_IGNORE = "As for matching", "Other mask(s)", "None (ignore masks)"
 
 # clips a resampled mask to [0, 1] (run with the python of the pytom environment). The mask is never
 # inverted: only the template's contrast is (pytom's mask is 1 on the particle, whatever the contrast)
@@ -139,7 +150,11 @@ MASK_FIX = ("import sys, numpy as np, mrcfile\n"
 
 # ---------------------------------------------------------------------------- arguments
 
-def parse(argv, modes=(MATCH, EXTRACT)):
+def parse(argv, modes=(MATCH,)):
+    if argv[:1] == ["extract"] and "extract" not in modes:
+        raise Usage("this is a candidate extraction job of an earlier cryo-savanna: it cannot run any more. The "
+                    "candidates are now extracted by the template matching job itself: continue that job with "
+                    "'Extract candidates?' set to Yes (Extraction tab). This job's results can still be viewed.")
     return C.parse(argv, modes)
 
 
@@ -266,11 +281,12 @@ def prepare_tomogram(row, opts, job_dir):
     return files
 
 
-def tomogram_mask_file(opts, name):
-    """The tomogram mask of tomogram ``name`` (option tomogram_mask), else "": in a folder,
-    <name>_mask.mrc (TOMO_MASK_SUFFIX, as cryo-savanna's Tomogram masks job writes them); a path with
-    {name}, that path for the tomogram; else one file for every tomogram."""
-    value = text(opts, "tomogram_mask")
+def tomogram_mask_file(opts, name, key="tomogram_mask"):
+    """The tomogram mask of tomogram ``name`` (option ``key``: the matching's tomogram_mask, or the
+    extraction's extract_mask), else "": in a folder, <name>_mask.mrc (TOMO_MASK_SUFFIX, as cryo-savanna's
+    Tomogram masks job writes them); a path with {name}, that path for the tomogram; else one file for every
+    tomogram."""
+    value = text(opts, key)
     if not value:
         return ""
     if "{name}" in value:
@@ -459,7 +475,7 @@ def prepare_template_and_mask(sup, opts, job_dir, voxel):
     return template, mask, nodes
 
 
-# ---------------------------------------------------------------------------- match
+# ---------------------------------------------------------------------------- match: the summary
 
 def match_outputs(job_dir, stem):
     tm = os.path.join(job_dir, TM_DIR)
@@ -468,7 +484,8 @@ def match_outputs(job_dir, stem):
 
 
 def write_summary(job_dir, opts, columns, rows, state, template="", mask=""):
-    extra = [COL_TOMOGRAM, COL_VOXEL, COL_SCORES, COL_ANGLES, COL_JOB, COL_STATUS, COL_SECONDS, COL_LOG]
+    extra = [COL_TOMOGRAM, COL_VOXEL, COL_SCORES, COL_ANGLES, COL_JOB, COL_STATUS, COL_SECONDS, COL_LOG,
+             COL_EXTRACTION]
     cols = [c for c in columns if c not in extra] + extra
     table = []
     for r in rows:
@@ -476,109 +493,30 @@ def write_summary(job_dir, opts, columns, rows, state, template="", mask=""):
         vals = dict(r)
         vals.update({COL_TOMOGRAM: s.get("tomogram", ""), COL_VOXEL: s.get("voxel", ""),
                      COL_SCORES: s.get("scores", ""), COL_ANGLES: s.get("angles", ""), COL_JOB: s.get("json", ""),
-                     COL_STATUS: s["status"], COL_SECONDS: "%.0f" % s.get("seconds", 0), COL_LOG: s.get("log", "")})
+                     COL_STATUS: s["status"], COL_SECONDS: "%.0f" % s.get("seconds", 0), COL_LOG: s.get("log", ""),
+                     COL_EXTRACTION: s.get("extraction", "")})
         table.append([vals.get(c, "") for c in cols])
     general = {P + "TomogramsFile": text(opts, "in_tomograms"), P + "Template": template, P + "Mask": mask,
                P + "TomogramKind": text(opts, "tomo_kind") or "Reconstructed"}
     write_star(os.path.join(job_dir, SUMMARY), [("general", general, None, None), ("global", None, cols, table)])
 
 
-def run_match(sup, job_dir, threads, opts):
-    star, columns, rows = tomogram_rows(opts)
-    for d in (TM_DIR, INPUTS_DIR, LOG_DIR):
-        p = os.path.join(job_dir, d)
-        if not os.path.isdir(p):
-            os.makedirs(p)
-    state, files = {}, {}
-    for r in rows:  # every tomogram's inputs first: a wrong setting shows before hours of matching
-        name = r[TOMO_NAME]
-        files[name] = prepare_tomogram(r, opts, job_dir)
-        scores, angles, js = match_outputs(job_dir, files[name]["stem"])
-        done = yes(opts, "skip_done") and all(os.path.isfile(f) for f in (scores, angles, js))
-        state[name] = {"status": "done" if done else "pending", "tomogram": _rel(files[name]["tomogram"]),
-                       "voxel": "%.4f" % files[name]["voxel"], "scores": _rel(scores), "angles": _rel(angles),
-                       "json": _rel(js), "log": _rel(os.path.join(job_dir, LOG_DIR, name + ".log"))}
-        if done:
-            say("%s: already done, skipped" % name)
-    voxels = sorted(set(round(f["voxel"], 3) for f in files.values()))
-    if len(voxels) > 1 and not (yes(opts, "do_prep_template") and number(opts, "template_angpix")):
-        say("WARNING: the tomograms have different voxel sizes (%s Å): one template fits only one of them"
-            % ", ".join(str(v) for v in voxels))
-    match_command(opts, files[rows[0][TOMO_NAME]], "template.mrc", "mask.mrc", [0], TM_DIR)  # checks the options
-    template, mask, nodes = prepare_template_and_mask(sup, opts, job_dir, voxels[0])
-    write_summary(job_dir, opts, columns, rows, state, _rel(template), _rel(mask))
+# ---------------------------------------------------------------------------- extraction: pytom's programs
 
-    ids = gpu_ids(opts)
-    slots = [ids] if text(opts, "gpu_mode") == GPU_SPLIT else [[i] for i in ids]
-    say("%d tomogram(s) to search, GPU(s) %s, %d at a time"
-        % (sum(s["status"] != "done" for s in state.values()), " ".join(map(str, ids)), len(slots)))
-
-    def task(name):
-        def factory(gpus):
-            def gen():
-                s = state[name]
-                s["status"], t0 = "running", time.time()
-                s["gpus"] = gpus
-                write_summary(job_dir, opts, columns, rows, state, _rel(template), _rel(mask))
-                say("%s: matching on GPU %s" % (name, ":".join(map(str, gpus))))
-                cmd = match_command(opts, files[name], template, mask, gpus, os.path.join(job_dir, TM_DIR))
-                rc = yield cmd, s["log"]
-                s["seconds"] = time.time() - t0
-                if rc != 0 or not os.path.isfile(s["scores"]):
-                    _show_tail(s["log"])
-                    raise Usage("pytom_match_template.py exited with %s (log: %s)" % (rc, s["log"]))
-                return True
-            return gen()
-        return name, factory
-
-    def changed(name, result):
-        s = state[name]
-        s["status"] = "done" if result else "failed"
-        say("%s: %s in %.0f min" % (name, s["status"], s.get("seconds", 0) / 60))
-        write_summary(job_dir, opts, columns, rows, state, _rel(template), _rel(mask))
-
-    todo = [task(r[TOMO_NAME]) for r in rows if state[r[TOMO_NAME]]["status"] != "done"]
-    try:
-        run_parallel(sup, todo, slots, changed)
-    except Aborted:
-        for s in state.values():
-            if s["status"] == "running":
-                s["status"] = "aborted"
-        write_summary(job_dir, opts, columns, rows, state, _rel(template), _rel(mask))
-        raise
-    failed = [n for n, s in state.items() if s["status"] != "done"]
-    if failed:
-        raise Usage("%d tomogram(s) failed: %s. Continue the job to run only those again."
-                    % (len(failed), " ".join(failed)))
-    return [(os.path.join(job_dir, SUMMARY), NODE_SUMMARY)] + nodes
-
-
-# ---------------------------------------------------------------------------- extract
-
-def read_summary(path):
-    blocks = read_star(path)
-    if "global" not in blocks:
-        raise Usage("%s: not a pytom match summary" % path)
-    return blocks.get("general", Block("general")).pairs, blocks["global"].dicts()
-
-
-def extract_job_file(row, job_dir):
-    """This job's copy of the match job's job.json, with output_dir here and the score maps linked,
-    so that pytom writes its files in this job's directory."""
-    src = row[COL_JOB]
-    with open(src) as fh:
+def extraction_job_file(job_json, job_dir):
+    """A copy of pytom's job.json of a matched tomogram (tm/<stem>_extract_job.json) with output_dir this
+    job's tm/ as an absolute path: pytom's extraction reads the score maps from there and writes its particles
+    there, also when the project was moved or copied since the tomogram was matched."""
+    with open(job_json) as fh:
         data = json.load(fh)
     tm = os.path.join(job_dir, TM_DIR)
-    stem = os.path.basename(src)[:-len("_job.json")]
-    for suffix in ("_scores.mrc", "_angles.mrc", "_whitening_filter.npy"):
-        f = os.path.join(os.path.dirname(src), stem + suffix)
-        if os.path.exists(f) and not _link(f, os.path.join(tm, stem + suffix)):
-            raise Usage("cannot link %s into %s (a file system without symbolic links?)" % (f, tm))
     data["output_dir"] = os.path.abspath(tm)
-    dst = os.path.join(tm, stem + "_job.json")
-    with open(dst + ".tmp", "w") as fh:
+    stem = os.path.basename(job_json)[:-len("_job.json")]
+    dst = os.path.join(tm, stem + EXTRACT_JOB)
+    tmp = "%s.%d.tmp" % (dst, os.getpid())
+    with open(tmp, "w") as fh:
         json.dump(data, fh, indent=4)
-    os.replace(dst + ".tmp", dst)
+    os.replace(tmp, dst)
     return dst, stem
 
 
@@ -587,53 +525,53 @@ def max_particles(opts, name=None):
     own = per_tomogram(opts, "tomo_n_particles", what="Max. particles of some tomograms")
     if name in own:
         return own[name]
-    return number(opts, "n_particles", int, True, "Number of particles")
+    return number(opts, "n_particles", int, True, "Max. particles per tomogram")
 
 
-def extract_command(opts, job_file, cut_off=None, n=None):
-    n = n or number(opts, "n_particles", int, True, "Number of particles")
+def extract_command(opts, job_file, name, cut_off=None, n=None):
+    n = n or max_particles(opts, name)
     cmd = conda_prefix(opts) + ["pytom_extract_candidates.py", "-j", job_file, "-n", str(n)]
-    fp = number(opts, "n_false_positives", what="Number of false positives")
+    fp = number(opts, "n_false_positives", what="False positives per tomogram")
     if fp:
         cmd += ["--number-of-false-positives", num(fp)]
-    d = number(opts, "particle_diameter", what="Particle diameter")
+    d = number(opts, "extract_diameter", what="Particle diameter for extraction")
     if d:
         cmd += ["--particle-diameter", num(d)]
     if cut_off is not None:
         cmd += ["--cut-off", "%.6g" % max(0.0, cut_off)]
     if yes(opts, "tophat"):
-        cmd += ["--tophat-filter", "--tophat-connectivity", str(number(opts, "tophat_connectivity", int) or 1)]
-        bins = number(opts, "tophat_bins", int)
+        cmd += ["--tophat-filter", "--tophat-connectivity",
+                str(number(opts, "tophat_connectivity", int, what="Tophat connectivity") or 1)]
+        bins = number(opts, "tophat_bins", int, what="Tophat histogram bins")
         if bins:
             cmd += ["--tophat-bins", str(bins)]
-    bins = number(opts, "plot_bins", int)
+    bins = number(opts, "plot_bins", int, what="Plot histogram bins")
     if bins:
         cmd += ["--plot-bins", str(bins)]
-    cmd += _tomogram_mask_args(opts, job_file)
+    cmd += _tomogram_mask_args(opts, name)
     cmd += ["--log", (text(opts, "log_level") or "info").lower()]
     return cmd + words(opts, "extract_args")
 
 
-def _tomogram_mask_args(opts, job_file):
+def _tomogram_mask_args(opts, name):
     mode = text(opts, "tomogram_mask_mode") or TMASK_JOB
     if mode == TMASK_IGNORE:
         return ["--ignore_tomogram_mask"]
     if mode == TMASK_OTHER:
-        name = os.path.basename(job_file)[:-len("_job.json")]
-        mask = tomogram_mask_file(opts, name)
+        mask = tomogram_mask_file(opts, name, "extract_mask")
         if not mask:
-            raise Usage("no tomogram masks given (Tomogram masks folder)")
+            raise Usage("no tomogram masks given for the extraction (Extraction masks folder)")
         return ["--tomogram-mask", mask]
-    return []
+    return []  # pytom's: the tomogram mask of the matching (in its job.json), if any
 
 
-def roc_command(opts, job_file, n=None):
-    n = number(opts, "roc_particles", int) or 3 * (n or number(opts, "n_particles", int, True, "Number of particles"))
+def roc_command(opts, job_file, n):
+    n = number(opts, "roc_particles", int, what="ROC: number of peaks") or 3 * n
     cmd = conda_prefix(opts) + ["pytom_estimate_roc.py", "-j", job_file, "-n", str(n)]
-    d = number(opts, "particle_diameter")
+    d = number(opts, "extract_diameter")
     if d:
         cmd += ["--particle-diameter", num(d)]
-    bins = number(opts, "roc_bins", int)
+    bins = number(opts, "roc_bins", int, what="ROC: histogram bins")
     if bins:
         cmd += ["--bins", str(bins)]
     if yes(opts, "roc_crop"):
@@ -666,6 +604,8 @@ def read_pytom_particles(path):
     except Usage:
         return []  # no rows: pytom found nothing above the cut-off
 
+
+# ---------------------------------------------------------------------------- extraction: RELION 5 coordinates
 
 def tomogram_geometry(info):
     """How a matched tomogram's voxels map to RELION 5's frame: (tilt-series pixel size, binning,
@@ -741,13 +681,7 @@ def candidate_columns(angles):
     return [TOMO_NAME] + list(CENTERED) + list(angles) + [LCC, "rlnCutOff", "rlnSearchStd", "rlnAutopickFigureOfMerit"]
 
 
-def read_thresholds(job_dir):
-    """{tomogram: (automatic cut-off or None, threshold or None)}, in the file's order."""
-    out = {}
-    for r in loop_block(os.path.join(job_dir, THRESHOLDS), "thresholds").dicts():
-        out[r[TOMO_NAME]] = (_f(r, COL_AUTO), _f(r, COL_THRESHOLD))
-    return out
-
+# ---------------------------------------------------------------------------- extraction: thresholds
 
 def write_thresholds(job_dir, rows):
     """thresholds.star from {column: value} rows (THRESHOLD_COLUMNS; missing ones are empty)."""
@@ -794,25 +728,28 @@ def write_selection(job_dir, thresholds=None):
     return dict((n, tuple(c)) for n, c in counts.items())
 
 
-# options that do not change what a tomogram's extraction gives (or are compared on their own)
-NOT_SETTINGS = ("tomo_names", "n_particles", "tomo_n_particles", "pytom_env", "conda", "cuda_module", "log_level")
+# the options a tomogram's extraction depends on, besides its matching (n_particles and tomo_n_particles are
+# compared on their own: a new maximum keeps the threshold chosen)
+EXTRACT_SETTINGS = ("extract_diameter", "cut_off_mode", "n_false_positives", "cut_off", "do_candidates",
+                    "candidate_factor", "tophat", "tophat_connectivity", "tophat_bins", "plot_bins",
+                    "tomogram_mask_mode", "extract_mask", "do_roc", "roc_particles", "roc_bins", "roc_crop",
+                    "orientations", "extract_args")
 
 
-def settings_key(opts, row):
-    """A key of everything else a tomogram's extraction depends on: the job's other options and the
-    match job's result for it (its job.json: matched again, it changes)."""
-    kept = sorted((k, v) for k, v in opts.items() if k not in NOT_SETTINGS)
-    src = row.get(COL_JOB, "")
+def settings_key(opts, job_json):
+    """A key of everything else a tomogram's extraction depends on: the extraction's options and the
+    tomogram's matching (its job.json: matched again, it changes)."""
+    kept = sorted((k, text(opts, k)) for k in EXTRACT_SETTINGS)
     try:
-        stamp = "%.0f" % os.path.getmtime(src)
+        stamp = "%.0f" % os.path.getmtime(job_json)
     except OSError:
         stamp = ""
-    return hashlib.sha1(json.dumps([kept, src, stamp]).encode("utf-8")).hexdigest()[:12]
+    return hashlib.sha1(json.dumps([kept, _rel(job_json), stamp]).encode("utf-8")).hexdigest()[:12]
 
 
 def previous_extraction(job_dir):
     """What an earlier run of this job left (continue): ({tomogram: thresholds.star row}, {tomogram:
-    [candidate rows]}, candidate columns). Empty when it did not finish."""
+    [candidate rows]}, candidate columns). Empty when it extracted nothing."""
     th, ca = os.path.join(job_dir, THRESHOLDS), os.path.join(job_dir, CANDIDATES)
     if not (os.path.isfile(th) and os.path.isfile(ca)):
         return {}, {}, []
@@ -827,60 +764,67 @@ def previous_extraction(job_dir):
     return dict((r[TOMO_NAME], r) for r in trows), by, cand.columns
 
 
-def run_extract(sup, job_dir, threads, opts):
-    summary = text(opts, "in_match")
-    if not summary or not os.path.isfile(summary):
-        raise Usage("pytom match summary not found: %r (the pytom_match.star of a template matching job)" % summary)
-    general, rows = read_summary(summary)
-    names = selected_names(opts)
-    rows = [r for r in rows if not names or r[TOMO_NAME] in names]
-    ready = [r for r in rows if r.get(COL_STATUS) == "done" and os.path.isfile(r.get(COL_JOB, ""))]
-    for r in rows:
-        if r not in ready:
-            say("%s: not matched yet (%s), left out" % (r[TOMO_NAME], r.get(COL_STATUS, "?")))
-    if not ready:
-        raise Usage("no tomograms of %s are done" % summary)
-    for d in (TM_DIR, LOG_DIR, PLOTS_DIR):
-        p = os.path.join(job_dir, d)
+# ---------------------------------------------------------------------------- extraction, beside the matching
+
+class Extraction(object):
+    """The candidates of the job's tomograms: pytom_extract_candidates.py on each one as soon as it is matched,
+    beside the matching of the others (run_match gives the tasks to a pool capped by the threads the matching
+    leaves), and the tables of those extracted so far.
+
+    ``rows`` and ``cands`` hold, per tomogram, its thresholds.star row and its candidates: from an earlier run
+    of the job (continue) until it is extracted again, then this run's. write() writes them out after each
+    extraction, so the thresholds can be chosen while the rest is matched."""
+
+    def __init__(self, job_dir, opts, names):
+        self.job_dir, self.opts, self.names = job_dir, opts, list(names)
+        self.fixed = None
+        if text(opts, "cut_off_mode") == CUT_FIXED:
+            self.fixed = number(opts, "cut_off", what="Fixed cut-off")
+            if self.fixed is None:
+                raise Usage("give the fixed cut-off (Extraction tab)")
+        self.interactive = yes(opts, "do_candidates")
+        self.factor = number(opts, "candidate_factor", what="Candidates down to") or 0.7
+        if self.factor <= 0:
+            raise Usage("Candidates down to: must be above 0")
+        self.angles = ORIENTATIONS.get(text(opts, "orientations"), ORIENTATIONS["rlnAngleRot/Tilt/Psi"])
+        self.cols = candidate_columns(self.angles)
+        for name in self.names:  # every option (and extraction mask) checked before hours of matching
+            n = max_particles(opts, name)
+            extract_command(opts, "job.json", name, self.fixed, n)
+            if yes(opts, "do_roc"):
+                roc_command(opts, "job.json", n)
+        if not number(opts, "extract_diameter") and not number(opts, "particle_diameter", what="Particle diameter"):
+            raise Usage("give the particle diameter for the extraction (Extraction tab): the matching has none")
+        p = os.path.join(job_dir, PLOTS_DIR)
         if not os.path.isdir(p):
             os.makedirs(p)
-    fixed = number(opts, "cut_off", what="Cut-off") if text(opts, "cut_off_mode") == CUT_FIXED else None
-    if text(opts, "cut_off_mode") == CUT_FIXED and fixed is None:
-        raise Usage("give the fixed cut-off")
-    interactive = yes(opts, "do_candidates")
-    factor = number(opts, "candidate_factor", what="Candidates down to") or 0.7
-    if factor <= 0:
-        raise Usage("Candidates down to: must be above 0")
-    angles = ORIENTATIONS.get(text(opts, "orientations"), ORIENTATIONS["rlnAngleRot/Tilt/Psi"])
-    cols = candidate_columns(angles)
-    tm, plots = os.path.join(job_dir, TM_DIR), os.path.join(job_dir, PLOTS_DIR)
+        before, cands, cols = previous_extraction(job_dir)
+        same = cols == self.cols  # else (other angle columns) every tomogram is extracted again anyway
+        self.rows = dict((n, before[n]) for n in self.names if n in before and same)
+        self.cands = dict((n, cands.get(n, [])) for n in self.rows)
 
-    # what each tomogram is to be extracted with, and what an earlier run (continue) did
-    want = {}
-    for r in ready:
-        want[r[TOMO_NAME]] = {COL_MAX: max_particles(opts, r[TOMO_NAME]), COL_SETTINGS: settings_key(opts, r)}
-    before, before_cands, before_cols = previous_extraction(job_dir)
-    found, kept = {}, {}  # name -> (cut-off, candidate rows); name -> threshold kept
-    for r in ready:
-        name, w = r[TOMO_NAME], want[r[TOMO_NAME]]
-        b = before.get(name)
-        if b is None or b.get(COL_SETTINGS, "") != w[COL_SETTINGS] or before_cols != cols:
-            continue  # extracted anew, with the new cut-off as threshold
-        kept[name] = _f(b, COL_THRESHOLD)  # the threshold chosen for it stays
-        if _f(b, COL_MAX) == w[COL_MAX]:
-            found[name] = (_f(b, COL_AUTO), before_cands.get(name, []))
-            say("%s: already extracted with these settings, kept" % name)
+    def up_to_date(self, name, job_json):
+        """Extracted in an earlier run with these settings and this maximum, from this matching: kept."""
+        b = self.rows.get(name)
+        return b is not None and b.get(COL_SETTINGS, "") == settings_key(self.opts, job_json) and \
+            _f(b, COL_MAX) == max_particles(self.opts, name)
 
-    def task(row):
-        name = row[TOMO_NAME]
-        n = want[name][COL_MAX]
+    def task(self, name, info, job_json, gpu):
+        """(name, factory) of run_pools: the extraction of one matched tomogram, its programs shown only GPU
+        ``gpu`` of the job (pytom's need CUDA, though extracting is mostly CPU work). ``info``: its
+        tomograms.star row with COL_TOMOGRAM and COL_VOXEL (the tomogram matched and its voxel size)."""
+        opts, job_dir, fixed, factor = self.opts, self.job_dir, self.fixed, self.factor
+        tm, plots = os.path.join(job_dir, TM_DIR), os.path.join(job_dir, PLOTS_DIR)
+        env = {"CUDA_VISIBLE_DEVICES": C.cuda_device(gpu)}
 
         def factory(_slot):
             def gen():
-                log = os.path.join(job_dir, LOG_DIR, name + ".log")
-                job_file, stem = extract_job_file(row, job_dir)
+                n, key = max_particles(opts, name), settings_key(opts, job_json)
+                log = os.path.join(job_dir, LOG_DIR, name + EXTRACT_LOG)
+                say("%s: extracting candidates on GPU %d (at most %d)" % (name, gpu, n))
+                job_file, stem = extraction_job_file(job_json, job_dir)
                 out = os.path.join(tm, stem + "_particles.star")
-                rc = yield extract_command(opts, job_file, fixed, n), log
+                rc = yield extract_command(opts, job_file, name, fixed, n), log, env
                 if rc != 0:
                     _show_tail(log)
                     raise Usage("pytom_extract_candidates.py exited with %s (log: %s)" % (rc, log))
@@ -892,9 +836,9 @@ def run_extract(sup, job_dir, threads, opts):
                 sel = read_pytom_particles(selected)
                 cut = fixed if fixed is not None else _cut_off_of(sel)
                 cands = sel
-                if interactive:
+                if self.interactive:
                     low = factor * cut if cut is not None else 0.0
-                    rc = yield extract_command(opts, job_file, low, n), log
+                    rc = yield extract_command(opts, job_file, name, low, n), log, env
                     if rc != 0:
                         _show_tail(log)
                         raise Usage("pytom_extract_candidates.py (candidates) exited with %s (log: %s)" % (rc, log))
@@ -906,48 +850,200 @@ def run_extract(sup, job_dir, threads, opts):
                     for r in cands:  # the automatic cut-off, not the one used for the candidates
                         r["rlnCutOff"] = "" if cut is None else str(cut)
                 if yes(opts, "do_roc"):
-                    rc = yield roc_command(opts, job_file, n), log
+                    rc = yield roc_command(opts, job_file, n), log, env
                     if rc != 0:
                         say("%s: pytom_estimate_roc.py failed (see %s); going on without it" % (name, log))
                     _move(os.path.join(tm, stem + "_roc.svg"), os.path.join(plots, name + "_roc.svg"))
-                found[name] = (cut, to_relion5(cands, row, angles))
+                relion = to_relion5(cands, info, self.angles)
+                cut_text = "" if cut is None else "%.6f" % cut
+                # the threshold: the cut-off, unless write() finds one chosen for the same settings
+                self.rows[name] = {TOMO_NAME: name, COL_AUTO: cut_text, COL_THRESHOLD: cut_text, COL_MAX: n,
+                                   COL_SETTINGS: key}
+                self.cands[name] = relion
                 say("%s: %d particle(s) above %s%s (at most %d)"
                     % (name, len(sel), "the cut-off" if cut is None else "%.4f" % cut,
-                       ", %d candidate(s) down to %.4g x it" % (len(cands), factor) if interactive else "", n))
+                       ", %d candidate(s) down to %.4g x it" % (len(cands), factor) if self.interactive else "", n))
                 return True
             return gen()
         return name, factory
 
-    todo = [r for r in ready if r[TOMO_NAME] not in found]
-    if len(todo) < len(ready):
-        say("%d tomogram(s) to extract, %d kept from before" % (len(todo), len(ready) - len(todo)))
-    run_parallel(sup, [task(r) for r in todo], [None] * max(1, threads))
-    failed = [r[TOMO_NAME] for r in ready if r[TOMO_NAME] not in found]
-    if failed:
-        raise Usage("extraction failed for: %s" % " ".join(failed))
-    table = []
-    for r in ready:
-        table += [[row.get(c, "") for c in cols] for row in found[r[TOMO_NAME]][1]]
-    write_star(os.path.join(job_dir, CANDIDATES), [("particles", None, cols, table)])
-    thr = []
-    for r in ready:
+    def write(self):
+        """candidates.star, thresholds.star, particles.star and optimisation_set.star of the tomograms extracted
+        so far (and those kept from an earlier run), in the tomograms' order. A tomogram whose row in
+        thresholds.star has the same settings keeps the threshold there: chosen in the Thresholds view, maybe
+        while the job runs, or kept from before for a new maximum. Returns {tomogram: (candidates, selected)};
+        {} when there is nothing to write yet."""
+        names = [n for n in self.names if n in self.rows]
+        if not names:
+            return {}
+        try:
+            disk = dict((r[TOMO_NAME], r) for r in loop_block(os.path.join(self.job_dir, THRESHOLDS),
+                                                               "thresholds").dicts())
+        except (OSError, Usage, KeyError):
+            disk = {}
+        for n in names:
+            d = disk.get(n)
+            if d is not None and d.get(COL_SETTINGS, "") == self.rows[n].get(COL_SETTINGS, ""):
+                self.rows[n][COL_THRESHOLD] = d.get(COL_THRESHOLD, "")
+        table = [[r.get(c, "") for c in self.cols] for n in names for r in self.cands[n]]
+        write_star(os.path.join(self.job_dir, CANDIDATES), [("particles", None, self.cols, table)])
+        write_thresholds(self.job_dir, [self.rows[n] for n in names])
+        counts = write_selection(self.job_dir)
+        write_star(os.path.join(self.job_dir, OPTIMISATION_SET),
+                   [("", {"rlnTomoParticlesFile": os.path.join(self.job_dir, PARTICLES),
+                          "rlnTomoTomogramsFile": text(self.opts, "in_tomograms")}, None, None)])
+        return counts
+
+    @staticmethod
+    def nodes(job_dir):
+        return [(os.path.join(job_dir, PARTICLES), NODE_PARTICLES),
+                (os.path.join(job_dir, OPTIMISATION_SET), NODE_OPTIMISATION),
+                (os.path.join(job_dir, CANDIDATES), NODE_CANDIDATES),
+                (os.path.join(job_dir, THRESHOLDS), NODE_THRESHOLDS)]
+
+
+# ---------------------------------------------------------------------------- match (and extract)
+
+def run_match(sup, job_dir, threads, opts):
+    star, columns, rows = tomogram_rows(opts)
+    for d in (TM_DIR, INPUTS_DIR, LOG_DIR):
+        p = os.path.join(job_dir, d)
+        if not os.path.isdir(p):
+            os.makedirs(p)
+    extracting = yes(opts, "do_extract")
+    state, files = {}, {}
+    for r in rows:  # every tomogram's inputs first: a wrong setting shows before hours of matching
         name = r[TOMO_NAME]
-        cut, w = found[name][0], want[name]
-        t = kept[name] if name in kept else cut
-        thr.append({TOMO_NAME: name, COL_AUTO: "" if cut is None else "%.6f" % cut,
-                    COL_THRESHOLD: "" if t is None else "%.6f" % t, COL_MAX: w[COL_MAX],
-                    COL_SETTINGS: w[COL_SETTINGS]})
-    write_thresholds(job_dir, thr)
-    counts = write_selection(job_dir)
-    say("particles.star: %d particle(s) in %d tomogram(s)" % (sum(c[1] for c in counts.values()), len(counts)))
-    tomograms = general.get(P + "TomogramsFile", "")
-    write_star(os.path.join(job_dir, OPTIMISATION_SET),
-               [("", {"rlnTomoParticlesFile": os.path.join(job_dir, PARTICLES), "rlnTomoTomogramsFile": tomograms},
-                 None, None)])
-    return [(os.path.join(job_dir, PARTICLES), NODE_PARTICLES),
-            (os.path.join(job_dir, OPTIMISATION_SET), NODE_OPTIMISATION),
-            (os.path.join(job_dir, CANDIDATES), NODE_CANDIDATES),
-            (os.path.join(job_dir, THRESHOLDS), NODE_THRESHOLDS)]
+        files[name] = prepare_tomogram(r, opts, job_dir)
+        scores, angles, js = match_outputs(job_dir, files[name]["stem"])
+        done = yes(opts, "skip_done") and all(os.path.isfile(f) for f in (scores, angles, js))
+        state[name] = {"status": "done" if done else "pending", "tomogram": _rel(files[name]["tomogram"]),
+                       "voxel": "%.4f" % files[name]["voxel"], "scores": _rel(scores), "angles": _rel(angles),
+                       "json": _rel(js), "log": _rel(os.path.join(job_dir, LOG_DIR, name + ".log")),
+                       "extraction": "pending" if extracting else ""}
+        if done:
+            say("%s: already matched, skipped" % name)
+    voxels = sorted(set(round(f["voxel"], 3) for f in files.values()))
+    if len(voxels) > 1 and not (yes(opts, "do_prep_template") and number(opts, "template_angpix")):
+        say("WARNING: the tomograms have different voxel sizes (%s Å): one template fits only one of them"
+            % ", ".join(str(v) for v in voxels))
+    match_command(opts, files[rows[0][TOMO_NAME]], "template.mrc", "mask.mrc", [0], TM_DIR)  # checks the options
+    ex = Extraction(job_dir, opts, [r[TOMO_NAME] for r in rows]) if extracting else None  # and these
+    template, mask, nodes = prepare_template_and_mask(sup, opts, job_dir, voxels[0])
+
+    def summary():
+        write_summary(job_dir, opts, columns, rows, state, _rel(template), _rel(mask))
+
+    ids = gpu_ids(opts)
+    slots = [ids] if text(opts, "gpu_mode") == GPU_SPLIT else [[i] for i in ids]
+    gpu_pool = C.Pool("match", slots)
+    # every tomogram as soon as it is matched, in the job's threads the matching leaves (at least one)
+    ex_pool = C.Pool("extract", most=lambda running: max(1, threads - running["match"]))
+    by_name = dict((r[TOMO_NAME], r) for r in rows)
+
+    def match_task(name):
+        def factory(gpus):
+            def gen():
+                s = state[name]
+                s["status"], t0 = "running", time.time()
+                s["gpus"] = gpus
+                summary()
+                say("%s: matching on GPU %s" % (name, ":".join(map(str, gpus))))
+                cmd = match_command(opts, files[name], template, mask, gpus, os.path.join(job_dir, TM_DIR))
+                rc = yield cmd, s["log"]
+                s["seconds"] = time.time() - t0
+                if rc != 0 or not os.path.isfile(s["scores"]):
+                    _show_tail(s["log"])
+                    raise Usage("pytom_match_template.py exited with %s (log: %s)" % (rc, s["log"]))
+                return True
+            return gen()
+        return name, factory
+
+    def extract_task(name, gpu):
+        assert ex is not None  # only queued when the job extracts
+        s = state[name]
+        info = dict(by_name[name])
+        info.update({COL_TOMOGRAM: s["tomogram"], COL_VOXEL: s["voxel"]})
+        key, factory = ex.task(name, info, s["json"], gpu)
+
+        def started(slot):
+            s["extraction"] = "running"
+            summary()
+            return factory(slot)
+        return key, started
+
+    def to_extract(name, gpu, matched_now):
+        """Extracted now, on GPU ``gpu`` of the job, unless extracted before with these settings (a tomogram
+        matched in this run always is: its scores are new)."""
+        assert ex is not None
+        if not matched_now and ex.up_to_date(name, state[name]["json"]):
+            state[name]["extraction"] = "done"
+            say("%s: already extracted with these settings, kept" % name)
+            return False
+        state[name]["extraction"] = "pending"
+        ex_pool.add(*extract_task(name, gpu))
+        return True
+
+    def changed(pool, name, result):
+        s = state[name]
+        if pool is gpu_pool:
+            s["status"] = "done" if result else "failed"
+            say("%s: %s in %.0f min" % (name, "matched" if result else "matching failed", s.get("seconds", 0) / 60))
+            if result and ex is not None:
+                to_extract(name, s["gpus"][0], True)  # on the GPU that matched it
+        else:
+            assert ex is not None
+            s["extraction"] = "done" if result else "failed"
+            if result:
+                try:
+                    counts = ex.write()
+                    say("%s: extracted; particles.star: %d particle(s) in %d tomogram(s) so far"
+                        % (name, sum(c[1] for c in counts.values()), len(counts)))
+                except (Usage, OSError, ValueError, KeyError) as e:
+                    say("WARNING: could not write the particles of the tomograms extracted so far: %s" % e)
+        summary()
+
+    before = 0  # tomograms matched in an earlier run, to extract now: on the job's GPUs in turn
+    for r in rows:
+        name = r[TOMO_NAME]
+        if state[name]["status"] != "done":
+            gpu_pool.add(*match_task(name))
+        elif ex is not None and to_extract(name, ids[before % len(ids)], False):
+            before += 1
+    summary()
+    say("%d tomogram(s) to search, GPU(s) %s, %d at a time" % (len(gpu_pool.pending), " ".join(map(str, ids)),
+                                                                len(slots)))
+    if ex is not None:
+        say("candidate extraction: %d tomogram(s) matched before, now; then each one as soon as it is matched, "
+            "on the GPU that matched it; at most %d at once (the job's %d thread(s), less one per GPU slot matching, "
+            "at least one)" % (before, max(1, threads), threads))
+    try:
+        C.run_pools(sup, [gpu_pool, ex_pool], changed)
+    except Aborted:
+        for s in state.values():
+            for k in ("status", "extraction"):
+                if s.get(k) == "running":
+                    s[k] = "aborted"
+        summary()
+        raise
+    names = [r[TOMO_NAME] for r in rows]
+    failed = [n for n in names if state[n]["status"] != "done"]
+    not_extracted = [n for n in names if ex is not None and state[n]["status"] == "done"
+                     and state[n]["extraction"] != "done"]
+    if ex is not None:
+        try:  # every tomogram's, also when some failed: a continue starts from there
+            counts = ex.write()
+        except (OSError, ValueError, KeyError) as e:
+            raise Usage("could not write the particles (%s, %s): %s" % (CANDIDATES, PARTICLES, e))
+        if counts:
+            say("particles.star: %d particle(s) in %d tomogram(s)" % (sum(c[1] for c in counts.values()), len(counts)))
+    if failed or not_extracted:
+        what = ["%s (matching)" % " ".join(failed)] if failed else []
+        what += ["%s (extraction)" % " ".join(not_extracted)] if not_extracted else []
+        raise Usage("%d tomogram(s) failed: %s. Continue the job to run only those again."
+                    % (len(failed) + len(not_extracted), ", ".join(what)))
+    out = [(os.path.join(job_dir, SUMMARY), NODE_SUMMARY)] + nodes
+    return out + (Extraction.nodes(job_dir) if ex is not None else [])
 
 
 # ---------------------------------------------------------------------------- main
@@ -962,7 +1058,7 @@ def run(argv):
     say("cryo-savanna pytom %s, job %s" % (mode, job_dir))
     try:
         load_modules(opts)
-        nodes = (run_match if mode == MATCH else run_extract)(sup, job_dir, threads, opts)
+        nodes = run_match(sup, job_dir, threads, opts)
     except Aborted:
         _touch(os.path.join(job_dir, ABORTED))
         return 128 + sup.stopped if sup.stopped else 1

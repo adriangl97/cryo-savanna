@@ -706,7 +706,8 @@ def build_view(spec: R.ViewSpec, ctx: R.JobContext, cache: ThumbCache | None, re
         if spec.kind == R.PYTOM_SCORES:
             return PV.PytomScoresView(project, a["job"])
         if spec.kind == R.PYTOM_THRESHOLDS:
-            return PV.PytomThresholdView(project, a["job"], a.get("summary", ""), a.get("diameter"), cache)
+            return PV.PytomThresholdView(project, a["job"], a.get("summary", ""), a.get("diameter"), cache,
+                                         continuable=a.get("continuable", True))
         return PV.SvgPlotsView(project, a["job"], a.get("folder", "plots"))
     if spec.kind == R.TOMO_MASKS:
         from cryo_savanna.viewers.tomo_mask_view import TomoMaskView

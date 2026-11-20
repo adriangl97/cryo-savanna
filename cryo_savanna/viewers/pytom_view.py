@@ -1,19 +1,22 @@
 # Copyright (C) 2026 Adrián González-López
 # SPDX-License-Identifier: GPL-2.0-or-later
-"""Viewers of the pytom jobs (jobdefs/pytom_jobs.py).
+"""Viewers of the pytom jobs (jobdefs/pytom_jobs.py): template matching, with the extraction of the
+candidates of each tomogram as soon as it is matched.
 
-Scores (template matching): every tomogram with its status (pending, running, done, failed), run time
-and pytom's search statistics (σ of the scores, search space, rotations), as the job goes; for the one
-chosen, the histogram of its score map (with the score Gaussian noise passes once, the cut-off pytom's
-extraction starts from) and the maximum projection of the map along z, where particles show as spots.
+Scores (the matching): every tomogram with its status (pending, running, done, failed), that of its
+extraction, run time and pytom's search statistics (σ of the scores, search space, rotations), as the job
+goes; for the one chosen, the histogram of its score map (with the score Gaussian noise passes once, the
+cut-off pytom's extraction starts from) and the maximum projection of the map along z, where particles show
+as spots.
 
-Thresholds (extraction): every tomogram's automatic cut-off and the threshold used, the histogram of its
+Thresholds (the extraction): every tomogram's automatic cut-off and the threshold used, the histogram of its
 candidates' scores with the threshold as a line to drag (or typed; one threshold for all tomograms, or
-one each, or for all of them the same fraction of each one's automatic cut-off), and the tomogram (or its score map) with the particles above the threshold. "Save" rewrites
-particles.star and thresholds.star in the job (as the job wrote them at its end). Below, the maximum number
-of particles of the tomogram shown can be changed too: "Save" writes it into the job's options (job.star),
-and continuing the job extracts again only the tomograms whose maximum changed (the others keep their
-candidates and thresholds).
+one each, or for all of them the same fraction of each one's automatic cut-off), and the tomogram (or its
+score map) with the particles above the threshold. Tomograms come as the job extracts them. "Save" rewrites
+particles.star and thresholds.star in the job (as the job writes them); the job keeps the thresholds saved
+while it runs. Below, the maximum number of particles of the tomogram shown can be changed too: "Save"
+writes it into the job's options (job.star), and continuing the job extracts again only the tomograms whose
+maximum changed (the others keep their candidates and thresholds; none is matched again).
 
 pytom plots: the SVG plots pytom wrote (extraction histograms, tophat filter, ROC).
 """
@@ -90,7 +93,7 @@ def _fmt(v, digits=4) -> str:
 # ---------------------------------------------------------------------------- template matching
 
 class PytomScoresView(QWidget):
-    COLUMNS = ["Tomogram", "Status", "Time (min)", "σ (search)", "Search space", "Rotations"]
+    COLUMNS = ["Tomogram", "Status", "Extraction", "Time (min)", "σ (search)", "Search space", "Rotations"]
 
     def __init__(self, project_dir: Path, job: str, parent=None):
         super().__init__(parent)
@@ -167,24 +170,28 @@ class PytomScoresView(QWidget):
         self.table.setRowCount(len(s.names))
         for i, n in enumerate(s.names):
             st = self.stats.get(n, {})
-            status = s.value(i, P.COL_STATUS)
+            status, extraction = s.value(i, P.COL_STATUS), s.value(i, P.COL_EXTRACTION)
             secs = R._float(s.value(i, P.COL_SECONDS))
-            cells = [_item(n), _item(status),
+            cells = [_item(n), _item(status), _item(extraction or "—"),
                      _item(f"{secs / 60:.1f}" if secs else "—", secs / 60 if secs else None),
                      _item(_fmt(st.get("std")), st.get("std")), _item(_fmt(st.get("search_space"), 3),
                                                                       st.get("search_space")),
                      _item(_fmt(st.get("n_rotations")), st.get("n_rotations"))]
-            color = STATUS_COLORS.get(status)
-            if color:
-                cells[1].setForeground(pg.mkColor(*color))
+            for c, value in ((1, status), (2, extraction)):
+                color = STATUS_COLORS.get(value)
+                if color:
+                    cells[c].setForeground(pg.mkColor(*color))
             for c, it in enumerate(cells):
                 self.table.setItem(i, c, it)
         self.table.blockSignals(False)
         counts = s.counts()
         order = ["done", "running", "pending", "failed", "aborted"]
         parts = [f"{counts[k]} {k}" for k in order if counts.get(k)]
+        extracted = s.counts(P.COL_EXTRACTION)
+        ex = [f"{extracted[k]} {k}" for k in order if extracted.get(k)]
         template, mask = s.general.get(P.P + "Template", ""), s.general.get(P.P + "Mask", "")
         self.info.setText(f"{len(s.names)} tomograms: " + ", ".join(parts) +
+                          (f"   ·   extraction: {', '.join(ex)}" if ex else "") +
                           (f"   ·   template {template}, mask {mask}" if template else ""))
         row = s.names.index(keep) if keep is not None and keep in s.names else 0
         if s.names:
@@ -267,10 +274,11 @@ class PytomThresholdView(QWidget):
     COLUMNS = ["Tomogram", "Automatic cut-off", "Threshold", "Candidates", "Selected", "Max. particles"]
 
     def __init__(self, project_dir: Path, job: str, summary: str = "", diameter: float | None = None,
-                 cache=None, parent=None):
+                 cache=None, parent=None, continuable: bool = True):
         super().__init__(parent)
         self.project_dir, self.job, self.summary_rel = Path(project_dir), job, summary
         self.cache, self.diameter = cache, diameter
+        self.continuable = continuable  # False: an old extraction job, which cannot run again (no maxima to set)
         self.tasks = Tasks(self)
         self.sel: R.Selection | None = None
         self.settings: R.ExtractSettings | None = None  # the job's -n per tomogram (for a continue)
@@ -384,12 +392,24 @@ class PytomThresholdView(QWidget):
         if self._files() != self._stamp and not self.dirty and not self.settings_dirty:
             self.load()
 
+    def _extracting(self) -> bool:
+        """The job's options say it extracts (or there is no job.star to say otherwise)."""
+        try:
+            _, own = R._job_options(self.project_dir, self.job)
+        except (OSError, ValueError, KeyError):
+            return True
+        return own.get("do_extract", "Yes") == "Yes"
+
     def load(self) -> None:
         self._stamp = files = self._files()
         if files[0] is None:
-            self.info.setText("The candidates come when the job has extracted every tomogram (candidates.star).")
+            self.info.setText("The candidates come as the job extracts the tomograms it matched (candidates.star); "
+                              "none is extracted yet." if self._extracting() else
+                              "This job does not extract candidates (Extract candidates? on its Extraction tab: "
+                              "continue it with Yes to extract the tomograms it matched).")
             return
         project, job, summary, diameter = self.project_dir, self.job, self.summary_rel, self.diameter
+        continuable = self.continuable
 
         def read():
             sel = R.read_selection(project, job)
@@ -401,10 +421,12 @@ class PytomThresholdView(QWidget):
                         if s.value(i, P.COL_JOB) else None
                     if d:
                         break
+            settings = None
             try:
-                settings = R.read_extract_settings(project, job)
+                if continuable:
+                    settings = R.read_extract_settings(project, job)
             except (OSError, ValueError, P.Usage):  # no job.star (or not readable): nothing to change
-                settings = None
+                pass
             return sel, d, settings
 
         self.tasks.run(read, self._on_loaded, channel="load")

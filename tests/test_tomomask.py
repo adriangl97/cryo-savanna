@@ -312,14 +312,16 @@ def test_pytom_hangs_under_the_mask_job(tomo_project):
     p.nodes[node] = Node(node, M.NODE_LIST, producer=JOB)
     assert masks_job_of(JOB + "masks/", p) == node and masks_job_of("./" + JOB + "masks", p) == node
     assert masks_job_of("elsewhere/masks", p) is None
-    js = PYTOM.variant("match").make_jobstar(match_values(tomogram_mask=JOB + "masks"), False, "External/job021/", p)
+    match = PYTOM.variant("match")
+    js = match.make_jobstar(match_values(tomogram_mask=JOB + "masks"), False, "External/job021/", p)
     assert node in js.options.values()
-    extract = PYTOM.variant("extract")
-    vals = extract.default_values(ENV)
-    vals.update(in_match="External/job015/pytom_match.star", tomogram_mask=JOB + "masks")
-    assert node not in extract.make_jobstar(vals, False, "External/job022/", p).options.values()  # not used
+    # the masks of the extraction only (none for the matching)
+    vals = match_values(extract_mask=JOB + "masks")
+    assert node not in match.make_jobstar(vals, False, "External/job022/", p).options.values()  # not used
     vals["tomogram_mask_mode"] = P.TMASK_OTHER
-    assert node in extract.make_jobstar(vals, False, "External/job022/", p).options.values()
+    assert node in match.make_jobstar(vals, False, "External/job022/", p).options.values()
+    vals["do_extract"] = "No"
+    assert node not in match.make_jobstar(vals, False, "External/job022/", p).options.values()
 
 
 def test_folder_widget_chooses_a_folder(qtbot, tmp_path, monkeypatch):

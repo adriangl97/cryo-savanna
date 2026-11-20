@@ -172,27 +172,47 @@ def is_spa_particles(path: str | os.PathLike) -> bool:
 
 def _pytom_views(ctx: JobContext, kind: str, add, add_maps) -> None:
     """pytom jobs (jobdefs/pytom_jobs.py): their views come from the files in the job directory, so that
-    they show while the job runs (an External job has its outputs only at the end)."""
+    they show while the job runs (an External job has its outputs only at the end): the matching's, then
+    those of the candidates extracted from it."""
     from cryo_savanna import pytom_runner as P
     from cryo_savanna.jobdefs.pytom_jobs import decode
     own = decode(ctx.options.get("other_args", ""))[0]
-    if kind == P.MATCH:
-        summary = ctx.name + P.SUMMARY
-        add(PYTOM_SCORES, "Scores", job=ctx.name)
-        if ctx.exists(summary):
-            add(TOMOGRAMS, "Tomograms", star=summary)
-        add_maps([ctx.name + "template.mrc", ctx.name + "mask.mrc"], masks=[ctx.name + "mask.mrc"])
-        return
-    summary = own.get("in_match", "")
-    add(PYTOM_THRESHOLDS, "Thresholds", job=ctx.name, summary=summary, diameter=_float(own.get("particle_diameter")))
+    summary = ctx.name + P.SUMMARY
     particles = ctx.name + P.PARTICLES
-    if ctx.exists(particles) and ctx.exists(summary):
-        add(TOMOGRAMS, "Picks", star=summary, picks=particles, diameter=_float(own.get("particle_diameter")))
+    diameter = _float(own.get("extract_diameter")) or _float(own.get("particle_diameter"))
+    add(PYTOM_SCORES, "Scores", job=ctx.name)
+    if own.get("do_extract") == "Yes" or ctx.exists(ctx.name + P.CANDIDATES):
+        add(PYTOM_THRESHOLDS, "Thresholds", job=ctx.name, summary=summary, diameter=diameter)
+    if ctx.exists(summary):
+        add(TOMOGRAMS, "Tomograms", star=summary)
+        if ctx.exists(particles):
+            add(TOMOGRAMS, "Picks", star=summary, picks=particles, diameter=diameter)
+    add_maps([ctx.name + "template.mrc", ctx.name + "mask.mrc"], masks=[ctx.name + "mask.mrc"])
+    _pytom_plots(ctx, add)
+
+
+def _pytom_plots(ctx: JobContext, add) -> None:
+    from cryo_savanna import pytom_runner as P
+    particles = ctx.name + P.PARTICLES
     if (ctx.job_dir / P.PLOTS_DIR).is_dir():
         add(SVG_PLOTS, "pytom plots", job=ctx.name, folder=P.PLOTS_DIR)
     if ctx.exists(particles):
         add(TABLE_PLOT, "Particle plots", star=particles, block="particles",
             columns=[P.LCC, "rlnCenteredCoordinateZAngst"])
+
+
+def _old_pytom_extraction_views(ctx: JobContext, add) -> None:
+    """A candidate extraction job of an earlier cryo-savanna (a job of its own then, reading a matching job's
+    pytom_match.star): its results, its thresholds still to choose (it cannot run again: no continue)."""
+    from cryo_savanna import pytom_runner as P
+    from cryo_savanna.jobdefs.pytom_jobs import decode
+    own = decode(ctx.options.get("other_args", ""))[0]
+    summary, particles = own.get("in_match", ""), ctx.name + P.PARTICLES
+    diameter = _float(own.get("particle_diameter"))
+    add(PYTOM_THRESHOLDS, "Thresholds", job=ctx.name, summary=summary, diameter=diameter, continuable=False)
+    if ctx.exists(particles) and ctx.exists(summary):
+        add(TOMOGRAMS, "Picks", star=summary, picks=particles, diameter=diameter)
+    _pytom_plots(ctx, add)
 
 
 def _aretomo_views(ctx: JobContext, kind: str, add, add_maps) -> None:
@@ -389,9 +409,12 @@ def views_for(ctx: JobContext) -> list[ViewSpec]:
         add(SELECTION, "Selection", job=ctx.name, what="tilts")
     elif t == "relion.external":
         from cryo_savanna.jobdefs.external_jobs import kind_of_exe
+        from cryo_savanna.jobdefs.pytom_jobs import is_old_extraction
         found = kind_of_exe(ctx.options.get("fn_exe", ""))
         if found is not None and found[0].name in EXTERNAL_VIEWS:
             EXTERNAL_VIEWS[found[0].name](ctx, found[1], add, add_maps)
+        elif is_old_extraction(ctx.options.get("fn_exe", "")):
+            _old_pytom_extraction_views(ctx, add)
 
     if t in ITERATIVE:
         # the particles of each iteration that wrote them, the latest shown (and followed while the job
