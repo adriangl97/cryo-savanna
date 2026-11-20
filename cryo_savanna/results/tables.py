@@ -197,14 +197,21 @@ def blocks_of(path: str | os.PathLike) -> list[str]:
 
 def optics_value(path: Path, label: str) -> float | None:
     """A value from the first row of the optics block (pixel size, box size, ...)."""
-    from cryo_savanna.project.star import read_star_head
+    return optics_values(path, label)[0]
+
+
+def optics_values(path: Path, *labels: str) -> list[float | None]:
+    """optics_value of each label, with one read of the optics block (a file without one, of RELION 3.0, is
+    read only up to its particles or micrographs, not through millions of rows once per label)."""
+    from cryo_savanna.project.star import BIG_TABLES, read_star_head
     try:
-        b = read_star_head(path, ["optics"]).get("optics")
+        b = read_star_head(path, ["optics"], stop=BIG_TABLES).get("optics")
     except (OSError, ValueError):
-        return None
-    if b is None or not b.has(label) or not b.rows:
-        return None
-    try:
-        return float(b.get(label))
-    except (TypeError, ValueError):
-        return None
+        return [None] * len(labels)
+    out: list[float | None] = []
+    for label in labels:
+        try:
+            out.append(float(b.get(label)) if b is not None and b.has(label) and b.rows else None)
+        except (TypeError, ValueError):
+            out.append(None)
+    return out

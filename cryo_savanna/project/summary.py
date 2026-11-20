@@ -26,7 +26,7 @@ from cryo_savanna.project.failure_hints import Diagnosis, diagnose
 from cryo_savanna.project.jobstar import JobStar
 from cryo_savanna.project.pipeline import Pipeline, Process
 from cryo_savanna.project.snapshot import JobInfo, stamp
-from cryo_savanna.project.star import StarError, loop_rows, read_star, read_star_head
+from cryo_savanna.project.star import BIG_TABLES, StarError, loop_rows, read_star, read_star_head
 from cryo_savanna.relion_consts import STATUS_FAILED, STATUS_RUNNING, job_type_for_label
 
 ITERATIVE = {"relion.class2d", "relion.class3d", "relion.initialmodel", "relion.refine3d", "relion.multibody"}
@@ -382,7 +382,7 @@ class SummaryReader:
         path = self.project_dir / rel
         if not path.is_file():
             return None
-        return read_star_head(path, [block]).get(block)
+        return read_star_head(path, [block], stop=BIG_TABLES).get(block)
 
     # ------------------------------------------------------------------ per job
     def _summarize(self, pr: Process, pipeline: Pipeline, running: bool) -> JobSummary:

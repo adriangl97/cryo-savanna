@@ -202,7 +202,8 @@ class JobTreeView(QTreeView):
         old, self.held = self.held, held
         with self._many_changes():
             for name in old.keys() | held.keys():
-                if name in self._items and self._snapshot is not None and name in self._snapshot.jobs:
+                if old.get(name) != held.get(name) and name in self._items and self._snapshot is not None \
+                        and name in self._snapshot.jobs:  # only those that changed (as set_stale)
                     self._fill_summary(self._items[name], self._snapshot.jobs[name], self.summaries.get(name))
 
     def set_queue(self, state) -> None:

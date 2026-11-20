@@ -14,7 +14,7 @@ import numpy as np
 from cryo_savanna.images.mrc import ImageRef
 from cryo_savanna.project.star import loop_columns, read_star
 from cryo_savanna.project.summary import current_iterations
-from cryo_savanna.results.tables import Table, optics_value
+from cryo_savanna.results.tables import Table, optics_values
 
 _MODEL_RE = re.compile(r"^(?P<root>.*?)_it(?P<it>\d+)(?P<half>_half1)?_model\.star$")
 # "run", or "run_ct<iteration>" for a continued run (MultiBody in RELION 5.1, every refine job before 3.1)
@@ -252,7 +252,6 @@ def read_particles(project_dir: str | os.PathLike, star_rel: str) -> ParticleSet
             break
     else:
         raise ValueError(f"{star_rel}: no particles (rlnImageName)")
-    px = optics_value(path, "rlnImagePixelSize")
-    box = optics_value(path, "rlnImageSize")
+    px, box = optics_values(path, "rlnImagePixelSize", "rlnImageSize")
     return ParticleSet(project_dir, star_rel, t, px, int(box) if box else None)
 

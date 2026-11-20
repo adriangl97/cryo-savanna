@@ -26,7 +26,7 @@ from pathlib import Path
 
 import numpy as np
 
-from cryo_savanna.project.star import StarBlock, StarError, loop_columns, read_star_head
+from cryo_savanna.project.star import BIG_TABLES, StarBlock, StarError, loop_columns, read_star_head
 from cryo_savanna.results.tables import Table
 from cryo_savanna.stamps import Cache, stamp
 
@@ -185,7 +185,7 @@ def _optics(path: Path | None) -> StarBlock | None:
     if path is None or not path.is_file():
         return None
     try:
-        return read_star_head(path, ["optics"]).get("optics")
+        return read_star_head(path, ["optics"], stop=BIG_TABLES).get("optics")
     except (OSError, StarError, ValueError):
         return None
 

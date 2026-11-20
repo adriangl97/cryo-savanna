@@ -11,8 +11,10 @@ group (forms, selection windows, running, pipeline operations), with what they s
 from __future__ import annotations
 
 from collections.abc import Callable
+from functools import partial
 
 from qtpy.QtCore import QPoint
+from qtpy.QtGui import QKeySequence
 from qtpy.QtWidgets import QAction, QMainWindow, QMenu
 
 from cryo_savanna.env.relion_env import RelionEnv
@@ -26,8 +28,18 @@ from cryo_savanna.ui.actions.forms import FormActions
 from cryo_savanna.ui.actions.pipeline_ops import PipelineActions
 from cryo_savanna.ui.actions.running import RunActions, RunScheduledDialog
 from cryo_savanna.ui.actions.selection import SelectionActions
+from cryo_savanna.ui.new_job_menu import Entry, NewJobMenu
 
 __all__ = ["JobActions", "EditorWindow", "RunScheduledDialog"]
+
+
+def explain(action: QAction, tip: str, why_not: str = "") -> None:
+    """Set an action's tooltip: what it does, its shortcut, and (while it is greyed out) why."""
+    keys = action.shortcut().toString(QKeySequence.NativeText)
+    text = f"{tip} ({keys})" if keys else tip
+    if why_not and not action.isEnabled():
+        text += f"\nNot now: {why_not}"
+    action.setToolTip(text)
 
 
 class JobActions(FormActions, SelectionActions, RunActions, PipelineActions, ActionsBase):
@@ -36,6 +48,7 @@ class JobActions(FormActions, SelectionActions, RunActions, PipelineActions, Act
     def __init__(self, window: QMainWindow, defs: JobDefs, env: RelionEnv, type_names: dict[str, str],
                  tomo: bool, readonly: bool, flag_source=None):
         super().__init__(window, defs, env, type_names, tomo, readonly, flag_source)
+        self._tips: dict[QAction, str] = {}  # what each action does: its tooltip, before the shortcut and why not
         self._build_actions()
 
     # ------------------------------------------------------------------ actions and menus
@@ -46,15 +59,15 @@ class JobActions(FormActions, SelectionActions, RunActions, PipelineActions, Act
         if tip:
             a.setToolTip(tip)
             a.setStatusTip(tip)
+        self._tips[a] = tip or text.rstrip("…")
         a.triggered.connect(slot)
         self.window.addAction(a)
         return a
 
     def _fill_new_menu(self) -> None:
-        self.new_menu.clear()
-        for label, variant in self.defs.menu(self.tomo):
-            a = self.new_menu.addAction(label)
-            a.triggered.connect(lambda _=False, v=variant: self.new_job(v.key))
+        """RELION's jobs (SPA or tomography), the other programs and the command-line tools (new_job_menu.py)."""
+        jobs = [Entry(f"job:{v.key}", label, partial(self.new_job, v.key)) for label, v in self.defs.menu(self.tomo)]
+        self.new_menu.set_entries(jobs, self._other_entries, self._cli_entries, self.new_cli_menu)
 
     def set_tomo(self, tomo: bool) -> None:
         """Switch the New job menu between RELION's SPA and tomography job lists."""
@@ -63,8 +76,11 @@ class JobActions(FormActions, SelectionActions, RunActions, PipelineActions, Act
             self._fill_new_menu()
 
     def _build_actions(self) -> None:
-        self.new_menu = QMenu("New job", self.window)
-        self._fill_new_menu()
+        self.new_menu = NewJobMenu("New job", self.window)
+        # the toolbar's button (it opens new_menu): enabled, and its tooltip, as the other actions. Not
+        # QAction.setMenu: new_menu is also in the menu bar, and macOS's menus take a menu in one place only
+        self.act_new = QAction("New job", self.window)
+        self._tips[self.act_new] = "RELION's jobs, other programs (pytom, AreTomo3, ...) and RELION's command-line tools"
         self.act_clone = self._act("Clone…", self.clone_job, "Ctrl+D", "New job with the settings of the selected job")
         self.act_continue = self._act("Continue…", self.continue_job, tip="Continue the selected job")
         self.act_overwrite = self._act("Overwrite…", self.overwrite_job,
@@ -103,34 +119,47 @@ class JobActions(FormActions, SelectionActions, RunActions, PipelineActions, Act
         self.cli_menu = QMenu("CLI tools", self.window)
         self.cli_menu.setToolTipsVisible(True)
         subs = {c: self.cli_menu.addMenu(c) for c in CATEGORIES}
+        # the same tools in New job: a menu of its own (macOS's menus take a menu in one place only)
+        self.new_cli_menu = QMenu("RELION command-line tools", self.window)
+        self.new_cli_menu.setToolTipsVisible(True)
+        new_subs = {c: self.new_cli_menu.addMenu(c) for c in CATEGORIES}
+        for m in new_subs.values():
+            m.setToolTipsVisible(True)
+        self._cli_entries: list[Entry] = []
         for program in self.cli.programs():
             category, description = describe(program)
             a = subs[category].addAction(program)
             a.setToolTip(description)
             a.setStatusTip(description)
             a.triggered.connect(lambda _=False, p=program: self.new_cli_job(p))
+            a.triggered.connect(lambda _=False, p=program: self.new_menu.remember(f"cli:{p}"))
+            new_subs[category].addAction(a)
+            self._cli_entries.append(Entry(f"cli:{program}", program, partial(self.new_cli_job, program),
+                                           description))
         for m in subs.values():
             m.setToolTipsVisible(True)
 
-        # programs that are not RELION's, run as External jobs (a button of their own in the main toolbar)
+        # programs that are not RELION's, run as External jobs: in New job, and a menu of their own in the menu bar
         self.external_menu = QMenu("Additional external jobs", self.window)
         self.external_menu.setToolTipsVisible(True)
-        for kind, text in PYTOM_MENU_TEXT.items():  # template matching, with the extraction of its candidates
-            a = self.external_menu.addAction(text)
-            a.setToolTip(PYTOM_DESCRIPTIONS[kind])
-            a.setStatusTip(PYTOM_DESCRIPTIONS[kind])
-            a.triggered.connect(lambda _=False, k=kind: self.new_pytom_job(k))
-        for kind, text in tomomask_jobs.MENU_TEXT.items():  # pytom's tomogram masks
-            a = self.external_menu.addAction(text)
-            a.setToolTip(tomomask_jobs.DESCRIPTIONS[kind])
-            a.setStatusTip(tomomask_jobs.DESCRIPTIONS[kind])
-            a.triggered.connect(lambda _=False, k=kind: self.new_tomomask_job(k))
-        self.external_menu.addSeparator()
-        for kind, text in aretomo_jobs.MENU_TEXT.items():
-            a = self.external_menu.addAction(text)
-            a.setToolTip(aretomo_jobs.DESCRIPTIONS[kind])
-            a.setStatusTip(aretomo_jobs.DESCRIPTIONS[kind])
-            a.triggered.connect(lambda _=False, k=kind: self.new_aretomo_job(k))
+        self._other_entries: list[Entry] = []
+        groups = [[(f"pytom:{k}", t, PYTOM_DESCRIPTIONS[k], partial(self.new_pytom_job, k))
+                   for k, t in PYTOM_MENU_TEXT.items()]  # template matching, with the extraction of its candidates
+                  + [(f"tomomask:{k}", t, tomomask_jobs.DESCRIPTIONS[k], partial(self.new_tomomask_job, k))
+                     for k, t in tomomask_jobs.MENU_TEXT.items()],  # pytom's tomogram masks
+                  [(f"aretomo:{k}", t, aretomo_jobs.DESCRIPTIONS[k], partial(self.new_aretomo_job, k))
+                   for k, t in aretomo_jobs.MENU_TEXT.items()]]
+        for n, group in enumerate(groups):
+            if n:
+                self.external_menu.addSeparator()
+            for entry_id, text, tip, start in group:
+                a = self.external_menu.addAction(text)
+                a.setToolTip(tip)
+                a.setStatusTip(tip)
+                a.triggered.connect(lambda _=False, f=start: f())
+                a.triggered.connect(lambda _=False, i=entry_id: self.new_menu.remember(i))
+                self._other_entries.append(Entry(entry_id, text, start, tip))
+        self._fill_new_menu()
 
         self.job_menu = QMenu("Job", self.window)
         self.job_menu.addMenu(self.new_menu)
@@ -163,15 +192,19 @@ class JobActions(FormActions, SelectionActions, RunActions, PipelineActions, Act
         why = ("read-only (--readonly)" if self.readonly else
                "" if has_pipeliner else "relion_pipeliner not found: load RELION 5.1")
         self.new_menu.setEnabled(writable)
+        self.act_new.setEnabled(writable)
         self.cli_menu.setEnabled(writable)
+        self.new_cli_menu.setEnabled(writable)
         self.external_menu.setEnabled(writable)
         self.act_clone.setEnabled(writable and info is not None)
         self.act_continue.setEnabled(writable and has_pipeliner and info is not None and status != "Running")
         self.act_overwrite.setEnabled(self.act_continue.isEnabled())
-        scheduled = snap is not None and any(j.status == "Scheduled" for j in snap.jobs.values())
-        self.act_run.setEnabled(writable and has_pipeliner and scheduled)
+        scheduled = sum(1 for j in snap.jobs.values() if j.status == "Scheduled") if snap is not None else 0
+        self.act_run.setEnabled(writable and has_pipeliner and scheduled > 0)
+        self.act_run.setText(f"Run scheduled ({scheduled})…" if scheduled else "Run scheduled…")
         self.act_rerun.setEnabled(writable and has_pipeliner and bool(self.stale))
-        self.act_stop_runs.setEnabled(writable and self._has_stoppable)
+        self.act_stop_runs.setEnabled(writable and self._stoppable > 0)
+        self.act_stop_runs.setText(f"Stop runs ({self._stoppable})…" if self._stoppable else "Stop runs…")
         self.act_abort.setEnabled(writable and status == "Running")
         for a in (self.act_alias, self.act_finished, self.act_failed, self.act_delete, self.act_delete_all):
             a.setEnabled(writable and info is not None)
@@ -182,4 +215,23 @@ class JobActions(FormActions, SelectionActions, RunActions, PipelineActions, Act
         self.act_disk.setEnabled(snap is not None)  # read-only too: only to look
         self.act_star.setEnabled(info is not None)  # read-only too: for the session only (project/stars.py)
         self.act_star.setChecked(info is not None and info.starred)
+
+        # tooltips: what the action does, its shortcut, and why it cannot be used now
+        no_project = "No project open" if snap is None else ""
+        readonly = "The project is open read-only (--readonly)" if self.readonly else ""
+        no_pipeliner = "" if has_pipeliner else "relion_pipeliner not found: load RELION 5.1"
+        no_job = "Select a job first" if info is None else ""
+        running = "The selected job is running" if status == "Running" else ""
+        reasons = {
+            self.act_new: (no_project, readonly),
+            self.act_clone: (no_project, readonly, no_job),
+            self.act_continue: (no_project, readonly, no_pipeliner, no_job, running),
+            self.act_overwrite: (no_project, readonly, no_pipeliner, no_job, running),
+            self.act_run: (no_project, readonly, no_pipeliner, "" if scheduled else "No job is scheduled"),
+            self.act_stop_runs: (no_project, readonly, "" if self._stoppable else "No run that can be stopped is going"),
+            self.act_rerun: (no_project, readonly, no_pipeliner, "" if self.stale else "No job is out of date"),
+            self.act_abort: (no_project, readonly, no_job, "" if status in (None, "Running") else "The job is not running"),
+        }
+        for a in self._tips:
+            explain(a, self._tips[a], next((r for r in reasons.get(a, ()) if r), ""))
         self.editor.set_permissions(self.readonly, has_pipeliner, why)

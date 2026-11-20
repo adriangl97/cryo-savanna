@@ -12,7 +12,7 @@ import numpy as np
 
 from cryo_savanna.images.mrc import ImageRef
 from cryo_savanna.project.star import loop_columns, loop_rows, read_star
-from cryo_savanna.results.tables import Table, optics_value
+from cryo_savanna.results.tables import Table, optics_values
 from cryo_savanna.stamps import Cache, stamp
 
 CLASS = "rlnClassNumber"
@@ -79,8 +79,8 @@ def read_micrographs(project_dir: str | os.PathLike, star_rel: str) -> Micrograp
             break
     else:
         raise ValueError(f"{star_rel}: no micrographs or movies")
-    px = optics_value(path, "rlnMicrographPixelSize") or optics_value(path, "rlnMicrographOriginalPixelSize")
-    return MicrographSet(project_dir, star_rel, table, col, px)
+    px, original = optics_values(path, "rlnMicrographPixelSize", "rlnMicrographOriginalPixelSize")
+    return MicrographSet(project_dir, star_rel, table, col, px or original)
 
 
 def micrographs_from_names(project_dir: str | os.PathLike, names: list[str], source: str = "") -> MicrographSet:
@@ -217,9 +217,9 @@ def read_picks(project_dir: str | os.PathLike, star_rel: str) -> PickSet:
         order.setdefault(m, []).append(i)
     per = {m: Picks(x[idx], y[idx], fom[idx] if fom is not None else None, cls[idx] if cls is not None else None)
            for m, idx in ((m, np.array(v)) for m, v in order.items())}
-    px = optics_value(path, "rlnMicrographPixelSize") or optics_value(path, "rlnMicrographOriginalPixelSize")
-    box, box_px = optics_value(path, "rlnImageSize"), optics_value(path, "rlnImagePixelSize")
-    return PickSet(project_dir, star_rel, list(order), pixel_size=px, classes=class_counts(cls),
+    px, original, box, box_px = optics_values(path, "rlnMicrographPixelSize", "rlnMicrographOriginalPixelSize",
+                                              "rlnImageSize", "rlnImagePixelSize")
+    return PickSet(project_dir, star_rel, list(order), pixel_size=px or original, classes=class_counts(cls),
                    box_angst=box * box_px if box and box_px else None, _from_particles=per)
 
 

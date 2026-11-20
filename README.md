@@ -178,7 +178,7 @@ Help → Keyboard shortcuts (F1) lists them all.
 
 ### CLI tools
 
-The **CLI tools** menu offers RELION's command-line-only programs as job forms. They run as
+The **CLI tools** menu (also in New job) offers RELION's command-line-only programs as job forms. They run as
 External jobs through `cryo_savanna/cli_runner.py`, which is copied into the project as
 `.cryo-savanna/cli_runner.py`, so the jobs keep working when cryo-savanna is moved or updated.
 

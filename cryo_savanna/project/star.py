@@ -168,12 +168,19 @@ def read_star(source: str | os.PathLike | IO[str], blocks: Iterable[str] | None 
     return _parse(source, wanted)
 
 
-def read_star_head(path: str | os.PathLike, blocks: Iterable[str]) -> dict[str, StarBlock]:
+BIG_TABLES = ("particles", "micrographs", "movies")  # the long loops RELION writes last, after optics and general
+
+
+def read_star_head(path: str | os.PathLike, blocks: Iterable[str], stop: Iterable[str] = ()) -> dict[str, StarBlock]:
     """Like read_star(path, blocks), but stops reading once all those blocks have been read.
 
-    For the small blocks at the start of big files (optics before millions of particles).
+    For the small blocks at the start of big files (optics before millions of particles). ``stop``: blocks
+    that end the read when they come (unless wanted), so that a block the file does not have (no optics in
+    a RELION 3.0 file, no optimiser_general in a particles file) does not take a read of the whole file:
+    BIG_TABLES, which come after everything else.
     """
     wanted = set(blocks)
+    stop_at = set(stop) - wanted
     seen: set[str] = set()
 
     def lines() -> Iterator[str]:
@@ -182,7 +189,10 @@ def read_star_head(path: str | os.PathLike, blocks: Iterable[str]) -> dict[str, 
                 if raw.startswith("data_"):
                     if wanted <= seen:
                         return
-                    seen.add(raw[5:].split()[0] if raw[5:].strip() else "")
+                    name = raw[5:].split()[0] if raw[5:].strip() else ""
+                    if name in stop_at:
+                        return
+                    seen.add(name)
                 yield raw
 
     return _parse(lines(), wanted)

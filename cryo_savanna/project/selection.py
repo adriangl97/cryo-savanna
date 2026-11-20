@@ -257,7 +257,7 @@ def regroup_particles(parts: StarBlock, groups: StarBlock, nr_regroups: int) -> 
     average = n // nr_regroups
     if average < 10:
         raise SelectionError("Each group should have at least 10 particles")
-    width = int(math.floor(math.log(nr_regroups) / math.log(10))) + 1
+    width = int(math.floor(math.log10(nr_regroups))) + 1  # RELION's log10: log(n)/log(10) is 2.99.. for 1000
     order = [g for _, g in sorted(zip(g_scale, g_no), key=lambda t: t[0])]  # MDgroups.sort(scale)
     names: dict[int, str] = {}
     new_id = 0

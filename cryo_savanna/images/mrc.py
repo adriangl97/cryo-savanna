@@ -124,7 +124,8 @@ class MrcReader:
         return self.read(z * plane, plane).reshape(self.ny, self.nx)
 
     def rows(self, z: int, y0: int, y1: int) -> np.ndarray:
-        y0, y1 = max(0, y0), min(self.ny, y1)
+        y0 = min(max(0, y0), self.ny)
+        y1 = max(y0, min(self.ny, y1))  # no rows (not a negative count) for a range off the image
         return self.read((z * self.ny + y0) * self.nx, (y1 - y0) * self.nx).reshape(y1 - y0, self.nx)
 
     def planes(self, z0: int, z1: int) -> np.ndarray:
@@ -260,5 +261,10 @@ def contrast_limits(img: np.ndarray, sigma: float = 3.0) -> tuple[float, float]:
 
 
 def to_uint8(img: np.ndarray, lo: float, hi: float) -> np.ndarray:
-    scaled = (img - lo) * (255.0 / (hi - lo))
-    return np.clip(scaled, 0, 255).astype(np.uint8)
+    """``img`` from lo..hi to 0..255. NaN pixels (maps with NaN outside the mask) become 0: cast as they are,
+    their value is undefined (and numpy warns at every image). Scaled in place: one array, not three."""
+    scaled = np.subtract(img, lo, dtype=np.float32)
+    scaled *= 255.0 / ((hi - lo) or 1.0)
+    np.fmax(scaled, 0, out=scaled)  # fmax / fmin take the number where one side is NaN: NaN -> 0
+    np.fmin(scaled, 255, out=scaled)
+    return scaled.astype(np.uint8)

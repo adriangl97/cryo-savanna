@@ -15,6 +15,7 @@ from qtpy.QtGui import (
     QColor,
     QFont,
     QFontMetrics,
+    QKeySequence,
     QPainter,
     QPainterPath,
     QPainterPathStroker,
@@ -23,11 +24,15 @@ from qtpy.QtGui import (
     QPolygonF,
 )
 from qtpy.QtWidgets import (
+    QCheckBox,
+    QFrame,
     QGraphicsItem,
     QGraphicsPathItem,
     QGraphicsScene,
     QGraphicsView,
+    QHBoxLayout,
     QStyleOptionGraphicsItem,
+    QToolButton,
 )
 
 from cryo_savanna.project.snapshot import JobInfo, ProjectSnapshot
@@ -362,6 +367,47 @@ class EdgeItem(QGraphicsPathItem):
 
 # ---------------------------------------------------------------------------- view
 
+class GraphControls(QFrame):
+    """Fit, zoom out / in and "All links", in the tree's top-right corner (over the cards, on a panel)."""
+
+    def __init__(self, view: JobGraphView):
+        super().__init__(view)
+        self.setObjectName("graph_controls")
+        lay = QHBoxLayout(self)
+        lay.setContentsMargins(6, 3, 6, 3)
+        lay.setSpacing(2)
+
+        def button(text: str, tip: str, slot) -> QToolButton:
+            b = QToolButton(self)
+            b.setText(text)
+            b.setToolTip(tip)
+            b.setAutoRaise(True)
+            b.clicked.connect(slot)
+            lay.addWidget(b)
+            return b
+
+        keys = QKeySequence("Ctrl+0").toString(QKeySequence.NativeText)
+        self.fit = button("Fit", f"Show the whole tree ({keys})", view.fit)
+        self.zoom_out = button("−", "Zoom out (or the mouse wheel)", lambda: view.zoom_centered(1 / 1.25))
+        self.zoom_in = button("+", "Zoom in (or the mouse wheel)", lambda: view.zoom_centered(1.25))
+        lay.addSpacing(6)
+        self.all_links = QCheckBox("All links", self)
+        self.all_links.setToolTip("Also draw links to references, masks and other secondary inputs of every job\n"
+                                  "(otherwise only for the selected job)")
+        self.all_links.toggled.connect(view.set_show_all_links)
+        lay.addWidget(self.all_links)
+
+    def paintEvent(self, e) -> None:  # a panel in the palette's colours (they change with the theme)
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing, True)
+        bg = QColor(self.palette().color(QPalette.Window))
+        bg.setAlpha(235)
+        p.setBrush(bg)
+        p.setPen(QPen(self.palette().color(QPalette.Mid), 1))
+        p.drawRoundedRect(QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5), 6, 6)
+        p.end()
+
+
 class JobGraphView(QGraphicsView):
     job_selected = Signal(str)
     context_requested = Signal(object, QPoint)  # job name (or None), global position
@@ -390,6 +436,21 @@ class JobGraphView(QGraphicsView):
         self.held: dict = {}  # job -> pipeliner.Held
         self.inputs: dict[str, list[str]] = {}  # the open job editor's input jobs (set_inputs)
         self.scene().selectionChanged.connect(self._on_selection)
+        self.controls = GraphControls(self)
+
+    def _place_controls(self) -> None:
+        c, vp = self.controls, self.viewport().geometry()
+        c.adjustSize()
+        c.move(vp.right() - c.width() - 8, vp.top() + 8)
+        c.raise_()
+
+    def resizeEvent(self, e) -> None:
+        super().resizeEvent(e)
+        self._place_controls()
+
+    def showEvent(self, e) -> None:
+        super().showEvent(e)
+        self._place_controls()
 
     def set_snapshot(self, snap: ProjectSnapshot) -> None:
         # the running jobs too: their cards are taller (card_progress_lines), so the tree is laid out again when
@@ -542,6 +603,13 @@ class JobGraphView(QGraphicsView):
         s = self.transform().m11() * factor
         if 0.05 <= s <= 4.0:
             self.scale(factor, factor)
+
+    def zoom_centered(self, factor: float) -> None:
+        """Zoom about the middle of the view (the buttons: not about the mouse, which is on them)."""
+        anchor = self.transformationAnchor()
+        self.setTransformationAnchor(QGraphicsView.AnchorViewCenter)
+        self.zoom(factor)
+        self.setTransformationAnchor(anchor)
 
     def wheelEvent(self, e):
         steps = e.angleDelta().y() / 120.0

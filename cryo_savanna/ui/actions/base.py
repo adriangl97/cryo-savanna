@@ -119,7 +119,7 @@ class ActionsBase(QObject):
         self._structure: object = None  # snapshot.structure_key() of the last snapshot
         self._nodes: object = None  # the pipeline's nodes (name, type, producer) when the input lists were filled
         self._has_trash = False  # looked at when the project changes, not on every selection
-        self._has_stoppable = False  # a run that Stop runs can stop is going
+        self._stoppable = 0  # runs Stop runs can stop
         self._look_pool = QThreadPool(self)  # those looks read Trash/ and the run records: off the GUI thread
         self._look_pool.setMaxThreadCount(1)
         self._look_signals = _Signals()
@@ -223,18 +223,19 @@ class ActionsBase(QObject):
 
     @staticmethod
     def _project_state(ops: PipelineOps | None, pl: Pipeliner | None, pipeline=None,
-                       checker: StalenessChecker | None = None) -> tuple[bool, bool, dict, dict]:
-        """(anything to undelete, any run Stop runs can stop, the jobs runs still going hold, the jobs out of
-        date)."""
+                       checker: StalenessChecker | None = None) -> tuple[bool, int, dict, dict]:
+        """(anything to undelete, how many runs Stop runs can stop, the jobs runs still going hold, the jobs out
+        of date)."""
         held = pl.held_jobs(pipeline) if pl is not None else {}
-        stoppable = pl is not None and (bool(pl.repeating_runs()) or any(h.stoppable for h in held.values()))
+        stoppable = len({r.id for r in pl.repeating_runs()} | {h.run.id for h in held.values() if h.stoppable}) \
+            if pl is not None else 0
         stale = checker.check(pipeline) if checker is not None and pipeline is not None else {}
         return ops is not None and bool(ops.trash()), stoppable, held, stale
 
     def look_at_project_now(self) -> None:
         """_look_at_project, done at once (tests)."""
         pipeline = self.snapshot.pipeline if self.snapshot is not None else None
-        self._has_trash, self._has_stoppable, held, self.stale = self._project_state(
+        self._has_trash, self._stoppable, held, self.stale = self._project_state(
             self.ops, self.pipeliner, pipeline, self.staleness)
         self.runs.emit(held)
         self.stale_jobs.emit(self.stale)
@@ -251,12 +252,12 @@ class ActionsBase(QObject):
             return {}
 
     def _on_look(self, result) -> None:
-        """``result``: (project, has_trash, has_stoppable, held, stale), or None when the look failed (kept as it
+        """``result``: (project, has_trash, stoppable runs, held, stale), or None when the look failed (kept as it
         was)."""
         self._looking = False
-        project, has_trash, has_stoppable, held, stale = result if result is not None else (None, False, False, {}, {})
+        project, has_trash, stoppable, held, stale = result if result is not None else (None, False, 0, {}, {})
         if result is not None and project == self.project_dir:  # not one of the project open before
-            self._has_trash, self._has_stoppable, self.stale = has_trash, has_stoppable, stale
+            self._has_trash, self._stoppable, self.stale = has_trash, stoppable, stale
             self.runs.emit(held)
             self.stale_jobs.emit(stale)
             self.update_state()
