@@ -28,6 +28,7 @@ from cryo_savanna.results.tomo import (
     is_warp_particles,
     tomograms_for_particles,
 )
+from cryo_savanna.stamps import stamp
 
 # viewer kinds
 MICROGRAPHS = "micrographs"  # list + image (+ CTF spectrum / motion track / picks)
@@ -153,11 +154,17 @@ ITERATIVE = ("relion.class2d", "relion.class3d", "relion.initialmodel", "relion.
 _OWN_PICKS = ("relion.manualpick", "relion.autopick", "relion.extract")
 
 
+def _mtime(ctx: JobContext, rel: str) -> int:
+    """When a file was written (-1 when it is gone: moved to Trash/ by an overwrite or a clean since it was seen)."""
+    st = stamp(ctx.project_dir / rel)
+    return st[0] if st is not None else -1
+
+
 def job_particles(ctx: JobContext) -> str | None:
     """The particles of a job for its Picks tab: the newest of its particle outputs (a continued job lists
     its earlier ones too)."""
     outs = [n for n, nt in ctx.outputs if nt.split(".", 1)[0] == "ParticleGroupMetadata" and ctx.exists(n)]
-    return max(outs, key=lambda n: (ctx.project_dir / n).stat().st_mtime_ns) if outs else None
+    return max(outs, key=lambda n: _mtime(ctx, n)) if outs else None
 
 
 def is_spa_particles(path: str | os.PathLike) -> bool:
@@ -450,11 +457,11 @@ def views_for(ctx: JobContext) -> list[ViewSpec]:
     # earlier ones too), the newest gets the Picks tab
     tomo_parts = [n for n, nt in ctx.outputs if nt.split(".", 1)[0] == "ParticleGroupMetadata"
                   and n not in seen_files and ctx.exists(n) and is_tomo_particles(ctx.project_dir / n)]
-    newest_parts = max(tomo_parts, key=lambda n: (ctx.project_dir / n).stat().st_mtime_ns, default=None)
+    newest_parts = max(tomo_parts, key=lambda n: _mtime(ctx, n), default=None)
     warp_parts = [n for n, nt in ctx.outputs if nt.split(".", 1)[0] == "ParticleGroupMetadata"
                   and n not in seen_files and n not in tomo_parts and ctx.exists(n)
                   and is_warp_particles(ctx.project_dir / n)]
-    newest_warp = max(warp_parts, key=lambda n: (ctx.project_dir / n).stat().st_mtime_ns, default=None)
+    newest_warp = max(warp_parts, key=lambda n: _mtime(ctx, n), default=None)
     for node, nt in ctx.outputs:
         kind = nt.split(".", 1)[0]
         if node in seen_files or not ctx.exists(node):

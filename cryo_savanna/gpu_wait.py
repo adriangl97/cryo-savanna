@@ -154,7 +154,8 @@ def wait(lock_dir, gpus, label, poll_s=POLL_S, busy=busy_gpus):
     while True:
         held = try_lock(lock_dir, gpus)
         if held is not None:
-            in_use = [g for g in gpus if g in busy()]
+            busy_now = busy()  # once per look (two nvidia-smi and a ps), not once per GPU
+            in_use = [g for g in gpus if g in busy_now]
             if not in_use:
                 break
             for fd in held:

@@ -144,7 +144,8 @@ class Pipeline:
                 raise
             except (StarError, PipelineError, KeyError, ValueError) as e:
                 last_err = e
-                time.sleep(delay_s * (attempt + 1))
+                if attempt + 1 < retries:  # no wait after the last try: the error is raised at once
+                    time.sleep(delay_s * (attempt + 1))
         raise PipelineError(f"Cannot read {path}: {last_err}")
 
     @classmethod

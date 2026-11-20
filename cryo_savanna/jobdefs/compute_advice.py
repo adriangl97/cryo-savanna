@@ -120,12 +120,12 @@ def input_star(variant_key: str, values: Mapping[str, str]) -> str:
 def read_particles(project_dir: str | os.PathLike, star: str, count: bool = True) -> Particles | None:
     """Box size (optics rlnImageSize) and number of particles of a particles, optimiser or optimisation-set
     file. None when there is nothing to read."""
-    from cryo_savanna.project.star import loop_rows, read_star_head
+    from cryo_savanna.project.star import BIG_TABLES, loop_rows, read_star_head
     project = Path(project_dir)
     path = project / star
     for _ in range(3):  # optimiser -> data, optimisation set -> particles
-        try:
-            head = read_star_head(path, ["optics", "optimiser_general", "optimisation_set", ""])
+        try:  # up to the particles: a particles file has none of the other blocks, and is not read through for them
+            head = read_star_head(path, ["optics", "optimiser_general", "optimisation_set", ""], stop=BIG_TABLES)
         except (OSError, ValueError):
             return None
         gen = head.get("optimiser_general")

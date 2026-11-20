@@ -1,6 +1,7 @@
 # Copyright (C) 2026 Adrián González-López
 # SPDX-License-Identifier: GPL-2.0-or-later
 """Fixes and speed-ups of the repository audit: each must give what the slower code gave."""
+import os
 from pathlib import Path
 
 import numpy as np
@@ -441,3 +442,162 @@ def test_the_fsc_of_half_maps_read_section_by_section_is_numpys(tmp_path):
     fig = M.halfmap_fsc(*paths)
     _, curve = M.fsc(*maps)
     assert np.allclose(fig.curves[0].y, curve[1:], atol=1e-5)
+
+
+# ---------------------------------------------------------------------------- second audit
+def test_regrouped_names_are_padded_as_relion_pads_them_at_powers_of_ten():
+    """RELION's fillwidth is floor(log10(n)) + 1: 4 digits for 1000 groups (log(1000)/log(10) is 2.99..)."""
+    from cryo_savanna.project.selection import regroup_particles
+    from cryo_savanna.project.star import StarBlock
+    n = 1000
+    parts = StarBlock.from_records("particles", ["rlnImageName", "rlnGroupNumber", "rlnOpticsGroup"],
+                                   [[f"{i + 1:06d}@x.mrcs", 1 + i % n, 1] for i in range(10 * n)])
+    groups = StarBlock.from_records("model_groups", ["rlnGroupNumber", "rlnGroupScaleCorrection"],
+                                    [[g, 1.0] for g in range(1, n + 1)])
+    regroup_particles(parts, groups, n)
+    assert {len(v) for v in parts.column("rlnGroupName")} == {len("group_") + 4}
+
+
+def test_nan_pixels_become_black_thumbnails_without_a_warning():
+    import warnings
+
+    from cryo_savanna.images.mrc import to_uint8
+    img = np.array([[np.nan, -1.0, 0.0, 0.5, 1.0, 9.0]], np.float32)
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        out = to_uint8(img, 0.0, 1.0)
+    assert out.dtype == np.uint8 and out.tolist() == [[0, 0, 0, 127, 255, 255]]
+    assert to_uint8(img[:, 1:].astype(np.float64), 0.0, 1.0).tolist() == [[0, 0, 127, 255, 255]]
+
+
+def test_rows_off_the_image_are_none_not_an_error(tmp_path):
+    import mrcfile
+
+    from cryo_savanna.images.mrc import MrcReader
+    with mrcfile.new(tmp_path / "m.mrc") as m:
+        m.set_data(np.arange(20, dtype=np.float32).reshape(4, 5))
+    with MrcReader(tmp_path / "m.mrc") as r:
+        assert r.rows(0, 6, 9).shape == (0, 5) and r.rows(0, 3, 1).shape == (0, 5)
+        assert r.rows(0, -2, 2).tolist() == [[0, 1, 2, 3, 4], [5, 6, 7, 8, 9]]
+
+
+def test_optics_of_a_file_without_them_are_not_read_through_its_particles(tmp_path, monkeypatch):
+    """A RELION 3.0 particle file has no optics block: the read stops at its particles, once for all labels."""
+    from cryo_savanna.project import star as S
+    from cryo_savanna.results.tables import optics_value, optics_values
+    old = tmp_path / "old.star"
+    old.write_text("data_particles\nloop_\n_rlnImageName #1\n" + "".join(f"{i:06d}@x.mrcs\n" for i in range(1, 500)))
+    new = tmp_path / "new.star"
+    new.write_text("data_optics\nloop_\n_rlnOpticsGroup #1\n_rlnImagePixelSize #2\n_rlnImageSize #3\n1 1.5 64\n\n"
+                   "data_particles\nloop_\n_rlnImageName #1\n000001@x.mrcs\n")
+    lines = []
+    real_open = open
+
+    def counting_open(path, *a, **k):
+        fh = real_open(path, *a, **k)
+        if str(path) == str(old):
+            def it():
+                for line in fh:
+                    lines.append(line)
+                    yield line
+            gen = it()
+
+            class F:
+                def __enter__(self):
+                    return gen
+
+                def __exit__(self, *exc):
+                    fh.close()
+            return F()
+        return fh
+    monkeypatch.setattr("builtins.open", counting_open)
+    assert optics_values(old, "rlnImagePixelSize", "rlnImageSize") == [None, None]
+    assert len(lines) == 1  # its data_particles line, and no more
+    monkeypatch.undo()
+    assert optics_values(new, "rlnImagePixelSize", "rlnImageSize", "rlnNothing") == [1.5, 64.0, None]
+    assert optics_value(new, "rlnImageSize") == 64.0
+    # a block that is wanted is read, also one of the big tables
+    assert len(S.read_star_head(new, ["particles"], stop=S.BIG_TABLES)["particles"]) == 1
+
+
+def test_clean_targets_glob_each_directory_once(tmp_path, monkeypatch):
+    """cleanupJob's run_itNNN* globs (one per iteration) list the job directory once, and find what glob finds."""
+    import glob as G
+
+    from cryo_savanna.project import disk_usage as D
+    from cryo_savanna.project.pipeline import Pipeline, Process
+    from cryo_savanna.relion_consts import STATUS_SUCCEEDED
+    job = "Class3D/job010/"
+    d = tmp_path / job
+    d.mkdir(parents=True)
+    for i in range(1, 31):
+        for what in ("data.star", "model.star", "optimiser.star", "class001.mrc"):
+            (d / f"run_it{i:03d}_{what}").write_text("")
+    (d / ".run_it001_hidden").write_text("")
+    p = Pipeline()
+    p.processes[job] = Process(job, "None", "relion.class3d", STATUS_SUCCEEDED)
+    slow = sorted({f for i in range(1, 30) for f in G.glob(f"{job}run_it{i:03d}*", root_dir=tmp_path)})
+    listed = []
+    real = os.listdir
+    monkeypatch.setattr(os, "listdir", lambda path=".": listed.append(path) or real(path))
+    got = D.clean_targets(tmp_path, p, job, False)
+    assert sorted(got) == slow and len(got) == 29 * 4
+    assert len(listed) == 1
+
+
+def test_the_gpu_waiter_looks_at_the_gpus_once_per_look(tmp_path):
+    from cryo_savanna import gpu_wait as W
+    looks = []
+
+    def busy():
+        looks.append(1)
+        return set()
+    held = W.wait(str(tmp_path), ["0", "1", "2", "3"], "test", poll_s=0, busy=busy)
+    for fd in held:
+        os.close(fd)
+    assert len(looks) == 1
+
+
+def test_an_unreadable_pipeline_is_not_waited_for_after_the_last_try(tmp_path, monkeypatch):
+    from cryo_savanna.project import pipeline as P
+    (tmp_path / "default_pipeline.star").write_text("data_nothing\n")
+    waits = []
+    monkeypatch.setattr(P.time, "sleep", waits.append)
+    with pytest.raises(P.PipelineError):
+        P.Pipeline.read(tmp_path, retries=3, delay_s=1.0)
+    assert waits == [1.0, 2.0]
+
+
+def test_a_rerun_order_puts_each_job_after_its_inputs():
+    from cryo_savanna.project.pipeline import Node, Pipeline, Process
+    from cryo_savanna.project.staleness import dependency_order
+    p = Pipeline()
+    names = [f"Ext/job{i:03d}/" for i in range(1, 6)]
+    for n in names:
+        p.processes[n] = Process(n, "None", "relion.external", "Succeeded")
+    for a, b in zip(names, names[1:]):  # a chain: job001 -> job002 -> ...
+        node = a + "out.star"
+        p.nodes[node] = Node(node, "ProcessData.star", producer=a)
+        p.processes[a].outputs.append(node)
+        p.processes[b].inputs.append(node)
+    assert dependency_order(p, list(reversed(names))) == names
+
+
+def test_the_newest_particles_of_a_job_tolerate_a_file_gone_meanwhile(tmp_path, monkeypatch):
+    from cryo_savanna.results import registry as R
+    (tmp_path / "Refine3D/job011").mkdir(parents=True)
+    for n in ("run_it010_data.star", "run_data.star"):
+        (tmp_path / "Refine3D/job011" / n).write_text("")
+    ctx = R.JobContext(tmp_path, "Refine3D/job011/", "relion.refine3d",
+                       outputs=[("Refine3D/job011/run_it010_data.star", "ParticleGroupMetadata.star.relion"),
+                                ("Refine3D/job011/run_data.star", "ParticleGroupMetadata.star.relion")])
+    real = R.JobContext.exists
+    gone = tmp_path / "Refine3D/job011/run_data.star"
+
+    def exists_then_gone(self, rel):  # seen, then moved to Trash/ before its time is asked
+        ok = real(self, rel)
+        if rel.endswith("run_data.star") and gone.exists():
+            gone.unlink()
+        return ok
+    monkeypatch.setattr(R.JobContext, "exists", exists_then_gone)
+    assert R.job_particles(ctx) == "Refine3D/job011/run_it010_data.star"

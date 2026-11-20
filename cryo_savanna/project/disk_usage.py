@@ -34,9 +34,11 @@ undeleted.
 
 from __future__ import annotations
 
+import fnmatch
 import glob
 import os
 import shutil
+import stat
 import threading
 import time
 from dataclasses import dataclass, field
@@ -166,7 +168,7 @@ class _Meter:
             st = os.lstat(path)
         except OSError:
             return Usage()
-        if not os.path.isdir(path) or os.path.islink(path):
+        if not stat.S_ISDIR(st.st_mode):  # a file, or a link (to a directory too): the lstat tells, no more stats
             return Usage(self._file(st), 1)
         out = Usage(self._file(st), 0)  # the directory itself
         stack = [os.fspath(path)]
@@ -216,6 +218,32 @@ def _glob(root: str, pattern: str) -> list[str]:
     return sorted(glob.glob(pattern, root_dir=root))
 
 
+class _Globber:
+    """_glob for one job's cleanup: each directory is listed once, and its names matched as glob does (sorted,
+    names starting with "." only by a pattern that does). cleanupJob globs run_itNNN* once per iteration: for a
+    job of 200 iterations, 200 listings of a directory of thousands of files (on a network file system), twice
+    (gentle and harsh), for every job of the project's Disk usage."""
+
+    def __init__(self, root: str):
+        self.root = root
+        self._names: dict[str, list[str]] = {}
+
+    def __call__(self, pattern: str) -> list[str]:
+        head, _, base = pattern.rpartition("/")
+        if glob.has_magic(head) or not glob.has_magic(base):
+            return _glob(self.root, pattern)
+        names = self._names.get(head)
+        if names is None:
+            try:
+                names = sorted(os.listdir(os.path.join(self.root, head) if head else self.root))
+            except OSError:
+                names = []
+            self._names[head] = names
+        if not base.startswith("."):
+            names = [n for n in names if not n.startswith(".")]
+        return [f"{head}/{n}" if head else n for n in fnmatch.filter(names, base)]
+
+
 def _subdirs(job_dir: str) -> list[str]:
     """Every directory under the job's, relative and ending in "/", breadth first as cleanupJob finds them:
     real directories only (not links to one), none whose name starts with ".", nor what is under one."""
@@ -256,9 +284,7 @@ def _targets(root: str, pipeline: Pipeline, pr: Process, label: str, harsh: bool
     job_dir = os.path.join(root, name)
     subdirs = _subdirs(job_dir) if os.path.isdir(job_dir) else []
     out: list[str] = []
-
-    def g(pattern: str) -> list[str]:
-        return _glob(root, pattern)
+    g = _Globber(root)
 
     if label == "relion.motioncorr":
         for d in subdirs:

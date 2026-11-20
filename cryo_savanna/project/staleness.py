@@ -131,9 +131,11 @@ def dependency_order(pipeline: Pipeline, jobs: list[str]) -> list[str]:
     needs = {j: {p for _, p in _input_jobs(pipeline, j) if p in chosen} for j in jobs if j in pipeline.processes}
     order = [n for n in pipeline.processes if n in needs]
     out: list[str] = []
+    placed: set[str] = set()
     while order:
-        ready = next((j for j in order if needs[j] <= set(out)), order[0])
+        ready = next((j for j in order if needs[j] <= placed), order[0])
         out.append(ready)
+        placed.add(ready)
         order.remove(ready)
     return out + [j for j in jobs if j not in needs]
 

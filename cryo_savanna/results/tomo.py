@@ -29,7 +29,7 @@ from cryo_savanna.images.mrc import ImageRef
 from cryo_savanna.project.star import loop_columns, read_star
 from cryo_savanna.results.curves import Curve, Figure
 from cryo_savanna.results.micrographs import CLASS, MIC, class_counts
-from cryo_savanna.results.tables import Table, optics_value
+from cryo_savanna.results.tables import Table, optics_values
 from cryo_savanna.stamps import stamp as _stamp
 
 TOMO_NAME = "rlnTomoName"
@@ -455,10 +455,9 @@ def _warp_pixel_size(path: Path, block: str, first: dict[str, str]) -> float | N
     if px is None and det and mag:
         px = det * 1e4 / mag
     if px is None:  # RELION moved it to the optics
-        px = optics_value(path, "rlnImagePixelSize") or optics_value(path, "rlnMicrographOriginalPixelSize")
-    if px is None:
-        det, mag = optics_value(path, "rlnDetectorPixelSize"), optics_value(path, "rlnMagnification")
-        px = det * 1e4 / mag if det and mag else None
+        image, original, det, mag = optics_values(path, "rlnImagePixelSize", "rlnMicrographOriginalPixelSize",
+                                                  "rlnDetectorPixelSize", "rlnMagnification")
+        px = image or original or (det * 1e4 / mag if det and mag else None)
     return px
 
 
