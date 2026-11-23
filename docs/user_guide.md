@@ -474,6 +474,54 @@ on them for subtomogram averaging in RELION, check that their hand and centre ma
 reconstruction of `aligned_tilt_series.star` (choose the other *Tomogram layout* if the hand is
 inverted).
 
+### MemBrain-seg: membrane segmentation
+
+[MemBrain-seg](https://github.com/teamtomo/membrain-seg) segments membranes in tomograms on GPUs.
+**Additional external jobs → MemBrain-seg: segment membranes** runs it on the tomograms of a RELION 5
+tomogram set, as a RELION External job. MemBrain-seg does not
+come with cryo-savanna. Give both in the job: the environment on the
+*Compute* tab (its `membrain` then runs with `conda run -n <environment>`. Leave it empty when `membrain` is
+on the PATH; `$CRYO_SAVANNA_MEMBRAIN_ENV` sets the default, else `membrain`), the checkpoint on the
+*Segmentation* tab (`$CRYO_SAVANNA_MEMBRAIN_CKPT` sets the default). A new job takes both, with the CUDA
+module and the conda command, from the project's last MemBrain-seg job.
+
+- *Input*: the tomograms.star, which tomogram of each row (reconstructed, denoised, a half), only some
+  tomograms, and the voxel size (empty: `rlnTomoTiltSeriesPixelSize` × `rlnTomoTomogramBinning`, else the
+  MRC header), given to MemBrain-seg as `--in-pixel-size`.
+- *Segmentation* (`membrain segment`): the checkpoint, rescaling of the patches to the model's pixel size
+  (10 Å; on by default, so tomograms of another voxel size work as they are: the segmentation keeps the
+  tomogram's size), test-time augmentation, the segmentation threshold, the sliding window (a multiple of
+  32; smaller ones need less GPU memory), and optionally the score maps before the
+  threshold, the uncertainty maps of the test-time augmentation, and connected components (each membrane
+  its own label, the smallest left out).
+- *Skeletons* (`membrain skeletonize`, after each tomogram's segmentation): 3D-NMS or 2D-skimage, and the
+  batch size.
+- *Compute*: the GPU ids (`0:1:2:3`: one tomogram per GPU at a time, or a few with *Tomograms per GPU*). Tomograms already done are skipped when the
+  job runs again (Continue), so after a failure only the rest run. A tomogram that only lacks its
+  skeleton is only skeletonized.
+
+Each tomogram is linked as `inputs/<rlnTomoName>.mrc`, and what MemBrain-seg writes is renamed, in
+`segmentations/`: `<rlnTomoName>_segmented.mrc`, `_scores.mrc`, `_uncertainty.mrc` and `_skeleton.mrc`
+(names that do not depend on the checkpoint). The job writes `membrain_seg.star` (one row per tomogram: the
+tomograms.star columns, its files and its status) as tomograms finish, so its **Membranes** tab shows the
+segmentations while it runs, with the raw tomogram beside them ("Raw beside it"); `tomograms.star` (the
+tomograms done, with the columns of their files) is the job's output for later jobs. Each tomogram's log is
+in `logs/`.
+
+**Scores and thresholds.** MemBrain-seg's scores are its network's raw output (logits): a voxel is membrane
+when its score is above the *Segmentation threshold* (0 by default, a probability of 0.5). With *Store score maps?* on, the job's **Scores** tab shows, for the tomogram
+chosen, the tomogram with the voxels above a threshold shaded over its slab (the scores averaged over the
+slab's sections), or the scores as a heatmap, and the histogram of its scores with the threshold as a line to
+drag (or typed), the threshold its segmentation was made with (dashed) and the part of the tomogram above
+it. Each tomogram can have its own threshold, or one for all ("Same threshold for all tomograms"; "Job's
+threshold" goes back to the job's). **Save** writes them into the job's options (*Threshold of some
+tomograms*, `<rlnTomoName>=<threshold>`), and **Continue** thresholds again only the tomograms whose
+threshold changed, from their score maps (`membrain thresholds`: no GPU segmentation), then makes their
+connected components (`membrain components`) and skeletons again. Score maps are float32 volumes as large as the tomograms: once the thresholds are
+applied, **Delete score maps…** deletes them (it refuses while a new threshold is still to be applied) and
+switches *Store score maps?* off in the job, so that a Continue does not segment everything again to write
+them.
+
 ### Split off zero-weight particles
 
 relion_refine (3D auto-refine, 3D and 2D classification, initial model) stops when a particle image gets

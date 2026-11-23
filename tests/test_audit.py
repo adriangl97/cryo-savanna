@@ -352,6 +352,8 @@ def test_every_kind_of_external_job_is_known_in_one_place(tmp_path):
         X.TOMOMASK: ("masks", {"in_tomograms": "Tomograms/job006/tomograms.star"}, "Tomograms/job006/tomograms.star",
                      "mask_runner.py"),
         X.SPLIT: ("zero_weights", {"in_job": "Refine3D/job012"}, "Refine3D/job012/", "split_runner.py"),
+        X.MEMBRAIN: ("segment", {"in_tomograms": "Tomograms/job006/tomograms.star"}, "Tomograms/job006/tomograms.star",
+                     "membrain_runner.py"),
     }
     assert set(made) == {f.name for f in X.FAMILIES} == set(forms.catalogs)
     for family, (kind, values, main, runner) in made.items():

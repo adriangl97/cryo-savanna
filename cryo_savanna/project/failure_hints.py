@@ -42,7 +42,8 @@ HINTS: tuple[Hint, ...] = (
     _h("gpu_oom", r"You ran out of memory on the GPU|cudaErrorMemoryAllocation|CUDA error: out of memory"
                   r"|CUDA out of memory|hipErrorOutOfMemory",
        "The GPU ran out of memory: run fewer MPI processes per GPU (see 'is split between' at the start of "
-       "run.out), use a smaller box (re-extract binned), or set 'Skip padding?' to Yes on the Compute tab."),
+       "run.out), use a smaller box (re-extract binned), or set 'Skip padding?' to Yes on the Compute tab "
+       "(membrain-seg: a smaller sliding window, or fewer tomograms per GPU)."),
     _h("gpu_ids", r"There was an issue with the GPU-ids",
        "The GPU ids in 'Which GPUs to use' do not match this node: leave the field empty, or remember that "
        "GPUs are numbered from 0."),
@@ -94,11 +95,11 @@ HINTS: tuple[Hint, ...] = (
        "No particles were left at this step: check the selection or threshold of the job before (an empty "
        "class selection, a too-strict figure of merit)."),
     _h("python_module", r"ModuleNotFoundError|ImportError: No module named",
-       "A Python module is missing: the program runs in the wrong Python environment (pytom: its conda "
-       "environment on the form; RELION's tomography tools: the Python of the RELION module)."),
+       "A Python module is missing: the program runs in the wrong Python environment (pytom, membrain-seg: "
+       "its conda environment on the form; RELION's tomography tools: the Python of the RELION module)."),
     _h("cannot_start", r"cannot start \S+: ",
-       "The program could not be started: check its path or environment on the form (pytom's conda "
-       "environment, the AreTomo3 executable)."),
+       "The program could not be started: check its path or environment on the form (pytom's or "
+       "membrain-seg's conda environment, the AreTomo3 executable)."),
     _h("missing_file", r"does not exist|Cannot open (input |output )?file|cannot read file|No such file or directory"
                        r"|Cannot find \S+ file",
        "An input file is missing or cannot be read: check the inputs on the I/O tab (was an earlier job "

@@ -39,8 +39,16 @@ TOMOGRAM_COLUMNS = [  # (column, title)
     ("rlnTomoReconstructedTomogramHalf1", "Half 1"),
     ("rlnTomoReconstructedTomogramHalf2", "Half 2"),
     ("savannaPytomScores", "pytom scores"),  # a pytom template matching job's score maps (pytom_match.star)
+    # a membrain-seg job's segmentations and what comes with them (membrain_seg.star, its tomograms.star)
+    ("savannaMembrainSegmentation", "Membranes"),
+    ("savannaMembrainScores", "Membrane scores"),
+    ("savannaMembrainSkeleton", "Membrane skeletons"),
+    ("savannaMembrainUncertainty", "Membrane uncertainty"),
 ]
 RAW_TOMOGRAM, SCORES = "rlnTomoReconstructedTomogram", "savannaPytomScores"
+# what a job made from the tomograms, shown beside the raw one (the first the set has)
+DERIVED = (SCORES, "savannaMembrainSegmentation", "savannaMembrainScores", "savannaMembrainSkeleton",
+           "savannaMembrainUncertainty")
 TILT_COLUMNS = [  # per-tilt values worth a column
     ("rlnTomoNominalStageTiltAngle", "Tilt (°)"), ("rlnMicrographPreExposure", "Dose (e/Å²)"),
     ("rlnDefocusU", "Defocus U (Å)"), ("rlnDefocusV", "Defocus V (Å)"), ("rlnCtfMaxResolution", "Max. res. (Å)"),

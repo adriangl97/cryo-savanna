@@ -2,8 +2,8 @@
 # Copyright (C) 2026 Adrián González-López
 # SPDX-License-Identifier: GPL-2.0-or-later
 #
-# Part of cryo-savanna; a copy of it goes into every project that runs its pytom, AreTomo3 or tomogram mask
-# jobs, beside their runners, and travels with it.
+# Part of cryo-savanna; a copy of it goes into every project that runs its pytom, AreTomo3, tomogram mask,
+# membrain-seg or particle split jobs, beside their runners, and travels with it.
 #
 # This program is free software; you can redistribute it and/or modify it under the terms of the GNU
 # General Public License as published by the Free Software Foundation; either version 2 of the License,
@@ -15,7 +15,8 @@
 # this program; if not, see <https://www.gnu.org/licenses/old-licenses/gpl-2.0.html>.
 """What the runners of cryo-savanna's "Additional external jobs" share.
 
-pytom_runner.py, aretomo_runner.py and mask_runner.py are started by RELION as External jobs
+pytom_runner.py, aretomo_runner.py, mask_runner.py, membrain_runner.py and split_runner.py are started by RELION
+as External jobs
 (``python3 .cryo-savanna/<runner>.py <mode> --o <job dir> [--in_* F]... --j <threads> --<option> <value> ...``)
 and import this file from beside them: the arguments of an External job, the exit files and
 RELION_OUTPUT_NODES.star, STAR files, MRC headers, environment modules, the programs they run (in process
@@ -155,6 +156,17 @@ def num(v):
 
 def selected_names(opts):
     return set(words(opts, "tomo_names"))
+
+
+def conda_run(opts, env_key):
+    """The start of a command run in the conda environment of option ``env_key`` (a name, or a path with a /):
+    ``<conda> run --no-capture-output -n <env>``, with the job's conda command (option conda), else $CONDA_EXE,
+    else conda. Nothing when the option is empty: the program is on the PATH."""
+    env = text(opts, env_key)
+    if not env:
+        return []
+    conda = text(opts, "conda") or os.environ.get("CONDA_EXE") or "conda"
+    return shlex.split(conda) + ["run", "--no-capture-output", "-p" if "/" in env else "-n", env]
 
 
 # ---------------------------------------------------------------------------- environment modules

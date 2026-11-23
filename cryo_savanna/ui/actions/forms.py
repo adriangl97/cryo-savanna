@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
 """New, clone, continue and overwrite jobs, and what happens when the job editor submits one: RELION's job
 types, the CLI tools (jobdefs/cli_tools.py) and cryo-savanna's own External jobs (pytom, AreTomo3, tomogram
-masks, zero-weight particle splits: jobdefs/external_jobs.py)."""
+masks, zero-weight particle splits, MemBrain-seg: jobdefs/external_jobs.py)."""
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ from qtpy.QtCore import Qt
 from qtpy.QtWidgets import QApplication, QMessageBox
 
 from cryo_savanna.env.relion_env import RelionEnvError
-from cryo_savanna.jobdefs import aretomo_jobs, external_jobs, split_jobs, tomomask_jobs
+from cryo_savanna.jobdefs import aretomo_jobs, external_jobs, membrain_jobs, split_jobs, tomomask_jobs
 from cryo_savanna.jobdefs.cli_tools import CliVariant
 from cryo_savanna.jobdefs.model import JobVariant
 from cryo_savanna.jobdefs.pytom_jobs import TITLES as PYTOM_TITLES
@@ -117,6 +117,26 @@ class FormActions(_Base):
         self._edit(variant.program, self.editor.new_job, variant, values,
                    f"{variant.description}. Runs as a RELION External job; the masks are then drawn in its "
                    "Masks view.")
+
+    def new_membrain_job(self, kind: str = membrain_jobs.SEGMENT) -> None:
+        """A membrain-seg job: the form, with the environment and checkpoint of the project's last one and the
+        newest tomogram set."""
+        try:
+            variant = self.membrain.variant(kind)
+        except RelionEnvError as e:
+            self._env_error("MemBrain-seg", e)
+            return
+        values = variant.default_values(self.env)
+        pipeline = self.snapshot.pipeline if self.snapshot is not None else None
+        if self.project_dir is not None:
+            jobs = [n for n, j in self.snapshot.jobs.items() if j.program in membrain_jobs.TITLES.values()] \
+                if self.snapshot is not None else None
+            values.update(membrain_jobs.last_settings(self.project_dir, pipeline, jobs))
+        if pipeline is not None:  # the newest tomogram set, as a start
+            values.update(tomomask_jobs.newest_input(pipeline))
+        self._edit(variant.program, self.editor.new_job, variant, values,
+                   f"{variant.description}. Runs as a RELION External job (membrain-seg from its conda "
+                   "environment).")
 
     def new_split_job(self, kind: str = split_jobs.ZERO_WEIGHTS) -> None:
         """A split of zero-weight particles: the form, with the selected job if it is a failed refinement (else

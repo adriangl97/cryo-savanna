@@ -104,6 +104,11 @@ and can be used interchangeably, even at the same time, on the same project.
   series per GPU, with the alignment written back into RELION's tilt-series STAR files (for
   RELION's Reconstruct tomograms) and the tomograms in a tomograms.star; or reconstruction only,
   with an existing alignment.
+  - MemBrain-seg membrane segmentation of RELION 5 tomograms (from its own conda environment), one
+  tomogram per GPU, with optional score maps, connected components, uncertainty maps and skeletons, shown
+  beside the tomograms while the job runs. The score maps are shown over the tomograms (the voxels above a
+  threshold, or a heatmap), with a threshold per tomogram chosen on their histogram and applied on Continue
+  without segmenting again; then they can be deleted.
   - Split off zero-weight particles: when a refinement or classification stops because a particle
   got all-zero weights ("A particle image was compared to the reference and resulted in all-zero
   weights"). This job will separate out (rejected) those particles or all the particles in that tomogram/micrograph.
@@ -194,7 +199,9 @@ AreTomo3 jobs run through `cryo_savanna/aretomo_runner.py` (copied as `.cryo-sav
 which runs the AreTomo3 executable named in the job. Tomogram mask jobs run through
 `cryo_savanna/mask_runner.py` (copied as `.cryo-savanna/mask_runner.py`); the masks are then drawn in the
 job's Masks tab. Splits of zero-weight particles run through `cryo_savanna/split_runner.py` (copied as
-`.cryo-savanna/split_runner.py`), which only reads and writes STAR files. All of them import the helpers they
+`.cryo-savanna/split_runner.py`), which only reads and writes STAR files. MemBrain-seg jobs run through
+`cryo_savanna/membrain_runner.py` (copied as `.cryo-savanna/membrain_runner.py`), which runs `membrain` from
+the conda environment named in the job: cryo-savanna does not include or import MemBrain-seg. All of them import the helpers they
 share from `cryo_savanna/runner_common.py`, copied with them as `.cryo-savanna/runner_common.py`.
 
 ### SLURM

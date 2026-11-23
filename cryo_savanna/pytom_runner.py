@@ -70,7 +70,6 @@ import hashlib
 import json
 import os
 import re
-import shlex
 import sys
 import time
 
@@ -160,11 +159,7 @@ def parse(argv, modes=(MATCH,)):
 
 def conda_prefix(opts):
     """The start of every pytom command: ``conda run`` in the job's environment (nothing: on PATH)."""
-    env = text(opts, "pytom_env")
-    if not env:
-        return []
-    conda = text(opts, "conda") or os.environ.get("CONDA_EXE") or "conda"
-    return shlex.split(conda) + ["run", "--no-capture-output", "-p" if "/" in env else "-n", env]
+    return C.conda_run(opts, "pytom_env")
 
 
 def per_tomogram(opts, key, kind=int, what=""):
