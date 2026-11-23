@@ -129,7 +129,8 @@ polling interval (Preferences, or `--poll`), and views of running jobs read new 
   after 30 s is terminated, and killed 30 s later.
 - **Additional external jobs** (New job → Other programs, and the menu bar): programs that are not RELION's, run as External
   jobs and in the pipeline like any job. See [pytom template matching](#pytom-template-matching),
-  [Tomogram masks](#tomogram-masks-for-pytom) and [AreTomo3](#aretomo3-tilt-series-alignment-and-reconstruction).
+  [Tomogram masks](#tomogram-masks-for-pytom), [AreTomo3](#aretomo3-tilt-series-alignment-and-reconstruction) and
+  [Split off zero-weight particles](#split-off-zero-weight-particles).
 - **Queue:** "Submit to queue" uses the queue settings of the loaded RELION module (RELION_QSUB_*).
   On a SLURM cluster the list shows each queued job's state (queued and why, or running where and
   for how long), Abort can cancel it with scancel, and jobs that SLURM ended without RELION noticing
@@ -199,7 +200,9 @@ card's tooltip: known messages at the end of run.err and run.out (RELION 5.1.1's
 SLURM, and cryo-savanna's runners), each with a one-line hint and a link to the log line it comes from:
 GPU or RAM out of memory, wrong GPU ids, the queue's time limit, a failed node, a full disk, permission
 denied, too few MPI processes, a mask or pixel size that does not fit, no particles left, a missing input
-file, a missing Python module, a crash. When none matches, it shows RELION's own error message.
+file, a missing Python module, a crash, a particle with all-zero weights (see
+[Split off zero-weight particles](#split-off-zero-weight-particles)). When none matches, it shows RELION's
+own error message.
 
 ## Disk usage
 
@@ -471,6 +474,83 @@ on them for subtomogram averaging in RELION, check that their hand and centre ma
 reconstruction of `aligned_tilt_series.star` (choose the other *Tomogram layout* if the hand is
 inverted).
 
+### MemBrain-seg: membrane segmentation
+
+[MemBrain-seg](https://github.com/teamtomo/membrain-seg) segments membranes in tomograms on GPUs.
+**Additional external jobs → MemBrain-seg: segment membranes** runs it on the tomograms of a RELION 5
+tomogram set, as a RELION External job. MemBrain-seg does not
+come with cryo-savanna. Give both in the job: the environment on the
+*Compute* tab (its `membrain` then runs with `conda run -n <environment>`. Leave it empty when `membrain` is
+on the PATH; `$CRYO_SAVANNA_MEMBRAIN_ENV` sets the default, else `membrain`), the checkpoint on the
+*Segmentation* tab (`$CRYO_SAVANNA_MEMBRAIN_CKPT` sets the default). A new job takes both, with the CUDA
+module and the conda command, from the project's last MemBrain-seg job.
+
+- *Input*: the tomograms.star, which tomogram of each row (reconstructed, denoised, a half), only some
+  tomograms, and the voxel size (empty: `rlnTomoTiltSeriesPixelSize` × `rlnTomoTomogramBinning`, else the
+  MRC header), given to MemBrain-seg as `--in-pixel-size`.
+- *Segmentation* (`membrain segment`): the checkpoint, rescaling of the patches to the model's pixel size
+  (10 Å; on by default, so tomograms of another voxel size work as they are: the segmentation keeps the
+  tomogram's size), test-time augmentation, the segmentation threshold, the sliding window (a multiple of
+  32; smaller ones need less GPU memory), and optionally the score maps before the
+  threshold, the uncertainty maps of the test-time augmentation, and connected components (each membrane
+  its own label, the smallest left out).
+- *Skeletons* (`membrain skeletonize`, after each tomogram's segmentation): 3D-NMS or 2D-skimage, and the
+  batch size.
+- *Compute*: the GPU ids (`0:1:2:3`: one tomogram per GPU at a time, or a few with *Tomograms per GPU*). Tomograms already done are skipped when the
+  job runs again (Continue), so after a failure only the rest run. A tomogram that only lacks its
+  skeleton is only skeletonized.
+
+Each tomogram is linked as `inputs/<rlnTomoName>.mrc`, and what MemBrain-seg writes is renamed, in
+`segmentations/`: `<rlnTomoName>_segmented.mrc`, `_scores.mrc`, `_uncertainty.mrc` and `_skeleton.mrc`
+(names that do not depend on the checkpoint). The job writes `membrain_seg.star` (one row per tomogram: the
+tomograms.star columns, its files and its status) as tomograms finish, so its **Membranes** tab shows the
+segmentations while it runs, with the raw tomogram beside them ("Raw beside it"); `tomograms.star` (the
+tomograms done, with the columns of their files) is the job's output for later jobs. Each tomogram's log is
+in `logs/`.
+
+**Scores and thresholds.** MemBrain-seg's scores are its network's raw output (logits): a voxel is membrane
+when its score is above the *Segmentation threshold* (0 by default, a probability of 0.5). With *Store score maps?* on, the job's **Scores** tab shows, for the tomogram
+chosen, the tomogram with the voxels above a threshold shaded over its slab (the scores averaged over the
+slab's sections), or the scores as a heatmap, and the histogram of its scores with the threshold as a line to
+drag (or typed), the threshold its segmentation was made with (dashed) and the part of the tomogram above
+it. Each tomogram can have its own threshold, or one for all ("Same threshold for all tomograms"; "Job's
+threshold" goes back to the job's). **Save** writes them into the job's options (*Threshold of some
+tomograms*, `<rlnTomoName>=<threshold>`), and **Continue** thresholds again only the tomograms whose
+threshold changed, from their score maps (`membrain thresholds`: no GPU segmentation), then makes their
+connected components (`membrain components`) and skeletons again. Score maps are float32 volumes as large as the tomograms: once the thresholds are
+applied, **Delete score maps…** deletes them (it refuses while a new threshold is still to be applied) and
+switches *Store score maps?* off in the job, so that a Continue does not segment everything again to write
+them.
+
+### Split off zero-weight particles
+
+relion_refine (3D auto-refine, 3D and 2D classification, initial model) stops when a particle image gets
+no weight in any orientation:
+
+```
+A particle image was compared to the reference and resulted in all-zero
+weights (for all orientations). ...
+```
+
+(or "The number of contributing orientations for an image was found to be zero", "The sum of weights
+for all orientations was found to be zero", "zero sum of weights" without GPUs). The Overview's
+*Likely cause* says so. **Additional external jobs → Split off zero-weight particles (of a failed
+refinement)** takes the failed job's folder (*Failed job*: the selected job when it is a failed
+refinement, else the newest one) and works out the rest:
+
+- the particles: the ones run.err names (the `fn_img=` line RELION writes before the error; with a
+  scratch disk, the name of the copy there, `opticsgroupN_particles.mrcs`, which is traced back to the
+  particle; without GPUs, its `part_id=`). run.err keeps what every attempt of the job wrote, so the
+  particles of all of them are split off at once;
+- the input: the failed job's particles (its job.star; for tomography the particles of its optimisation
+  set, or of its direct entries; else the command in note.txt).
+- *Reject their whole tomograms?* (tomography only): Yes rejects every particle of the
+  tomograms (`rlnTomoName`) the named particles are in.
+- *Reject their whole micrographs?* (SPA only, No to start with): Yes rejects every particle of the
+  micrographs (`rlnMicrographName`) the named particles are in.
+
+The job writes `accepted_particles.star` and `rejected_particles.star`, and for tomography an `optimisation_set.star`.
+
 ## Preferences (Ctrl+,)
 
 Help → Keyboard shortcuts (F1) lists every key.
@@ -519,15 +599,22 @@ at their time limit are continued from their last iteration, at most 3 times per
 The default of "Copy particles to scratch directory" for new jobs, as `$RELION_SCRATCH_DIR` would
 set it. A `$RELION_SCRATCH_DIR` set in the shell wins over this preference.
 
-### Scratch subdirectory of its own for each job
+### Scratch subdirectory of its own when the directory is in use
 
-Off by default: the directory is used as typed, as in RELION's GUI. If set to on, every job started
-or scheduled with a scratch directory (new, cloned or overwritten) gets a subdirectory of its own in
-it, `savanna_NNN`, with a random 3-digit number that no other job of the project uses and that is
-not on disk yet. RELION wipes `<scratch>/relion_volatile/` when a job starts and ends, so jobs
-sharing one directory would destroy each other's copies. This can lead to an accidental crash of a
-job if you run two at the same time sharing a scratch folder. This setting avoids that. Continuing a
-job keeps its directory.
+Off by default: the directory is used as typed, as in RELION's GUI. RELION wipes
+`<scratch>/relion_volatile/` when a job starts and ends, so two jobs running at the same time with
+one scratch directory destroy each other's copies, and one of them can crash. If set to on, a job
+gets a subdirectory of its own, `savanna_NNN` (a random 3-digit number not on disk yet and not used
+by another running job), only when its scratch directory is already in use. Otherwise it uses the
+directory as typed.
+
+The directory counts as in use when:
+
+- a process on this machine has it as its `--scratch_dir`.
+- a job of this project that runs on this machine has it selected.
+
+This is checked each time a job starts. Jobs submitted to a queue (Slurm) are never changed. The status line says when a
+job got a `savanna_NNN` instead.
 
 The caveat with this is that RELION removes only `relion_volatile/` of a job that finishes ok, so
 the copies of failed, aborted or killed jobs stay until you delete them (with one shared directory,

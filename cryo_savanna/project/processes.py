@@ -17,7 +17,12 @@ The job's processes are, with everything they started (mpirun's ranks, an Extern
 
 RELION_JOB_EXIT_ABORTED is written first, so the pipeliner or the GUI that waits for the job sees it aborted
 (and a run stops, as for an abort) however soon it looks; the pipeliner itself is not killed. Then the
-processes get SIGTERM, and SIGKILL after a few seconds.
+processes get SIGTERM, and SIGKILL after a few seconds. The job stays marked as aborted unless one of them is
+another user's (it could not be killed); processes still ending after SIGKILL do not unmark it.
+
+With the local GPU queue (gpu_wait.py), whatever else keeps the run's GPU locks (inherited: a program the job
+left in the background, one started after the job's processes were listed) is killed with them
+(lock_leftovers); else the GPUs would count as busy for every later run until it ended.
 """
 
 from __future__ import annotations
@@ -42,6 +47,7 @@ from cryo_savanna.relion_consts import (
 
 EXITS = (RELION_JOB_EXIT_SUCCESS, RELION_JOB_EXIT_FAILURE, RELION_JOB_EXIT_ABORTED)
 TERM_WAIT_S = 5.0  # between SIGTERM and SIGKILL
+KILL_WAIT_S = 30.0  # after SIGKILL, for them to end: a program on a GPU takes a while (its memory there is freed)
 
 
 @dataclass(frozen=True)
@@ -155,6 +161,72 @@ def job_processes(project_dir: str | os.PathLike, job: str, pipeliner_pids: Iter
     return [table[pid] for pid in pids if pid != me and pid not in pipeliners and not table[pid].zombie]
 
 
+def _lock_holders(paths: Iterable[str | os.PathLike], table: dict[int, Proc]) -> set[int]:
+    """This user's processes that have one of ``paths`` open: /proc/<pid>/fd (Linux), else lsof (macOS)."""
+    uid = os.getuid()
+    keys = set()
+    for path in paths:
+        try:
+            st = os.stat(path)
+        except OSError:
+            continue
+        keys.add((st.st_dev, st.st_ino))
+    if not keys:
+        return set()
+    out: set[int] = set()
+    if os.path.isdir("/proc/self/fd"):
+        for pid, p in table.items():
+            if p.uid != uid:
+                continue
+            try:
+                fds = os.listdir(f"/proc/{pid}/fd")
+            except OSError:
+                continue
+            for fd in fds:
+                try:
+                    st = os.stat(f"/proc/{pid}/fd/{fd}")
+                except OSError:
+                    continue
+                if (st.st_dev, st.st_ino) in keys:
+                    out.add(pid)
+                    break
+        return out
+    try:
+        r = subprocess.run(["lsof", "-w", "-t", "--", *map(str, paths)], capture_output=True, text=True, timeout=20,
+                           stdin=subprocess.DEVNULL)
+    except (OSError, subprocess.SubprocessError):
+        return out
+    return {int(w) for w in r.stdout.split() if w.isdigit() and int(w) in table and table[int(w)].uid == uid}
+
+
+_PIPELINER = re.compile(r"(?:^|[\s/])relion_pipeliner(?:\s|$)")
+
+
+def lock_leftovers(project_dir: str | os.PathLike, lock_files: Iterable[str | os.PathLike], pipeliner: int,
+                   table: dict[int, Proc] | None = None) -> list[Proc]:
+    """What keeps the GPU locks of a run (gpu_wait.py) apart from its relion_pipeliner ``pipeliner``, with
+    everything under it, parents first.
+
+    The locks are inherited by everything the run's jobs start, so a program that a job left in the background
+    (its command line naming no job directory, under nothing of the job's: not found by job_processes), or one
+    started after the job's processes were listed, keeps the GPUs locked once the job is gone. While the run's
+    pipeliner is alive and has its locks, every other process that has them open got them from it. When it is
+    gone, only processes in this project count, and none while another relion_pipeliner (another run, which got
+    the GPUs since) has them; the brief looks of runs waiting for them (gpu_wait.py) never count."""
+    table = process_table() if table is None else table
+    holders = {pid for pid in _lock_holders(list(lock_files), table)
+               if pid != os.getpid() and "gpu_wait.py" not in table[pid].args}
+    if pipeliner in table and not table[pipeliner].zombie:
+        found = holders - {pipeliner} if pipeliner in holders else set()  # not holding them: still waiting
+    elif any(_PIPELINER.search(table[pid].args) for pid in holders):
+        found = set()
+    else:
+        project = Path(project_dir).resolve()
+        found = {pid for pid in holders if (cwd := _cwd(pid)) is None or cwd == project}
+    pids = _subtrees(_topmost(found, table), table) if found else []
+    return [table[pid] for pid in pids if pid != pipeliner and not table[pid].zombie]
+
+
 def _alive(procs: list[Proc]) -> list[Proc]:
     """Those still running: the same process (its command line, so not a new one given its number), not a zombie."""
     table = process_table()
@@ -176,8 +248,8 @@ def _signal(procs: list[Proc], sig: int) -> list[Proc]:
 
 def kill(project_dir: str | os.PathLike, job: str, procs: list[Proc], term_wait_s: float | None = None) -> None:
     """Mark the job as aborted and end ``procs`` (from job_processes, perhaps a while ago: only those still the
-    same are signalled). Raises ForceAbortError naming the processes that are still running (the job is then
-    not marked)."""
+    same are signalled). Raises ForceAbortError naming the processes still running when one of them is another
+    user's (the job is then not marked)."""
     d = Path(project_dir) / job
     marked = d.is_dir() and not any((d / f).exists() for f in EXITS)  # not if it ended meanwhile
     if marked:
@@ -191,18 +263,22 @@ def kill(project_dir: str | os.PathLike, job: str, procs: list[Proc], term_wait_
         left = _alive(left)
     if left:
         denied += _signal(left, signal.SIGKILL)
-        deadline = time.monotonic() + 2.0
+        deadline = time.monotonic() + KILL_WAIT_S
         while left and time.monotonic() < deadline:
             time.sleep(0.1)
             left = _alive(left)
-    if left:
+    refused = [p for p in left if p in denied]
+    if refused:
         if marked:
             (d / RELION_JOB_EXIT_ABORTED).unlink(missing_ok=True)
-        why = " (not yours to stop)" if denied else ""
-        raise ForceAbortError(f"Still running{why}:\n" + "\n".join(f"{p.pid}  {p.args}" for p in left))
+        raise ForceAbortError("Still running (not yours to stop):\n" + "\n".join(f"{p.pid}  {p.args}" for p in left))
+    # The rest got SIGKILL, which cannot be refused: they end as soon as the kernel lets them (a program on a GPU
+    # only once its memory there is freed). The job stays marked: unmarked, the relion_pipeliner that waits for
+    # it would wait for ever, keeping the run's GPUs locked (gpu_wait.py).
     (d / RELION_JOB_ABORT_NOW).unlink(missing_ok=True)  # nothing is left to read it; a continue would stop at once
     if marked:
+        ending = f" ({len(left)} still ending after SIGKILL)" if left else ""
         with open(d / "run.err", "a") as fh:  # where RELION's GUI and this window show why a job ended
             fh.write(f"\n ++++ cryo-savanna: force abort on {socket.gethostname()}, "
-                     f"{time.ctime()}: {len(procs)} process(es) killed, "
+                     f"{time.ctime()}: {len(procs)} process(es) killed{ending}, "
                      f"{RELION_JOB_EXIT_ABORTED} written\n")

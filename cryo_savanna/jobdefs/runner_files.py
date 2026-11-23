@@ -3,8 +3,9 @@
 """The runners of the "Additional external jobs" in a project's .cryo-savanna/ folder.
 
 RELION runs ``python3 .cryo-savanna/<runner>.py ...``: a copy of cryo-savanna's runner, so that the jobs
-keep working when cryo-savanna is moved or updated. pytom_runner.py, aretomo_runner.py and mask_runner.py
-import runner_common.py from beside them, so it always goes in first.
+keep working when cryo-savanna is moved or updated. The runners (pytom_runner.py, aretomo_runner.py,
+mask_runner.py, split_runner.py, membrain_runner.py) import runner_common.py from beside them, so it always
+goes in first.
 """
 
 from __future__ import annotations

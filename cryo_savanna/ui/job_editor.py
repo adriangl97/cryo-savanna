@@ -418,8 +418,8 @@ class _HelpFilter(QObject):
 
 
 def _scratch_base(values: dict[str, str]) -> None:
-    """Show the scratch directory chosen, not the job's own savanna_NNN in it (a new one is given
-    when the job starts)."""
+    """Show the scratch directory chosen, not a savanna_NNN a job got in it (whether one is needed is
+    decided again when the job starts)."""
     if SCRATCH_KEY in values:
         values[SCRATCH_KEY] = scratch_base_dir(values[SCRATCH_KEY])
 
@@ -1429,7 +1429,7 @@ class JobEditor(QWidget):
         if env:
             extra.append(f"default from {env}" + (" or Preferences" if "RELION_SCRATCH_DIR" in env else ""))
         if key == SCRATCH_KEY and self.own_scratch:
-            extra.append("each job gets its own savanna_NNN subdirectory in it")
+            extra.append("a local job gets a savanna_NNN subdirectory of it when another job uses it as it starts")
         if self.variant is not None and not self.is_cli:
             flags = option_flags(self.variant.label).get(key)
             if flags:

@@ -50,8 +50,8 @@ from cryo_savanna.images.volume import load_volume
 from cryo_savanna.results.tables import Table
 from cryo_savanna.results.tomo import (
     CHANGE_COLUMNS,
+    DERIVED,
     RAW_TOMOGRAM,
-    SCORES,
     SERIES_COLUMNS,
     TILT_COLUMNS,
     TiltSeriesSet,
@@ -585,16 +585,17 @@ class TomogramViewer(QWidget):
             self.select(row)
 
     def _beside(self) -> str | None:
-        """The tomogram shown beside the chosen one: the raw reconstruction (beside a denoised one or
-        pytom's scores), or the scores beside the raw one; None when there is no such pair."""
+        """The tomogram shown beside the chosen one: the raw reconstruction (beside a denoised one, pytom's
+        scores or membrain-seg's segmentations), or what a job made from it (scores, segmentations) beside the raw
+        one; None when there is no such pair."""
         if self.set is None:
             return None
         kinds = [c for c, _ in self.set.tomogram_kinds()]
         cur = self.kind.currentData()
         if cur != RAW_TOMOGRAM and RAW_TOMOGRAM in kinds:
             return RAW_TOMOGRAM
-        if cur == RAW_TOMOGRAM and SCORES in kinds:
-            return SCORES
+        if cur == RAW_TOMOGRAM:
+            return next((k for k in DERIVED if k in kinds), None)
         return None
 
     def _update_compare(self) -> None:

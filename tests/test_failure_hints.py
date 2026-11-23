@@ -30,6 +30,10 @@ LOGS = {
                              "by the RELION_ERROR_LOCAL_MPI environment variable.\n"),
     "mask_size": ("run.err", "ERROR: \nERROR: Solvent mask does not have the same size as the reference vol.\n"),
     "pixel_size": ("run.err", "ERROR: \nCalculated and user-defined pixel sizes are different (> 1% of error)!\n"),
+    "zero_weights": ("run.err", "\n fn_img= 000017@Extract/job007/Movies/mic_003.mrcs\n adaptive_fraction= 0.999\n"
+                                " min_diff2= 1.7e+38\nin: /src/acc/acc_ml_optimiser_impl.h, line 2255\nERROR: \n"
+                                "No orientation was found as better than any other.\n\nA particle image was compared "
+                                "to the reference and resulted in all-zero\n"),
     "no_particles": ("run.err", "ERROR: \nERROR: there are no particles in Select/job020/particles.star\n"),
     "python_module": ("run.err", "Traceback (most recent call last):\nModuleNotFoundError: No module named 'napari'\n"),
     "cannot_start": ("run.err", "cannot start pytom_match_template.py: [Errno 2] No such file or directory: "

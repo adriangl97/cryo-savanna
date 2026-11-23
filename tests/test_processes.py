@@ -218,3 +218,105 @@ def test_a_process_of_another_project_with_a_job_of_that_name_is_not_the_jobs(tm
         assert sh.wait(10) is not None
     finally:
         sh.kill()
+
+
+LEFT_BEHIND = "sleep 3017"  # what the job leaves in the background: no job directory in its command line
+
+
+def test_force_abort_frees_the_gpus_of_its_run(tmp_path, monkeypatch):
+    """A program the job left in the background keeps the run's GPU locks (gpu_wait.py: inherited) without being
+    one of the job's processes (its command line names no job directory, and it is under nothing of the job's):
+    force abort kills it too, and the next run gets the GPUs."""
+    from cryo_savanna import gpu_wait as W
+    from cryo_savanna.project.gpu_queue import GpuQueue
+    from tests.fixtures.fake_pipeliner import install
+
+    class OneGpu(GpuQueue):
+        def gpus_of(self, jobstars, environ):
+            return ["0"]
+
+    install(tmp_path / "bin")
+    project = tmp_path / "p"
+    project.mkdir()
+    write_star(project / "default_pipeline.star", Pipeline(job_counter=1).to_blocks(), atomic=False)
+    environ = dict(os.environ, PATH=f"{tmp_path / 'bin'}{os.pathsep}{os.environ['PATH']}")
+    pl = Pipeliner(project, exe=str(tmp_path / "bin/relion_pipeliner"), environ=environ)
+    locks = tmp_path / "locks"
+    pl.gpu_queue = OneGpu(locks)
+    script = project / "ext.sh"
+    script.write_text(f"#!/bin/sh\n({LEFT_BEHIND} > /dev/null 2>&1 &)\n"
+                      f"exec {sys.executable} -c '{IGNORES_TERM}'\n")
+    script.chmod(0o755)
+    js = JobDefs.load().variant("relion.external").new_jobstar(RelionEnv({}))
+    js.options.update({"fn_exe": str(script), "do_queue": "No", "nr_threads": "1"})
+    job = pl.add_job(js).job
+    rec = pl.run([job])
+    monkeypatch.setattr(P, "TERM_WAIT_S", 0.3)
+
+    def left_behind():
+        return [p for p in P.process_table().values() if p.args == LEFT_BEHIND and p.uid == UID]
+
+    try:
+        deadline = time.time() + 20
+        while not left_behind() and time.time() < deadline:
+            time.sleep(0.1)
+        assert left_behind() and W.try_lock(str(locks), ["0"]) is None  # the run has the GPU
+        procs, _ = pl.force_abort_targets(job)
+        assert {p.pid for p in left_behind()} <= {p.pid for p in procs}  # shown before it is killed
+        pl.force_abort(job, procs)
+        deadline = time.time() + 20
+        held = None
+        while held is None and time.time() < deadline:
+            held = W.try_lock(str(locks), ["0"])
+            time.sleep(0.1)
+        assert held is not None, f"GPU 0 still locked by {left_behind()}"
+        for fd in held:
+            os.close(fd)
+        assert not left_behind() and Pipeline.read(project).processes[job].status == "Aborted"
+    finally:
+        for p in left_behind() + P.job_processes(project, job, [rec.pid]):
+            os.kill(p.pid, 9)
+
+
+def test_a_job_whose_killed_processes_are_slow_to_end_stays_aborted(tmp_path, monkeypatch):
+    """A program on a GPU can take long to end after SIGKILL: the job stays marked as aborted (else the
+    relion_pipeliner waiting for it, which keeps the run's GPU locks, would wait for ever). Only processes that
+    could not be signalled (another user's) leave it unmarked."""
+    job = "Class3D/job009/"
+    d = tmp_path / job
+    d.mkdir(parents=True)
+    stuck = P.Proc(2 ** 22 + 7, 1, UID, "D", "relion_refine --o Class3D/job009/run --gpu 0")
+    monkeypatch.setattr(P, "_alive", lambda procs: list(procs))
+    monkeypatch.setattr(P, "KILL_WAIT_S", 0.2)
+    monkeypatch.setattr(P, "_signal", lambda procs, sig: [])
+    P.kill(tmp_path, job, [stuck], term_wait_s=0.1)
+    assert (d / "RELION_JOB_EXIT_ABORTED").exists() and "still ending" in (d / "run.err").read_text()
+
+    (d / "RELION_JOB_EXIT_ABORTED").unlink()
+    monkeypatch.setattr(P, "_signal", lambda procs, sig: list(procs))  # another user's
+    with pytest.raises(P.ForceAbortError, match="not yours"):
+        P.kill(tmp_path, job, [stuck], term_wait_s=0.1)
+    assert not (d / "RELION_JOB_EXIT_ABORTED").exists()
+
+
+def test_lock_leftovers_are_only_those_of_the_run():
+    """Holders of a run's GPU locks other than its pipeliner; none while the pipeliner still waits for them (they
+    are another run's then), nor, once it is gone, while another relion_pipeliner has them."""
+    t = table(
+        (100, 1, UID, "S", "relion_pipeliner --RunJobs Class3D/job009/ --schedule cryo-savanna"),
+        (200, 1, UID, "S", "sleep 3017"),  # left in the background by a job of the run
+        (201, 200, UID, "S", "child of it"),
+        (300, 1, UID, "S", "python3 -I /x/gpu_wait.py --locks /tmp/l --gpus 0 -- relion_pipeliner"),  # waits
+    )
+    holders = {100, 200, 300}
+    import unittest.mock as m
+    with m.patch.object(P, "_lock_holders", lambda paths, tbl: set(holders)), \
+            m.patch.object(P, "_cwd", lambda pid: None):
+        assert [p.pid for p in P.lock_leftovers("/p", ["/l"], 100, t)] == [200, 201]
+        holders.discard(100)  # the pipeliner does not have them: it still waits, the holders are another run's
+        assert P.lock_leftovers("/p", ["/l"], 100, t) == []
+        del t[100]  # the pipeliner is gone
+        assert [p.pid for p in P.lock_leftovers("/p", ["/l"], 100, t)] == [200, 201]
+        t[400] = P.Proc(400, 1, UID, "S", "relion_pipeliner --RunJobs External/job020/ --schedule cryo-savanna")
+        holders.add(400)  # another run got the GPUs since
+        assert P.lock_leftovers("/p", ["/l"], 100, t) == []

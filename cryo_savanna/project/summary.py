@@ -107,7 +107,7 @@ def _pace(jobdir: Path, models: dict[int, str], root: str) -> tuple[float | None
 
 
 # The tables cryo-savanna's runners keep of the items they work through: (file, what the items are)
-ITEM_TABLES = (("aretomo3.star", "tilt series"), ("pytom_match.star", "tomograms"))
+ITEM_TABLES = (("aretomo3.star", "tilt series"), ("pytom_match.star", "tomograms"), ("membrain_seg.star", "tomograms"))
 # RELION's progress bar (src/time.cpp): "  3.12/  5.40 min ..........~~(,_,">", time so far / estimated total
 _BAR = re.compile(r"(\d+(?:\.\d+)?)\s*/\s*(\d+(?:\.\d+)?)\s+(sec|min|hrs?|hours?|days?)\s*\.*~~\(,_,\">")
 _UNIT_S = {"sec": 1, "min": 60, "hr": 3600, "hrs": 3600, "hour": 3600, "hours": 3600, "day": 86400, "days": 86400}
@@ -165,8 +165,8 @@ def _items(jobdir: Path, s: "JobSummary") -> bool:
 
 def progress_lines(type_label: str, program: str = "") -> int:
     """Lines a running job's card has for its progress: how far (iteration, items) and the times, or the times."""
-    from cryo_savanna.jobdefs import aretomo_jobs, pytom_jobs
-    counted = set(aretomo_jobs.TITLES.values()) | set(pytom_jobs.TITLES.values())
+    from cryo_savanna.jobdefs import aretomo_jobs, membrain_jobs, pytom_jobs
+    counted = set(aretomo_jobs.TITLES.values()) | set(pytom_jobs.TITLES.values()) | set(membrain_jobs.TITLES.values())
     return 2 if base_type(type_label) in ITERATIVE or program in counted else 1
 
 

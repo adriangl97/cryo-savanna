@@ -42,7 +42,8 @@ HINTS: tuple[Hint, ...] = (
     _h("gpu_oom", r"You ran out of memory on the GPU|cudaErrorMemoryAllocation|CUDA error: out of memory"
                   r"|CUDA out of memory|hipErrorOutOfMemory",
        "The GPU ran out of memory: run fewer MPI processes per GPU (see 'is split between' at the start of "
-       "run.out), use a smaller box (re-extract binned), or set 'Skip padding?' to Yes on the Compute tab."),
+       "run.out), use a smaller box (re-extract binned), or set 'Skip padding?' to Yes on the Compute tab "
+       "(membrain-seg: a smaller sliding window, or fewer tomograms per GPU)."),
     _h("gpu_ids", r"There was an issue with the GPU-ids",
        "The GPU ids in 'Which GPUs to use' do not match this node: leave the field empty, or remember that "
        "GPUs are numbered from 0."),
@@ -84,15 +85,21 @@ HINTS: tuple[Hint, ...] = (
     _h("pixel_size", r"pixel sizes are different|different pixel size|Invalid pixel size|Pixel size is invalid",
        "The pixel sizes do not agree (or one is missing): check the pixel size of the inputs and their optics "
        "groups."),
+    _h("zero_weights", r"resulted in all-zero|No orientation was found as better than any other"
+                       r"|number of contributing orientations for an image|sum of weights for all orientations was"
+                       r"|zero sum of weights",
+       "A particle got no weight in any orientation, and RELION stopped on it (run.err names it: 'fn_img='): "
+       "split it off with Additional external jobs → Split off zero-weight particles, then run the job "
+       "again on its accepted_particles.star (tomography: its optimisation_set.star)."),
     _h("no_particles", r"there are no particles in|not enough particles to",
        "No particles were left at this step: check the selection or threshold of the job before (an empty "
        "class selection, a too-strict figure of merit)."),
     _h("python_module", r"ModuleNotFoundError|ImportError: No module named",
-       "A Python module is missing: the program runs in the wrong Python environment (pytom: its conda "
-       "environment on the form; RELION's tomography tools: the Python of the RELION module)."),
+       "A Python module is missing: the program runs in the wrong Python environment (pytom, membrain-seg: "
+       "its conda environment on the form; RELION's tomography tools: the Python of the RELION module)."),
     _h("cannot_start", r"cannot start \S+: ",
-       "The program could not be started: check its path or environment on the form (pytom's conda "
-       "environment, the AreTomo3 executable)."),
+       "The program could not be started: check its path or environment on the form (pytom's or "
+       "membrain-seg's conda environment, the AreTomo3 executable)."),
     _h("missing_file", r"does not exist|Cannot open (input |output )?file|cannot read file|No such file or directory"
                        r"|Cannot find \S+ file",
        "An input file is missing or cannot be read: check the inputs on the I/O tab (was an earlier job "
@@ -101,7 +108,7 @@ HINTS: tuple[Hint, ...] = (
     _h("segfault", r"Segmentation fault|signal 11\b|SIGSEGV|core dumped",
        "The program crashed (segmentation fault): often a truncated or corrupt input file; if it happens again "
        "with the same inputs, report it with run.out and run.err.",
-       covered_by=("gpu_oom", "ram_oom")),
+       covered_by=("gpu_oom", "ram_oom", "zero_weights")),  # (a debug build raises SIGSEGV for this error)
     _h("mpi_abort", r"MPI_ABORT was invoked|mpirun noticed that process rank|mpirun was unable to launch"
                     r"|ORTE was unable|PMIX ERROR",
        "MPI stopped the job because one process failed: the first error above in run.out or run.err is the "

@@ -57,13 +57,14 @@ def job_gpu_ids(js: JobStar, queued: bool = False) -> list[int] | None:
     jt = job_type_for_label(js.type_label)
     t = jt.label if jt is not None else js.type_label
     if t == "relion.external":
-        from cryo_savanna.jobdefs import aretomo_jobs, external_jobs, pytom_jobs
+        from cryo_savanna.jobdefs import aretomo_jobs, external_jobs, membrain_jobs, pytom_jobs
         found = external_jobs.kind_of(js)
         if found is None:
             return None
         family, kind = found
         own, _ = pytom_jobs.decode(o.get("other_args", ""))
-        if (family.name, kind) in (("pytom", pytom_jobs.MATCH), ("aretomo", aretomo_jobs.ALIGN)):
+        if (family.name, kind) in (("pytom", pytom_jobs.MATCH), ("aretomo", aretomo_jobs.ALIGN),
+                                   ("membrain", membrain_jobs.SEGMENT)):
             return parse_ids(own.get("gpu_ids", ""))
         return None
     if t in _REFINE:

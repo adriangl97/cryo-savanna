@@ -48,6 +48,7 @@ PYTOM_SCORES = "pytom_scores"  # pytom template matching: progress and score sta
 PYTOM_THRESHOLDS = "pytom_thresholds"  # pytom extraction: thresholds per tomogram, chosen interactively
 SVG_PLOTS = "svg_plots"  # the plots a program wrote as SVG files (pytom)
 TOMO_MASKS = "tomo_masks"  # tomogram masks: drawn interactively on the tomograms
+MEMBRAIN_SCORES = "membrain_scores"  # membrain-seg: score maps over the tomograms, thresholds per tomogram
 FILES = "files"  # every file of the job: STAR tables, images, stacks
 
 
@@ -241,9 +242,32 @@ def _tomomask_views(ctx: JobContext, kind: str, add, add_maps) -> None:
     add(TOMO_MASKS, "Masks", job=ctx.name)
 
 
+def _split_views(ctx: JobContext, kind: str, add, add_maps) -> None:
+    """Splits of zero-weight particles (jobdefs/split_jobs.py): the rejected particles first (the images RELION
+    stopped on); the accepted ones come with the job's outputs."""
+    from cryo_savanna import split_runner as S
+    rejected = ctx.name + S.REJECTED
+    if ctx.exists(rejected):
+        add(PARTICLES, "Rejected particles", star=rejected)
+
+
+def _membrain_views(ctx: JobContext, kind: str, add, add_maps) -> None:
+    """membrain-seg jobs (jobdefs/membrain_jobs.py): the tomograms with their segmentations, from the table the
+    job rewrites as tomograms finish (so they show while it runs, with the status of each); with score maps, the
+    Scores view (the scores over the tomograms, thresholds per tomogram). Its tomograms.star (the same, for the
+    tomograms done) needs no tab of its own."""
+    from cryo_savanna import membrain_runner as M
+    summary = ctx.name + M.SUMMARY
+    if ctx.exists(summary):
+        add(TOMOGRAMS, "Membranes", star=summary, output=ctx.name + M.TOMOGRAMS)
+        if M.COL_SCORES in (columns_of(ctx.project_dir / summary, "global") or []):  # (none once deleted)
+            add(MEMBRAIN_SCORES, "Scores", job=ctx.name)
+
+
 # The viewers of the External jobs made from cryo-savanna's own forms, by family (jobdefs/external_jobs.py):
 # (ctx, kind, add, add_maps). A CLI tool has none of its own: its output files get the usual ones.
-EXTERNAL_VIEWS = {"pytom": _pytom_views, "aretomo": _aretomo_views, "tomomask": _tomomask_views}
+EXTERNAL_VIEWS = {"pytom": _pytom_views, "aretomo": _aretomo_views, "tomomask": _tomomask_views,
+                  "split": _split_views, "membrain": _membrain_views}
 
 
 def views_for(ctx: JobContext) -> list[ViewSpec]:
