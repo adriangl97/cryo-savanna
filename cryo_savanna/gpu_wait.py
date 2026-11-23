@@ -53,7 +53,8 @@ def parse(argv):
     return opts["--locks"], gpus, opts.get("--label", ""), cmd
 
 
-def _lock_path(lock_dir, gpu):
+def lock_path(lock_dir, gpu):
+    """The lock file of a GPU (also read by cryo-savanna's force abort, project/processes.py)."""
     return os.path.join(lock_dir, "gpu-%s.lock" % "".join(c if c.isalnum() or c in "-_" else "_" for c in gpu))
 
 
@@ -61,7 +62,7 @@ def try_lock(lock_dir, gpus):
     """File descriptors holding the locks of all ``gpus``, or None (and nothing held) when one is taken."""
     held = []  # type: list[int]
     for gpu in sorted(gpus):
-        fd = os.open(_lock_path(lock_dir, gpu), os.O_RDWR | os.O_CREAT, 0o666)
+        fd = os.open(lock_path(lock_dir, gpu), os.O_RDWR | os.O_CREAT, 0o666)
         try:
             fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except OSError as e:
@@ -78,7 +79,7 @@ def try_lock(lock_dir, gpus):
 def holder(lock_dir, gpu):
     """What the lock file of a GPU says holds it (the label written by the run holding it)."""
     try:
-        with open(_lock_path(lock_dir, gpu)) as fh:
+        with open(lock_path(lock_dir, gpu)) as fh:
             return fh.read().strip()
     except OSError:
         return ""

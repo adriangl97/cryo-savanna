@@ -525,16 +525,40 @@ class Pipeliner:
         (self.project_dir / job / RELION_JOB_ABORT_NOW).touch()
 
     def force_abort_targets(self, job: str) -> tuple[list[processes.Proc], str]:
-        """The processes of ``job`` on this host (project/processes.py), and, when there are none, the host the
-        last run of it was started on if that is another one ("" otherwise)."""
+        """The processes of ``job`` on this host (project/processes.py), with what else keeps the GPU locks of
+        its last run (lock_leftovers), and, when there are none, the host the last run of it was started on if
+        that is another one ("" otherwise)."""
         here = socket.gethostname()
         runs = self.runs_of(job)
-        procs = processes.job_processes(self.project_dir, job, [r.pid for r in runs if r.host == here and r.is_alive()])
+        table = processes.process_table()
+        procs = processes.job_processes(self.project_dir, job, [r.pid for r in runs if r.host == here and r.is_alive()],
+                                        table=table)
+        seen = {p.pid for p in procs}
+        procs += [p for p in self._lock_leftovers(runs, table) if p.pid not in seen]
         return procs, (runs[0].host if not procs and runs and runs[0].host != here else "")
 
+    def _lock_leftovers(self, runs: list[RunRecord], table: dict[int, processes.Proc] | None = None
+                        ) -> list[processes.Proc]:
+        """What keeps the GPU locks of the last of ``runs`` (newest first) besides its relion_pipeliner, if it was
+        started here through the GPU queue."""
+        rec = runs[0] if runs else None
+        if rec is None or rec.host != socket.gethostname() or not rec.gpus or "--locks" not in rec.command[:-1]:
+            return []
+        from cryo_savanna import gpu_wait
+        lock_dir = rec.command[rec.command.index("--locks") + 1]
+        return processes.lock_leftovers(self.project_dir, [gpu_wait.lock_path(lock_dir, g) for g in rec.gpus],
+                                        rec.pid, table)
+
     def force_abort(self, job: str, procs: list[processes.Proc]) -> None:
-        """Kill ``procs`` (force_abort_targets) and mark the job as aborted."""
-        processes.kill(self.project_dir, job, procs)
+        """Kill ``procs`` (force_abort_targets) and mark the job as aborted; also what the job started since
+        ``procs`` were listed (shown to the user perhaps a while ago), and then what still keeps its run's GPU
+        locks (started while the others were being killed), so that the GPUs are free for the next run."""
+        fresh, _ = self.force_abort_targets(job)
+        listed = {p.pid for p in fresh}  # as they are now: kill() leaves alone a process whose command line changed
+        processes.kill(self.project_dir, job, fresh + [p for p in procs if p.pid not in listed])
+        left = self._lock_leftovers(self.runs_of(job))
+        if left:
+            processes.kill(self.project_dir, job, left)
 
     def clean(self, job: str, harsh: bool = False) -> None:
         number = Pipeline.read(self.project_dir).processes[job].job_number
