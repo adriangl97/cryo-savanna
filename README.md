@@ -104,6 +104,9 @@ and can be used interchangeably, even at the same time, on the same project.
   series per GPU, with the alignment written back into RELION's tilt-series STAR files (for
   RELION's Reconstruct tomograms) and the tomograms in a tomograms.star; or reconstruction only,
   with an existing alignment.
+  - Split off zero-weight particles: when a refinement or classification stops because a particle
+  got all-zero weights ("A particle image was compared to the reference and resulted in all-zero
+  weights"). This job will separate out (rejected) those particles or all the particles in that tomogram/micrograph.
 - Class2D, Class3D, Refine3D and InitialModel jobs that have not written an iteration yet can be
   marked failed (RELION refuses and leaves them Running), and then overwritten.
 
@@ -190,8 +193,9 @@ conda environment named in the job): cryo-savanna does not include or import pyt
 AreTomo3 jobs run through `cryo_savanna/aretomo_runner.py` (copied as `.cryo-savanna/aretomo_runner.py`),
 which runs the AreTomo3 executable named in the job. Tomogram mask jobs run through
 `cryo_savanna/mask_runner.py` (copied as `.cryo-savanna/mask_runner.py`); the masks are then drawn in the
-job's Masks tab. All three import the helpers they share from `cryo_savanna/runner_common.py`, copied with
-them as `.cryo-savanna/runner_common.py`.
+job's Masks tab. Splits of zero-weight particles run through `cryo_savanna/split_runner.py` (copied as
+`.cryo-savanna/split_runner.py`), which only reads and writes STAR files. All of them import the helpers they
+share from `cryo_savanna/runner_common.py`, copied with them as `.cryo-savanna/runner_common.py`.
 
 ### SLURM
 

@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
 """New, clone, continue and overwrite jobs, and what happens when the job editor submits one: RELION's job
 types, the CLI tools (jobdefs/cli_tools.py) and cryo-savanna's own External jobs (pytom, AreTomo3, tomogram
-masks: jobdefs/external_jobs.py)."""
+masks, zero-weight particle splits: jobdefs/external_jobs.py)."""
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ from qtpy.QtCore import Qt
 from qtpy.QtWidgets import QApplication, QMessageBox
 
 from cryo_savanna.env.relion_env import RelionEnvError
-from cryo_savanna.jobdefs import aretomo_jobs, external_jobs, tomomask_jobs
+from cryo_savanna.jobdefs import aretomo_jobs, external_jobs, split_jobs, tomomask_jobs
 from cryo_savanna.jobdefs.cli_tools import CliVariant
 from cryo_savanna.jobdefs.model import JobVariant
 from cryo_savanna.jobdefs.pytom_jobs import TITLES as PYTOM_TITLES
@@ -117,6 +117,22 @@ class FormActions(_Base):
         self._edit(variant.program, self.editor.new_job, variant, values,
                    f"{variant.description}. Runs as a RELION External job; the masks are then drawn in its "
                    "Masks view.")
+
+    def new_split_job(self, kind: str = split_jobs.ZERO_WEIGHTS) -> None:
+        """A split of zero-weight particles: the form, with the selected job if it is a failed refinement (else
+        the newest one)."""
+        try:
+            variant = self.particle_split.variant(kind, self.tomo)
+        except RelionEnvError as e:
+            self._env_error(split_jobs.TITLES[kind], e)
+            return
+        values = variant.default_values(self.env)
+        pipeline = self.snapshot.pipeline if self.snapshot is not None else None
+        if pipeline is not None:
+            values.update(split_jobs.failed_job(pipeline, self.current))
+        self._edit(variant.program, self.editor.new_job, variant, values,
+                   f"{variant.description}. Runs as a RELION External job (quick: it only reads and writes STAR "
+                   "files).")
 
     def _variant_for(self, js: JobStar) -> JobVariant:
         """The form for a job: its job type's, or a CLI tool's, pytom's or AreTomo3's for External jobs made

@@ -561,7 +561,7 @@ def test_new_aretomo_job_in_window(qtbot, tomo_project, tmp_path):
     qtbot.addWidget(w)
     w.load_now()
     titles = [a.text() for a in w.actions.external_menu.actions()]
-    assert titles[-1] == "AreTomo3: align and reconstruct tilt series"
+    assert "AreTomo3: align and reconstruct tilt series" in titles
     w.actions.new_aretomo_job("align")
     ed = w.actions.editor
     assert ed.variant.kind == "align" and "AreTomo3" in ed.title.text()

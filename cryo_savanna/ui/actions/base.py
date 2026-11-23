@@ -133,10 +133,12 @@ class ActionsBase(QObject):
         self.editor = JobEditor(env, type_names, flag_source=flag_source, relion_version=defs.version)
         self._shown_inputs: dict[str, list[str]] = {}  # as last told (editor_inputs)
         self.editor.inputs_changed.connect(lambda _: self._tell_editor_inputs())
-        # the forms of the External jobs made here (CLI tools, pytom, AreTomo3, tomogram masks), built once
+        # the forms of the External jobs made here (CLI tools, pytom, AreTomo3, tomogram masks, particle splits),
+        # built once
         self.forms = external_jobs.Forms(defs, env, self.editor.flag_source)
         self.cli, self.pytom = self.forms.cli, self.forms.pytom
         self.aretomo, self.tomomask = self.forms.aretomo, self.forms.tomomask
+        self.particle_split = self.forms.split
         warm_pytom_defaults()  # "module avail cuda", in the background: not when the first form opens
         self.editor.submit.connect(self._on_submit)
         self.editor.submit_many.connect(self._on_submit_many)

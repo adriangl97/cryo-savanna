@@ -2,9 +2,9 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
 """The kinds of RELION External jobs cryo-savanna makes with a form and a runner of its own, in one place.
 
-Each is a *family*: the CLI tools (jobdefs/cli_tools.py), pytom (pytom_jobs.py), AreTomo3 (aretomo_jobs.py)
-and the tomogram masks (tomomask_jobs.py). To RELION they are all ``relion.external`` jobs; what tells them
-apart is the runner their executable names (``python3 .cryo-savanna/<runner>.py <kind>``). The rest of
+Each is a *family*: the CLI tools (jobdefs/cli_tools.py), pytom (pytom_jobs.py), AreTomo3 (aretomo_jobs.py),
+the tomogram masks (tomomask_jobs.py) and the split of zero-weight particles (split_jobs.py). To RELION they are
+all ``relion.external`` jobs; what tells them apart is the runner their executable names (``python3 .cryo-savanna/<runner>.py <kind>``). The rest of
 cryo-savanna asks here, not each family in turn:
 
 - ``kind_of(js)`` / ``kind_of_exe(fn_exe)``: (family, kind) of a job, or None for any other job;
@@ -29,13 +29,13 @@ from pathlib import Path
 from typing import Any
 
 from cryo_savanna.env.relion_env import RelionEnv
-from cryo_savanna.jobdefs import aretomo_jobs, cli_tools, pytom_jobs, tomomask_jobs
+from cryo_savanna.jobdefs import aretomo_jobs, cli_tools, pytom_jobs, split_jobs, tomomask_jobs
 from cryo_savanna.jobdefs.flags import FlagSource
 from cryo_savanna.jobdefs.model import JobDefs, JobVariant
 from cryo_savanna.project.jobstar import JobStar
 
 EXTERNAL = cli_tools.EXTERNAL
-CLI, PYTOM, ARETOMO, TOMOMASK = "cli", "pytom", "aretomo", "tomomask"
+CLI, PYTOM, ARETOMO, TOMOMASK, SPLIT = "cli", "pytom", "aretomo", "tomomask", "split"
 
 
 @dataclass(frozen=True)
@@ -62,6 +62,9 @@ FAMILIES: tuple[Family, ...] = (
     Family(TOMOMASK, tomomask_jobs.mask_kind, lambda kind: tomomask_jobs.TITLES[kind], tomomask_jobs.install_runner,
            tomomask_jobs.mask_main_input, lambda defs, env, flags: tomomask_jobs.TomoMaskCatalog(defs, env),
            lambda catalog, kind, tomo: catalog.variant(kind)),
+    Family(SPLIT, split_jobs.split_kind, lambda kind: split_jobs.TITLES[kind], split_jobs.install_runner,
+           split_jobs.split_main_input, lambda defs, env, flags: split_jobs.SplitCatalog(defs, env),
+           lambda catalog, kind, tomo: catalog.variant(kind, tomo)),
 )
 BY_NAME = {f.name: f for f in FAMILIES}
 
@@ -113,7 +116,7 @@ def program_title(fn_exe: str) -> str:
 
 class Forms:
     """The forms of every family for one RELION environment: each family's catalog (which builds a form
-    on first use), by family name and as ``.cli``, ``.pytom``, ``.aretomo``, ``.tomomask``."""
+    on first use), by family name and as ``.cli``, ``.pytom``, ``.aretomo``, ``.tomomask``, ``.split``."""
 
     def __init__(self, defs: JobDefs, env: RelionEnv, flag_source: FlagSource | None = None):
         self.defs, self.env = defs, env

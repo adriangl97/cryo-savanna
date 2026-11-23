@@ -241,9 +241,19 @@ def _tomomask_views(ctx: JobContext, kind: str, add, add_maps) -> None:
     add(TOMO_MASKS, "Masks", job=ctx.name)
 
 
+def _split_views(ctx: JobContext, kind: str, add, add_maps) -> None:
+    """Splits of zero-weight particles (jobdefs/split_jobs.py): the rejected particles first (the images RELION
+    stopped on); the accepted ones come with the job's outputs."""
+    from cryo_savanna import split_runner as S
+    rejected = ctx.name + S.REJECTED
+    if ctx.exists(rejected):
+        add(PARTICLES, "Rejected particles", star=rejected)
+
+
 # The viewers of the External jobs made from cryo-savanna's own forms, by family (jobdefs/external_jobs.py):
 # (ctx, kind, add, add_maps). A CLI tool has none of its own: its output files get the usual ones.
-EXTERNAL_VIEWS = {"pytom": _pytom_views, "aretomo": _aretomo_views, "tomomask": _tomomask_views}
+EXTERNAL_VIEWS = {"pytom": _pytom_views, "aretomo": _aretomo_views, "tomomask": _tomomask_views,
+                  "split": _split_views}
 
 
 def views_for(ctx: JobContext) -> list[ViewSpec]:

@@ -84,6 +84,12 @@ HINTS: tuple[Hint, ...] = (
     _h("pixel_size", r"pixel sizes are different|different pixel size|Invalid pixel size|Pixel size is invalid",
        "The pixel sizes do not agree (or one is missing): check the pixel size of the inputs and their optics "
        "groups."),
+    _h("zero_weights", r"resulted in all-zero|No orientation was found as better than any other"
+                       r"|number of contributing orientations for an image|sum of weights for all orientations was"
+                       r"|zero sum of weights",
+       "A particle got no weight in any orientation, and RELION stopped on it (run.err names it: 'fn_img='): "
+       "split it off with Additional external jobs → Split off zero-weight particles, then run the job "
+       "again on its accepted_particles.star (tomography: its optimisation_set.star)."),
     _h("no_particles", r"there are no particles in|not enough particles to",
        "No particles were left at this step: check the selection or threshold of the job before (an empty "
        "class selection, a too-strict figure of merit)."),
@@ -101,7 +107,7 @@ HINTS: tuple[Hint, ...] = (
     _h("segfault", r"Segmentation fault|signal 11\b|SIGSEGV|core dumped",
        "The program crashed (segmentation fault): often a truncated or corrupt input file; if it happens again "
        "with the same inputs, report it with run.out and run.err.",
-       covered_by=("gpu_oom", "ram_oom")),
+       covered_by=("gpu_oom", "ram_oom", "zero_weights")),  # (a debug build raises SIGSEGV for this error)
     _h("mpi_abort", r"MPI_ABORT was invoked|mpirun noticed that process rank|mpirun was unable to launch"
                     r"|ORTE was unable|PMIX ERROR",
        "MPI stopped the job because one process failed: the first error above in run.out or run.err is the "

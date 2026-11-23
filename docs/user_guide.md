@@ -129,7 +129,8 @@ polling interval (Preferences, or `--poll`), and views of running jobs read new 
   after 30 s is terminated, and killed 30 s later.
 - **Additional external jobs** (New job → Other programs, and the menu bar): programs that are not RELION's, run as External
   jobs and in the pipeline like any job. See [pytom template matching](#pytom-template-matching),
-  [Tomogram masks](#tomogram-masks-for-pytom) and [AreTomo3](#aretomo3-tilt-series-alignment-and-reconstruction).
+  [Tomogram masks](#tomogram-masks-for-pytom), [AreTomo3](#aretomo3-tilt-series-alignment-and-reconstruction) and
+  [Split off zero-weight particles](#split-off-zero-weight-particles).
 - **Queue:** "Submit to queue" uses the queue settings of the loaded RELION module (RELION_QSUB_*).
   On a SLURM cluster the list shows each queued job's state (queued and why, or running where and
   for how long), Abort can cancel it with scancel, and jobs that SLURM ended without RELION noticing
@@ -199,7 +200,9 @@ card's tooltip: known messages at the end of run.err and run.out (RELION 5.1.1's
 SLURM, and cryo-savanna's runners), each with a one-line hint and a link to the log line it comes from:
 GPU or RAM out of memory, wrong GPU ids, the queue's time limit, a failed node, a full disk, permission
 denied, too few MPI processes, a mask or pixel size that does not fit, no particles left, a missing input
-file, a missing Python module, a crash. When none matches, it shows RELION's own error message.
+file, a missing Python module, a crash, a particle with all-zero weights (see
+[Split off zero-weight particles](#split-off-zero-weight-particles)). When none matches, it shows RELION's
+own error message.
 
 ## Disk usage
 
@@ -470,6 +473,35 @@ AreTomo3's tomograms are AreTomo3's reconstructions, not RELION's. Before you us
 on them for subtomogram averaging in RELION, check that their hand and centre match a RELION
 reconstruction of `aligned_tilt_series.star` (choose the other *Tomogram layout* if the hand is
 inverted).
+
+### Split off zero-weight particles
+
+relion_refine (3D auto-refine, 3D and 2D classification, initial model) stops when a particle image gets
+no weight in any orientation:
+
+```
+A particle image was compared to the reference and resulted in all-zero
+weights (for all orientations). ...
+```
+
+(or "The number of contributing orientations for an image was found to be zero", "The sum of weights
+for all orientations was found to be zero", "zero sum of weights" without GPUs). The Overview's
+*Likely cause* says so. **Additional external jobs → Split off zero-weight particles (of a failed
+refinement)** takes the failed job's folder (*Failed job*: the selected job when it is a failed
+refinement, else the newest one) and works out the rest:
+
+- the particles: the ones run.err names (the `fn_img=` line RELION writes before the error; with a
+  scratch disk, the name of the copy there, `opticsgroupN_particles.mrcs`, which is traced back to the
+  particle; without GPUs, its `part_id=`). run.err keeps what every attempt of the job wrote, so the
+  particles of all of them are split off at once;
+- the input: the failed job's particles (its job.star; for tomography the particles of its optimisation
+  set, or of its direct entries; else the command in note.txt).
+- *Reject their whole tomograms?* (tomography only): Yes rejects every particle of the
+  tomograms (`rlnTomoName`) the named particles are in.
+- *Reject their whole micrographs?* (SPA only, No to start with): Yes rejects every particle of the
+  micrographs (`rlnMicrographName`) the named particles are in.
+
+The job writes `accepted_particles.star` and `rejected_particles.star`, and for tomography an `optimisation_set.star`.
 
 ## Preferences (Ctrl+,)
 
