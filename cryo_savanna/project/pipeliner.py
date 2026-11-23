@@ -407,8 +407,7 @@ class Pipeliner:
         the job's job.star (relion_pipeliner makes the job's command from it), and one left from an earlier
         start, when its directory is free again, the directory itself (scratch.py). Returns the savanna_NNN
         given (job -> directory)."""
-        wanting = {j: js for j, js in jobstars.items()
-                   if scratch.wants_scratch(js.options.get(scratch.SCRATCH_KEY, "")) and not scratch.queued(js.options)}
+        wanting = {j: js for j, js in jobstars.items() if not scratch.left_alone(js.options)}
         if not wanting:
             return {}
         p = Pipeline.read(self.project_dir)

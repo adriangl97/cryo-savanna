@@ -17,7 +17,9 @@ Only then does the job get a subdirectory savanna_NNN of it, with a random 3-dig
 and that is not on disk already; when ps cannot be read, the directory counts as in use. Otherwise the job
 keeps the directory as chosen (a savanna_NNN left in its job.star is taken off again). RELION creates the
 directories itself (mkdir -p) when the job starts. A job sent to a queue (Slurm) is left as it is: it gets
-a scratch disk of its node. Jobs on other machines that share the directory cannot be seen.
+a scratch disk of its node. So is one with --reuse_scratch or --keep_scratch in its additional arguments: the
+copies it reuses, or keeps for the next job, are in the directory as chosen. Jobs on other machines that share
+the directory cannot be seen.
 """
 
 from __future__ import annotations
@@ -37,6 +39,8 @@ ENV_VAR = "RELION_SCRATCH_DIR"  # its default (RELION's), or cryo-savanna's Pref
 PREFIX = "savanna_"
 _SUFFIX = re.compile(r"/+" + PREFIX + r"(?P<num>\d{3})/*$")
 _OWN_NAME = re.compile(PREFIX + r"\d{3}")
+EXTRA_ARGS = "other_args"  # "Additional arguments"
+_KEEP_ARGS = {"--reuse_scratch", "--keep_scratch"}
 # a program's --scratch_dir (RELION writes it unquoted; a shell running the job's command may have quotes)
 _SCRATCH_ARG = re.compile(r"--scratch_dir(?:=|\s+)(?P<q>['\"]?)(?P<dir>[^\s'\"]+)(?P=q)")
 
@@ -83,6 +87,17 @@ def queued(options: Mapping[str, str]) -> bool:
     return (options.get("do_queue") or "").strip() == "Yes"
 
 
+def keeps_its_copies(options: Mapping[str, str]) -> bool:
+    """Told to reuse the copies on scratch (--reuse_scratch) or to keep them for a next job (--keep_scratch), in
+    its additional arguments: they must be in the directory as chosen."""
+    return bool(_KEEP_ARGS & set((options.get(EXTRA_ARGS) or "").split()))
+
+
+def left_alone(options: Mapping[str, str]) -> bool:
+    """A job whose scratch directory is never changed: no scratch, sent to a queue, or reusing/keeping copies."""
+    return not wants_scratch(options.get(SCRATCH_KEY, "")) or queued(options) or keeps_its_copies(options)
+
+
 def normalized(path: str, project_dir: str | os.PathLike) -> str:
     """A scratch directory as a path to compare (~ expanded, relative to the project, symlinks followed)."""
     p = os.path.expanduser(path.strip())
@@ -127,10 +142,10 @@ def settle(options: dict[str, str], project_dir: str | os.PathLike, use: InUse,
            exists: Callable[[str], bool] = os.path.exists, rng: random.Random | None = None) -> str | None:
     """When a job starts: its scratch directory, in ``options``. The one chosen when no other job uses it, else
     a savanna_NNN of it (the job's own from before, if that is free). Returns the savanna_NNN given, None when it
-    has none (no scratch, sent to a queue: left as it is)."""
-    path = options.get(SCRATCH_KEY, "")
-    if not wants_scratch(path) or queued(options):
+    has none (left_alone: left as it is)."""
+    if left_alone(options):
         return None
+    path = options[SCRATCH_KEY]
     base = base_dir(path.strip())
     if not use.unknown and normalized(base, project_dir) not in use.dirs:
         options[SCRATCH_KEY] = base

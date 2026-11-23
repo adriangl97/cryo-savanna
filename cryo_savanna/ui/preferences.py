@@ -187,8 +187,9 @@ class PreferencesDialog(QDialog):
             "RELION job, it copies its particles to <directory>/savanna_NNN instead (a random 3-digit number), so "
             "the two never wipe each other's relion_volatile/. In use: a process of this machine (any user, any "
             "project, also RELION's own GUI) has it as its --scratch_dir, or a job of this project that runs here, "
-            "or waits to, has it. Checked when the job starts, also a scheduled or continued one. Otherwise the "
-            "directory as typed. Jobs on other machines sharing the directory are not seen. RELION removes only "
+            "or waits to, has it. Checked when the job starts, also a scheduled or continued one. Otherwise, and "
+            "for jobs with --reuse_scratch or --keep_scratch in their additional arguments, the directory as "
+            "typed. Jobs on other machines sharing the directory are not seen. RELION removes only "
             "relion_volatile/ of a job that finishes well: the copies of failed or aborted jobs stay until you "
             "delete them. Off: always the directory as typed, as in RELION's own GUI.")
         wipe = QPushButton("Wipe savanna folders…")
