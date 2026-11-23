@@ -402,7 +402,7 @@ class MainWindow(QMainWindow):
         apply_environment(s)
         apply_relion_defaults(s, self.env)
         self._pipeliner_exe = self.env.which("relion_pipeliner")
-        self.actions.editor.own_scratch = setting(s, "scratch_own")
+        self.actions.set_own_scratch(setting(s, "scratch_own"))
         self.actions.set_gpu_queue(setting(s, "gpu_queue"))
         self.actions.auto_continue = setting(s, "auto_continue")
         self.actions.editor.refresh_defaults()  # an open editor shows the new scratch directory
@@ -852,7 +852,7 @@ class MainWindow(QMainWindow):
         if s.value("editor_geometry"):  # and its own window
             self.actions.editor_window.placed = self.actions.editor_window.restoreGeometry(s.value("editor_geometry"))
         self.actions.set_editor_place(setting(s, "editor"))
-        self.actions.editor.own_scratch = setting(s, "scratch_own")
+        self.actions.set_own_scratch(setting(s, "scratch_own"))
         self.actions.set_gpu_queue(setting(s, "gpu_queue"))
         self.actions.auto_continue = setting(s, "auto_continue")
         self.actions.hide_editor()

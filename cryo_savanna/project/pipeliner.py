@@ -37,7 +37,7 @@ from pathlib import Path
 
 from cryo_savanna.env.child import external_environ
 from cryo_savanna.jobdefs import external_jobs
-from cryo_savanna.project import processes, references
+from cryo_savanna.project import processes, references, scratch
 from cryo_savanna.project.gpu_queue import GpuQueue, is_waiting
 from cryo_savanna.project.jobstar import JobStar
 from cryo_savanna.project.lock import PipelineLock
@@ -72,6 +72,7 @@ class RunRecord:
     repeat: int = 1
     log: str = ""  # relative to the project
     gpus: list[str] = field(default_factory=list)  # the GPUs of this machine it waits for and keeps (gpu_queue.py)
+    scratch: dict[str, str] = field(default_factory=dict)  # job -> the savanna_NNN it was given (scratch.py)
 
     def is_alive(self) -> bool | None:
         """True/False on the host that started it; None elsewhere (cannot tell)."""
@@ -156,6 +157,8 @@ class Pipeliner:
         self.environ = environ if environ is not None else external_environ()
         self._records: dict[str, RunRecord] = {}  # run record file -> its record (see runs)
         self.gpu_queue: GpuQueue | None = None  # runs that use GPUs here wait for them (Preferences; gpu_queue.py)
+        # a job starting with a scratch directory another job uses gets a savanna_NNN of it (Preferences; scratch.py)
+        self.own_scratch = False
 
     @property
     def available(self) -> bool:
@@ -342,20 +345,21 @@ class Pipeliner:
         if not jobs:
             raise PipelinerError("no jobs to run")
         self._check_free(jobs)
-        jobstars = []
+        jobstars: dict[str, JobStar] = {}
         for job in jobs:  # scheduled earlier, perhaps by another cryo-savanna (or the project's copy was removed)
             try:
                 js = JobStar.read(self.project_dir / job / "job.star")
             except (OSError, ValueError, KeyError):
                 continue
-            jobstars.append(js)
+            jobstars[job] = js
             self._runner_for(js)
+        own = self._own_scratch(jobstars) if self.own_scratch else {}
         rid = time.strftime("%Y%m%d-%H%M%S-") + uuid.uuid4().hex[:6]
         schedule = SCHEDULE if repeat <= 1 else f"{SCHEDULE}_{rid}"
         cmd = [self._require(), "--RunJobs", " ".join(jobs), "--schedule", schedule, "--repeat", str(repeat),
                "--min_wait", str(min_wait), "--min_wait_before", str(min_wait_before),
                "--sec_wait_after", str(sec_wait_after)]
-        gpus = self.gpu_queue.gpus_of(jobstars, self.environ) if self.gpu_queue is not None else []
+        gpus = self.gpu_queue.gpus_of(list(jobstars.values()), self.environ) if self.gpu_queue is not None else []
         if gpus and self.gpu_queue is not None:  # waits for them, then becomes the relion_pipeliner
             label = f"{', '.join(j.rstrip('/') for j in jobs)} in {self.project_dir} ({_user()})"
             cmd = self.gpu_queue.command(cmd, gpus, label)
@@ -365,7 +369,7 @@ class Pipeliner:
             proc = subprocess.Popen(cmd, cwd=self.project_dir, env=self.environ, stdin=subprocess.DEVNULL, stdout=out,
                                     stderr=subprocess.STDOUT, start_new_session=True, close_fds=True)
         rec = RunRecord(rid, list(jobs), schedule, proc.pid, socket.gethostname(), _user(), time.time(), cmd, repeat,
-                        str(log.relative_to(self.project_dir)), gpus)
+                        str(log.relative_to(self.project_dir)), gpus, own)
         tmp = runs / f"{rid}.json.tmp"  # complete or absent: runs() reads each record only once
         tmp.write_text(json.dumps(asdict(rec), indent=1))
         os.replace(tmp, runs / f"{rid}.json")
@@ -397,6 +401,35 @@ class Pipeliner:
                 raise PipelinerError(f"{e}" + (f"\n\nOverwritten before this, now scheduled (not run): {left}" if left
                                                else "")) from e
         return done, self.run(done)
+
+    def _own_scratch(self, jobstars: dict[str, JobStar]) -> dict[str, str]:
+        """Before these jobs start: each scratch directory another job uses now becomes a savanna_NNN of it, in
+        the job's job.star (relion_pipeliner makes the job's command from it), and one left from an earlier
+        start, when its directory is free again, the directory itself (scratch.py). Returns the savanna_NNN
+        given (job -> directory)."""
+        wanting = {j: js for j, js in jobstars.items()
+                   if scratch.wants_scratch(js.options.get(scratch.SCRATCH_KEY, "")) and not scratch.queued(js.options)}
+        if not wanting:
+            return {}
+        p = Pipeline.read(self.project_dir)
+        others = ({n for n, pr in p.processes.items() if pr.status == STATUS_RUNNING} | set(self.held_jobs(p))) \
+            - set(jobstars)  # those of this start run one after the other (and are checked below)
+        options = []
+        for job in sorted(others):
+            try:
+                options.append(JobStar.read(self.project_dir / job / "job.star").options)
+            except (OSError, ValueError, KeyError):
+                continue
+        use = scratch.in_use(self.project_dir, options)
+        out: dict[str, str] = {}
+        for job, js in wanting.items():
+            before = js.options[scratch.SCRATCH_KEY]
+            given = scratch.settle(js.options, self.project_dir, use)
+            if js.options[scratch.SCRATCH_KEY] != before:
+                js.write(self.project_dir / job / "job.star")
+            if given:
+                out[job] = given
+        return out
 
     def continue_job(self, job: str, jobstar: JobStar, **run_args) -> RunRecord:
         """Continue an existing job with these (continue-mode) options."""

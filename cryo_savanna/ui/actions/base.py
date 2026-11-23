@@ -179,6 +179,7 @@ class ActionsBase(QObject):
         self.project_dir = Path(project_dir)
         self.pipeliner = Pipeliner(project_dir)
         self.pipeliner.gpu_queue = GpuQueue() if self.gpu_queue_on else None
+        self.pipeliner.own_scratch = self.editor.own_scratch
         self.ops = PipelineOps(project_dir)
         self.staleness = StalenessChecker(project_dir)
         self.stale = {}
@@ -271,6 +272,13 @@ class ActionsBase(QObject):
         self.gpu_queue_on = on
         if self.pipeliner is not None:
             self.pipeliner.gpu_queue = GpuQueue() if on else None
+
+    def set_own_scratch(self, on: bool) -> None:
+        """Preferences → a subdirectory of its own when the scratch directory is in use (project/scratch.py):
+        decided when a job starts (Pipeliner.run)."""
+        self.editor.own_scratch = on
+        if self.pipeliner is not None:
+            self.pipeliner.own_scratch = on
 
     def set_slurm(self, monitor) -> None:
         self.slurm, self.queue = monitor, None

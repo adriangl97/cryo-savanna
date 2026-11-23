@@ -551,15 +551,22 @@ at their time limit are continued from their last iteration, at most 3 times per
 The default of "Copy particles to scratch directory" for new jobs, as `$RELION_SCRATCH_DIR` would
 set it. A `$RELION_SCRATCH_DIR` set in the shell wins over this preference.
 
-### Scratch subdirectory of its own for each job
+### Scratch subdirectory of its own when the directory is in use
 
-Off by default: the directory is used as typed, as in RELION's GUI. If set to on, every job started
-or scheduled with a scratch directory (new, cloned or overwritten) gets a subdirectory of its own in
-it, `savanna_NNN`, with a random 3-digit number that no other job of the project uses and that is
-not on disk yet. RELION wipes `<scratch>/relion_volatile/` when a job starts and ends, so jobs
-sharing one directory would destroy each other's copies. This can lead to an accidental crash of a
-job if you run two at the same time sharing a scratch folder. This setting avoids that. Continuing a
-job keeps its directory.
+Off by default: the directory is used as typed, as in RELION's GUI. RELION wipes
+`<scratch>/relion_volatile/` when a job starts and ends, so two jobs running at the same time with
+one scratch directory destroy each other's copies, and one of them can crash. If set to on, a job
+gets a subdirectory of its own, `savanna_NNN` (a random 3-digit number not on disk yet and not used
+by another running job), only when its scratch directory is already in use. Otherwise it uses the
+directory as typed.
+
+The directory counts as in use when:
+
+- a process on this machine has it as its `--scratch_dir`.
+- a job of this project that runs on this machine has it selected.
+
+This is checked each time a job starts. Jobs submitted to a queue (Slurm) are never changed. The status line says when a
+job got a `savanna_NNN` instead.
 
 The caveat with this is that RELION removes only `relion_volatile/` of a job that finishes ok, so
 the copies of failed, aborted or killed jobs stay until you delete them (with one shared directory,

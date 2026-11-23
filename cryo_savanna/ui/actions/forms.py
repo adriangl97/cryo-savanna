@@ -25,7 +25,7 @@ from cryo_savanna.project.pipeline import Pipeline
 from cryo_savanna.project.pipeliner import PipelinerError
 from cryo_savanna.project.scratch import ENV_VAR as SCRATCH_VAR
 from cryo_savanna.project.scratch import SCRATCH_KEY
-from cryo_savanna.project.scratch import assign as assign_scratch
+from cryo_savanna.project.scratch import base_dir as scratch_base_dir
 from cryo_savanna.project.selection import interactive_kind
 from cryo_savanna.ui.job_editor import MODE_CONTINUE, MODE_OVERWRITE
 
@@ -225,13 +225,9 @@ class FormActions(_Base):
         if QMessageBox.question(self.window, "Overwrite", ask) != QMessageBox.Yes:
             return
 
-        scratch: list[str | None] = [None]  # the job's own scratch directory, once given
-        own_scratch = self.editor.own_scratch
         refs = self.editor.reference_maps()  # several reference maps: their list goes in the job's directory
 
         def overwrite_and_run():
-            if own_scratch:
-                scratch[0] = self._own_scratch(js, p)
             res = pl.overwrite_job(job, js, alias or None, refs)
             rec = None if schedule_only else pl.run([res.job])
             return res, rec
@@ -243,26 +239,13 @@ class FormActions(_Base):
             self.select.emit(res.job)
             verb = "scheduled" if rec is None else "started"
             text = f"{res.job.rstrip('/')} overwritten and {verb}." + (" " + " ".join(res.warnings) if res.warnings else "")
-            if scratch[0]:
-                text += f" Scratch directory: {scratch[0]}"
+            text += _scratch_note(rec)
             if rec is None:
                 self.editor.status.setText(text)
             else:
                 self._started(edit, text)
 
         self._run(f"Overwrite {self._label(job)}", overwrite_and_run, done)
-
-    def _own_scratch(self, js: JobStar, pipeline: Pipeline | None) -> str | None:
-        """Before a job is added (in the worker: it reads the project's job.star files): its scratch
-        directory becomes a savanna_NNN of its own, so no two jobs wipe each other's relion_volatile/.
-        Only with Preferences → "A subdirectory of its own for each job" (editor.own_scratch)."""
-        labels = {v.label for v in self.defs.variants.values() if SCRATCH_KEY in v.options}
-        project = self._ready()[0]
-        try:
-            pipeline = Pipeline.read(project)  # with jobs added since the last snapshot
-        except (OSError, ValueError, KeyError):
-            pass
-        return assign_scratch(js.options, project, pipeline, labels)
 
     def _check_values(self, variant: JobVariant | None, v: dict[str, str]) -> tuple[str, str] | None:
         """(title, what is wrong) when these options of this form cannot be submitted, else None: what RELION
@@ -316,7 +299,7 @@ class FormActions(_Base):
                 return
             edit = self._edits
             self._run(f"Continue {self._label(job)}", lambda: pl.continue_job(job, js),
-                      lambda _: self._started(edit, f"{job.rstrip('/')} continued."))
+                      lambda rec: self._started(edit, f"{job.rstrip('/')} continued." + _scratch_note(rec)))
             return
         if alias and self.snapshot is not None and self.editor.variant is not None:  # --setJobAlias checks again
             try:
@@ -331,13 +314,9 @@ class FormActions(_Base):
         project = self._ready()[0]
         pipeline = self.editor.pipeline
 
-        scratch: list[str | None] = [None]  # the job's own scratch directory, once given
-        own_scratch = self.editor.own_scratch
         refs = self.editor.reference_maps()  # several reference maps: their list goes in the job's directory
 
         def add_and_run():
-            if own_scratch:
-                scratch[0] = self._own_scratch(js, pipeline)
             res = pl.add_job(js, alias or None, refs)
             if cli is not None and res.job != predicted:  # outputs must go to its own directory
                 cli.make_jobstar(values, False, res.job, pipeline).write(project / res.job / "job.star")
@@ -351,8 +330,7 @@ class FormActions(_Base):
             self.select.emit(res.job)
             verb = "scheduled" if rec is None else "started"
             text = f"{res.job.rstrip('/')} {verb}." + (" " + " ".join(res.warnings) if res.warnings else "")
-            if scratch[0]:
-                text += f" Scratch directory: {scratch[0]}"
+            text += _scratch_note(rec)
             if rec is None:  # scheduled: kept open, to schedule the next job from it
                 self.editor.status.setText(text)
             else:
@@ -381,15 +359,12 @@ class FormActions(_Base):
                     return
         cli = variant if isinstance(variant, CliVariant) else None  # its outputs go to the job's directory
         pipeline = self.editor.pipeline
-        own_scratch = self.editor.own_scratch
         refs = self.editor.reference_maps()  # several reference maps: each job gets its own list of them
 
         def add_and_run():
             added: list[str] = []
             try:
                 for js, alias, values in jobs:
-                    if own_scratch:
-                        self._own_scratch(js, pipeline)
                     own_refs = refs if references.is_list_path(js.options.get(references.KEY, "")) else None
                     res = pl.add_job(js, alias or None, own_refs)
                     if cli is not None:  # outputs must go to its own directory (the one guessed may be taken)
@@ -436,3 +411,9 @@ def _newest_inputs(pipeline: Pipeline, kind: str) -> dict[str, str]:
         if kind == PYTOM_MATCH and n.kind == "TomogramGroupMetadata" and name.endswith("tomograms.star"):
             return {"in_tomograms": name}
     return {}
+
+
+def _scratch_note(rec) -> str:
+    """For the status line: the savanna_NNN a job got when it started (its scratch directory was in use)."""
+    given = getattr(rec, "scratch", None) or {}
+    return "".join(f" {scratch_base_dir(d)} is in use by another job: scratch directory {d}." for d in given.values())

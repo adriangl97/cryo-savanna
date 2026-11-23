@@ -45,7 +45,7 @@ DEFAULTS = {
     "theme": "light",  # colours of the window: light or dark (style.THEMES; a saved "system" is light)
     "editor": "window",  # where the job editor opens (EDITOR_PLACES)
     "scratch_dir": "",  # default "Copy particles to scratch directory" of new jobs (as $RELION_SCRATCH_DIR)
-    "scratch_own": False,  # each job a savanna_NNN subdirectory of its scratch directory (off: as RELION's GUI)
+    "scratch_own": False,  # a savanna_NNN subdirectory when another job uses the scratch directory (off: as RELION's GUI)
     "gpu_queue": True,  # runs of jobs that use GPUs of this machine wait until those GPUs are free
     "auto_continue": False,  # relion_refine jobs that hit the SLURM time limit are continued from their last iteration
 }
@@ -180,14 +180,17 @@ class PreferencesDialog(QDialog):
         holder = QWidget()
         holder.setLayout(row)
         form.addRow("Scratch directory", holder)
-        self.scratch_own = QCheckBox("A subdirectory of its own for each job (savanna_NNN)")
+        self.scratch_own = QCheckBox("A subdirectory of its own when the directory is in use (savanna_NNN)")
         self.scratch_own.setChecked(setting(settings, "scratch_own"))
         self.scratch_own.setToolTip(
-            "Each job started with a scratch directory copies its particles to <directory>/savanna_NNN, with a "
-            "random 3-digit number no other job of the project uses, so jobs sharing a scratch disk never wipe "
-            "each other's relion_volatile/. RELION removes only relion_volatile/ of a job that finishes well: "
-            "the copies of failed or aborted jobs stay until you delete them. Off: the directory as typed, as "
-            "in RELION's own GUI.")
+            "When a job runs on this machine (not in a Slurm queue) and its scratch directory is in use by another "
+            "RELION job, it copies its particles to <directory>/savanna_NNN instead (a random 3-digit number), so "
+            "the two never wipe each other's relion_volatile/. In use: a process of this machine (any user, any "
+            "project, also RELION's own GUI) has it as its --scratch_dir, or a job of this project that runs here, "
+            "or waits to, has it. Checked when the job starts, also a scheduled or continued one. Otherwise the "
+            "directory as typed. Jobs on other machines sharing the directory are not seen. RELION removes only "
+            "relion_volatile/ of a job that finishes well: the copies of failed or aborted jobs stay until you "
+            "delete them. Off: always the directory as typed, as in RELION's own GUI.")
         wipe = QPushButton("Wipe savanna folders…")
         wipe.setToolTip("Delete every savanna_NNN folder directly in the scratch directory, after showing them. "
                         "Jobs running with their scratch in one of them will crash.")
