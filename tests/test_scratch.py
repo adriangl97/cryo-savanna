@@ -68,9 +68,16 @@ def test_the_scratch_directories_of_this_machines_processes_are_found(tmp_path):
 def test_jobs_without_scratch_or_sent_to_a_queue_are_left_as_they_are(tmp_path):
     busy = InUse(unknown=True)
     for opts in ({SCRATCH_KEY: ""}, {SCRATCH_KEY: "  "}, {SCRATCH_KEY: "$$scratch"}, {},
-                 {SCRATCH_KEY: "/ssd", "do_queue": "Yes"}, {SCRATCH_KEY: "/ssd/savanna_007", "do_queue": "Yes"}):
+                 {SCRATCH_KEY: "/ssd", "do_queue": "Yes"}, {SCRATCH_KEY: "/ssd/savanna_007", "do_queue": "Yes"},
+                 {SCRATCH_KEY: "/ssd", "other_args": "--reuse_scratch"},
+                 {SCRATCH_KEY: "/ssd/savanna_007", "other_args": "--pad 1 --keep_scratch --dont_combine_weights_via_disc"}):
         before = dict(opts)
         assert settle(opts, tmp_path, busy) is None and opts == before
+
+
+def test_only_those_flags_leave_it_alone(tmp_path):
+    for args in ("--reuse_scratch_dir", "--no_keep_scratch", "--keep_free_scratch 10", ""):
+        assert settle({SCRATCH_KEY: "/ssd", "other_args": args}, tmp_path, InUse(unknown=True), exists=lambda d: False)
 
 
 def test_a_free_directory_is_used_as_chosen(tmp_path):
@@ -132,6 +139,11 @@ def test_jobs_get_their_scratch_directory_when_they_start(spa_copy, monkeypatch)
             assert JobStar.read(spa_copy / job / "job.star").options[SCRATCH_KEY] == want
         queued = {"Class3D/job009/": set_scratch("Class3D/job009/", "/ssd/a", queue="Yes")}
         assert pl._own_scratch(queued) == {}
+        assert JobStar.read(spa_copy / "Class3D/job009/job.star").options[SCRATCH_KEY] == "/ssd/a"
+        reusing = set_scratch("Class3D/job009/", "/ssd/a")
+        reusing.options["other_args"] = "--reuse_scratch"
+        reusing.write(spa_copy / "Class3D/job009/job.star")
+        assert pl._own_scratch({"Class3D/job009/": reusing}) == {}
         assert JobStar.read(spa_copy / "Class3D/job009/job.star").options[SCRATCH_KEY] == "/ssd/a"
     finally:
         proc.kill()

@@ -613,7 +613,8 @@ The directory counts as in use when:
 - a process on this machine has it as its `--scratch_dir`.
 - a job of this project that runs on this machine has it selected.
 
-This is checked each time a job starts. Jobs submitted to a queue (Slurm) are never changed. The status line says when a
+This is checked each time a job starts. Jobs submitted to a queue (Slurm) are never changed, nor
+are jobs with `--reuse_scratch` or `--keep_scratch` in their additional arguments. The status line says when a
 job got a `savanna_NNN` instead.
 
 The caveat with this is that RELION removes only `relion_volatile/` of a job that finishes ok, so
