@@ -43,6 +43,9 @@ dose of each image), and runs AreTomo3 on it, one tilt series per GPU at a time:
   files (written into an .aln for AreTomo3; the local alignment of an earlier AreTomo3 job is kept
   when the tilts are still the same), with their CTF values (as a _CTF.txt).
 
+"Reconstruct tomograms?" No (with "Align with AreTomo3" only): AreTomo3 aligns without reconstructing
+(-VolZ 0), and the job writes aligned_tilt_series.star but no tomograms.star.
+
 AreTomo3's tomograms (aretomo/<name>/<name>_Vol.mrc, _EVN_Vol / _ODD_Vol for the halves) are listed
 in tomograms.star (rlnTomoReconstructedTomogram, Half1/2, rlnTomoSize[XYZ], rlnTomoTomogramBinning)
 for cryo-savanna's tomogram viewer and template matching. aretomo3.star has one row per tilt series
@@ -408,6 +411,11 @@ def write_tlt(path, angles, acq, dose):
 
 # ---------------------------------------------------------------------------- one tilt series
 
+def reconstruct(opts):
+    """Whether AreTomo3 reconstructs tomograms ("Reconstruct tomograms?"; jobs from before the option: yes)."""
+    return opts.get("do_recon", "Yes") != "No"
+
+
 def _paths(job_dir, name):
     inp, out = os.path.join(job_dir, INPUTS_DIR, name), os.path.join(job_dir, OUT_DIR, name)
     return {"in": inp, "out": out, "stack": os.path.join(inp, name + ".mrc"),
@@ -437,7 +445,7 @@ def prepare(row, opts, job_dir):
         if not os.path.isfile(p):
             raise Usage("%s: tilt image not found: %s" % (name, p))
     halves = None
-    if yes(opts, "do_halves"):
+    if yes(opts, "do_halves") and reconstruct(opts):
         if EVEN not in columns or ODD not in columns:
             raise Usage("%s: no %s / %s in its STAR file (MotionCorr's 'Save images for denoising?'), or "
                         "switch off 'Odd/even tomograms'" % (name, EVEN, ODD))
@@ -605,6 +613,10 @@ def aretomo_command(opts, ts, gpu):
         phase = _pair_words(opts, "ext_phase", "Phase shift and search range", 2)
         if phase:
             cmd += ["-ExtPhase"] + phase
+    if not reconstruct(opts):  # alignment only: -VolZ 0, no tomogram
+        cmd += ["-VolZ", "0", "-AtBin"] + binnings(opts)
+        _check_lengths(ts)
+        return cmd + words(opts, "aretomo_args")
     vol_z = number(opts, "vol_z", int, what="Tomogram thickness")
     cmd += ["-VolZ", str(vol_z if vol_z else -1)]
     ext = number(opts, "ext_z", int, what="Extra thickness")
@@ -626,10 +638,14 @@ def aretomo_command(opts, ts, gpu):
     cmd += ["-FlipVol", FLIP_VOL.get(text(opts, "flip_vol"), "1")]
     if yes(opts, "flip_int"):
         cmd += ["-FlipInt", "1"]
-    for path in (p["stack"], p["out"]):
+    _check_lengths(ts)
+    return cmd + words(opts, "aretomo_args")
+
+
+def _check_lengths(ts):
+    for path in (ts["paths"]["stack"], ts["paths"]["out"]):
         if len(path) > 200:
             raise Usage("%s: AreTomo3 keeps file names in 256 characters: %s is too long" % (ts["name"], path))
-    return cmd + words(opts, "aretomo_args")
 
 
 def collect(ts, opts):
@@ -778,6 +794,8 @@ def write_tables(job_dir, opts, columns, rows, state):
     if not use_input:
         cols = base + [COL_ALN]
         C.write_star(os.path.join(job_dir, ALIGNED), [("global", None, cols, rows_of(cols, False))])
+    if not reconstruct(opts):
+        return
     halves = any("rlnTomoReconstructedTomogramHalf1" in state[r[TOMO_NAME]].get("tomo", {}) for r in done)
     cols = base + [COL_ALN, "rlnTomoReconstructedTomogram", "rlnTomoSizeX", "rlnTomoSizeY", "rlnTomoSizeZ",
                    "rlnTomoTomogramBinning"]
@@ -803,6 +821,8 @@ def picking_warnings(opts):
     """Settings whose tomograms are not in RELION's frame: particles picked in them (e.g. by template
     matching) may land in the wrong place when RELION extracts subtomograms from the aligned tilt series."""
     out = []
+    if not reconstruct(opts):
+        return out
     if FLIP_VOL.get(text(opts, "flip_vol"), "1") == "2":
         out.append("-FlipVol 2: the tomograms are flipped in z relative to RELION's reconstructions of the "
                    "aligned tilt series; do not pick particles in them for RELION (use -FlipVol 1)")
@@ -823,6 +843,10 @@ def run_align(sup, job_dir, threads, opts):
     for w in picking_warnings(opts):
         say("WARNING: " + w)
     use_input = text(opts, "alignment") == ALIGN_INPUT
+    recon = reconstruct(opts)
+    if use_input and not recon:
+        raise Usage("'Use the alignment of the input' only reconstructs: set 'Reconstruct tomograms?' to Yes, or "
+                    "align with AreTomo3")
     # the -AlignZ each tilt series was aligned with; for a job of an older cryo-savanna (no such column),
     # the job's own: only those given another one since are aligned again
     before = previous_align_z(job_dir)
@@ -835,14 +859,15 @@ def run_align(sup, job_dir, threads, opts):
         aretomo_command(opts, ts, 0)  # checks the options
         used = before.get(name) if before is not None else align_z(opts)
         state[name] = {"status": "pending", "log": _rel(p["log"]), "star": p["star"], "align_z": used}
-        if yes(opts, "skip_done") and os.path.isfile(p["vol"]) and (use_input or os.path.isfile(p["aln"])):
+        if yes(opts, "skip_done") and (os.path.isfile(p["vol"]) or not recon) and (use_input or os.path.isfile(p["aln"])):
             want = align_z(opts, name)
             if not use_input and used != want:
                 say("%s: alignment thickness %s, aligned with %s: aligning it again"
                     % (name, want or "measured", "unknown" if used is None else used or "measured"))
                 continue
             try:
-                state[name].update({"info": collect(ts, opts), "tomo": tomogram_values(ts, opts), "status": "done"})
+                state[name].update({"info": collect(ts, opts), "tomo": tomogram_values(ts, opts) if recon else {},
+                                    "status": "done"})
                 say("%s: already done, skipped" % name)
             except Usage as e:
                 say("%s: done before, but %s: running it again" % (name, e))
@@ -875,7 +900,7 @@ def run_align(sup, job_dir, threads, opts):
                     raise Usage("%s: AreTomo3 exited with %s (log: %s)" % (name, rc, s["log"]))
                 try:
                     s["info"] = collect(ts, opts)
-                    s["tomo"] = tomogram_values(ts, opts)
+                    s["tomo"] = tomogram_values(ts, opts) if recon else {}
                 except Usage:
                     C._show_tail(s["log"])
                     raise
@@ -904,7 +929,9 @@ def run_align(sup, job_dir, threads, opts):
     if failed:
         raise Usage("%d tilt series failed: %s. Continue the job to run only those again."
                     % (len(failed), " ".join(failed)))
-    nodes = [(os.path.join(job_dir, TOMOGRAMS), NODE_TOMOGRAMS), (os.path.join(job_dir, SUMMARY), NODE_SUMMARY)]
+    nodes = [(os.path.join(job_dir, SUMMARY), NODE_SUMMARY)]
+    if recon:
+        nodes.insert(0, (os.path.join(job_dir, TOMOGRAMS), NODE_TOMOGRAMS))
     if not use_input:
         nodes.insert(0, (os.path.join(job_dir, ALIGNED), NODE_ALIGNED))
     return nodes
