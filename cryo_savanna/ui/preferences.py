@@ -33,6 +33,7 @@ from qtpy.QtWidgets import (
 from cryo_savanna.env.relion_env import RelionEnv
 from cryo_savanna.images.cache import cache_root, cache_size_mb, clear_cache
 from cryo_savanna.project import scratch
+from cryo_savanna.project.gpu_queue import cpu_threads
 from cryo_savanna.ui.busy import run_busy, when_done
 from cryo_savanna.ui.style import THEMES
 
@@ -47,6 +48,9 @@ DEFAULTS = {
     "scratch_dir": "",  # default "Copy particles to scratch directory" of new jobs (as $RELION_SCRATCH_DIR)
     "scratch_own": False,  # a savanna_NNN subdirectory when another job uses the scratch directory (off: as RELION's GUI)
     "gpu_queue": True,  # runs of jobs that use GPUs of this machine wait until those GPUs are free
+    "thread_queue": True,  # runs of jobs that compute here wait until enough of this machine's threads are free
+    "thread_limit": 0,  # the threads RELION jobs may take on this machine (0: all its logical CPUs)
+    "show_usage": True,  # the status bar shows the threads and GPUs RELION jobs use on this machine
     "auto_continue": False,  # relion_refine jobs that hit the SLURM time limit are continued from their last iteration
 }
 
@@ -91,6 +95,11 @@ def setting(settings: QSettings, key: str):
 
 
 _set_here: str | None = None  # the CRYO_SAVANNA_CHIMERAX value these preferences put in the environment
+
+
+def thread_limit(settings: QSettings) -> int:
+    """The thread queue's limit on this machine: the preference, else (0) its logical CPUs."""
+    return setting(settings, "thread_limit") or cpu_threads()
 
 
 def apply_environment(settings: QSettings) -> None:
@@ -213,6 +222,44 @@ class PreferencesDialog(QDialog):
             "starting on the same GPUs and running out of their memory. A waiting run shows as \"waiting for a GPU\" "
             "and can be stopped with Job → Stop runs…. It keeps waiting when cryo-savanna is closed.")
         form.addRow("Local GPU queue", self.gpu_queue)
+        self.thread_queue = QCheckBox("Runs on this machine wait until enough threads are free")
+        self.thread_queue.setChecked(setting(settings, "thread_queue"))
+        self.thread_queue.setToolTip(
+            "Jobs that run on this machine (not sent to a queue) and have 'Number of MPI procs' or 'Number of "
+            "threads' take MPI procs × threads of the limit; a run of several jobs takes what its biggest job takes. "
+            "Started while too few are free, they wait. In use: what runs of cryo-savanna (of anyone on the machine) "
+            "took, and the threads of RELION jobs started without it (RELION's own GUI, other projects), from their "
+            "command lines (--j and MPI ranks). Jobs with neither option (Import, Subset selection…) never wait. A "
+            "job asking for more than the limit waits until no RELION job runs here, then starts alone, "
+            "oversubscribing the machine (you are warned). A waiting run shows as \"waiting for threads\" and can be "
+            "stopped with Job → Stop runs…. It keeps waiting when cryo-savanna is closed.")
+        self.thread_limit = QSpinBox()
+        self.thread_limit.setRange(0, 100_000)
+        self.thread_limit.setSpecialValueText(f"all logical CPUs ({cpu_threads()} here)")
+        self.thread_limit.setSuffix(" threads")
+        self.thread_limit.setValue(setting(settings, "thread_limit"))
+        self.thread_limit.setToolTip("How many threads RELION jobs may take on this machine together. 0: all its "
+                                     "logical CPUs (counted on each machine cryo-savanna runs on). Lower it to keep "
+                                     "cores free for other work.")
+        self.thread_limit.setEnabled(self.thread_queue.isChecked())
+        self.thread_queue.toggled.connect(self.thread_limit.setEnabled)
+        row = QHBoxLayout()
+        row.addWidget(self.thread_queue)
+        row.addStretch(1)
+        row.addWidget(QLabel("Limit"))
+        row.addWidget(self.thread_limit)
+        row.setContentsMargins(0, 0, 0, 0)
+        holder = QWidget()
+        holder.setLayout(row)
+        form.addRow("Local thread queue", holder)
+        self.show_usage = QCheckBox("Show the threads and GPUs RELION jobs use, and the RAM in use, on this machine")
+        self.show_usage.setChecked(setting(settings, "show_usage"))
+        self.show_usage.setToolTip(
+            "Next to \"updated HH:MM:SS\" at the bottom of the window: threads in use of the thread queue's limit "
+            "and GPUs in use, by RELION jobs of anyone on this machine (with the local queue or without it), looked "
+            "at every few seconds, and the machine's RAM in use (by every program) of its total. The tooltip says "
+            "which runs hold them.")
+        form.addRow("Status bar", self.show_usage)
         self.auto_continue = QCheckBox("Continue jobs that hit the SLURM time limit")
         self.auto_continue.setChecked(setting(settings, "auto_continue"))
         self.auto_continue.setToolTip(
@@ -289,6 +336,9 @@ class PreferencesDialog(QDialog):
         s.setValue("scratch_dir", self.scratch.text().strip())
         s.setValue("scratch_own", self.scratch_own.isChecked())
         s.setValue("gpu_queue", self.gpu_queue.isChecked())
+        s.setValue("thread_queue", self.thread_queue.isChecked())
+        s.setValue("thread_limit", self.thread_limit.value())
+        s.setValue("show_usage", self.show_usage.isChecked())
         s.setValue("auto_continue", self.auto_continue.isChecked())
         s.setValue("theme", self.theme.currentData())
         s.setValue("editor", self.editor.currentData())

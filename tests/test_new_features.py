@@ -394,6 +394,206 @@ def test_only_relion_jobs_on_a_gpu_make_a_run_wait(monkeypatch):
     assert W.busy_gpus(lambda: table) == {"0", "GPU-a", "2", "GPU-c"}  # not GPU 1: only the notebook is on it
 
 
+# ---------------------------------------------------------------------------- the local thread queue
+def test_the_threads_a_job_takes_on_this_machine():
+    from cryo_savanna.project.gpu_queue import GpuQueue, job_threads
+    assert job_threads(JobStar("relion.class3d", False, False, {"nr_mpi": "3", "nr_threads": "8"})) == 24
+    assert job_threads(JobStar("relion.ctffind", False, False, {"nr_mpi": "4"})) == 4
+    assert job_threads(JobStar("relion.external", False, False, {"nr_threads": "6"})) == 6
+    assert job_threads(JobStar("relion.class3d", False, False, {"nr_mpi": "", "nr_threads": "x"})) == 1
+    assert job_threads(JobStar("relion.class3d", False, False, {"nr_mpi": "3", "nr_threads": "8",
+                                                                "do_queue": "Yes"})) == 0  # sent to a queue
+    assert job_threads(JobStar("relion.import", False, False, {"fn_in_raw": "Movies/*.tiff"})) == 0  # never waits
+    jobs = [JobStar("relion.class2d", False, False, {"nr_mpi": "1", "nr_threads": "4"}),
+            JobStar("relion.class3d", False, False, {"nr_mpi": "2", "nr_threads": "6"})]
+    assert GpuQueue(max_threads=64).threads_of(jobs) == 12  # the biggest: they run one after the other
+    assert GpuQueue().threads_of(jobs) == 0  # the thread queue is off
+    assert GpuQueue(gpus=False, max_threads=64).gpus_of(
+        [JobStar("relion.class3d", False, False, {"use_gpu": "Yes", "gpu_ids": "0"})], {}) == []  # GPU queue off
+    cmd = GpuQueue("/l", max_threads=64).command(["relion_pipeliner"], [], "x", 12)
+    assert "--gpus" not in cmd and cmd[cmd.index("--threads") + 1] == "12" and "64" in cmd
+
+
+def test_the_threads_of_relion_jobs_are_counted_from_their_command_lines():
+    from cryo_savanna import gpu_wait as W
+    table = {
+        10: (1, "/bin/sh -c mpirun -n 4 `which relion_refine_mpi` --o Class3D/job012/run --j 4 >> Class3D/job012/run.out"),
+        11: (10, "mpirun -n 4 relion_refine_mpi --o Class3D/job012/run --j 4"),
+        **{12 + i: (11, "relion_refine_mpi --o Class3D/job012/run --j 4") for i in range(4)},
+        20: (1, "python3 .cryo-savanna/aretomo_runner.py align --o External/job020/ --j 8"),
+        21: (20, "/opt/AreTomo3/AreTomo3 -InPrefix External/job020/aretomo/TS_01"),  # no --j: the runner's 8
+        30: (1, "make -j 16"),  # not RELION
+        31: (1, "python train.py --j 12"),  # not part of a RELION job
+        40: (1, "mpirun -n 3 relion_preprocess_mpi --o Extract/job005/"),
+        **{41 + i: (40, "relion_preprocess_mpi --o Extract/job005/") for i in range(3)},  # one per rank
+        50: (1, "relion_pipeliner --RunJobs Class2D/job007/"),  # a run of the queue: what it holds counts instead
+        51: (50, "relion_refine --o Class2D/job007/run --j 6"),
+    }
+    assert W.relion_threads(table) == 16 + 8 + 3 + 6
+    assert W.relion_threads(table, skip={50}) == 16 + 8 + 3
+
+
+def test_a_run_waits_for_threads_and_a_too_big_one_for_an_idle_machine(tmp_path, capsys):
+    from cryo_savanna import gpu_wait as W
+    locks = str(tmp_path)
+    looks = []
+    running = {10: (1, "relion_refine --o Class2D/job001/run --j 3")}
+
+    def table():  # another RELION job takes 3 of 4 threads for the first two looks
+        looks.append(1)
+        return running if len(looks) <= 2 else {}
+    (tmp_path / "threads-999999.lock").write_text("4 a run that ended (process 999999)\n")  # nobody holds it
+    held = W.wait(locks, [], "big", poll_s=0, threads=2, max_threads=4, table=table)
+    assert len(looks) == 3 and not (tmp_path / "threads-999999.lock").exists()
+    assert "3 of 4 threads in use (3 by other RELION jobs), 2 needed" in capsys.readouterr().out
+    assert [(n, lab) for _, n, lab in W.held_threads(locks)] == [(2, "big (process %d)" % os.getpid())]
+    tracked, untracked, _ = W.threads_in_use(locks, {})
+    assert (tracked, untracked) == (2, 0)
+    fd, why = W.try_threads(locks, 3, 4, "next", lambda: {})  # 2 + 3 > 4: waits
+    assert fd is None and "2 by runs of the queue (big (process" in why
+    for fd in held:
+        os.close(fd)
+    assert W.held_threads(locks) == []  # let go
+    looks.clear()
+    held = W.wait(locks, [], "huge", poll_s=0, threads=8, max_threads=4, table=table)  # more than the limit
+    out = capsys.readouterr().out
+    assert len(looks) == 3 and "more than the limit, so it waits until no RELION job runs" in out
+    assert "WARNING: 8 threads asked for, more than the 4 of the thread queue" in out
+    for fd in held:
+        os.close(fd)
+
+
+def test_two_commands_that_need_most_threads_run_one_after_the_other(tmp_path):
+    import subprocess
+    import sys
+
+    from cryo_savanna.project.gpu_queue import WAITER
+    code = ("import sys, time; open(sys.argv[1], 'a').write('%f start\\n' % time.time()); time.sleep(1.0); "
+            "open(sys.argv[1], 'a').write('%f end\\n' % time.time())")
+    procs = []
+    for name in ("a", "b"):
+        procs.append(subprocess.Popen([sys.executable, "-I", str(WAITER), "--locks", str(tmp_path / "locks"),
+                                       "--threads", "3", "--max-threads", "4", "--label", name, "--",
+                                       sys.executable, "-c", code, str(tmp_path / name)],
+                                      stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True))
+        time.sleep(0.3)
+    outs = [p.communicate(timeout=60)[0] for p in procs]
+    assert all(p.returncode == 0 for p in procs), outs
+    (a0, a1), (b0, b1) = ([float(line.split()[0]) for line in (tmp_path / n).read_text().splitlines()] for n in "ab")
+    assert b0 >= a1 - 0.05  # b started once a had ended and let go of its threads
+    assert "waiting: 3 of 4 threads in use (3 by runs of the queue (a " in outs[1]
+
+
+def test_a_run_waits_for_its_threads_and_one_too_big_is_warned_of(tmp_path, monkeypatch):
+    from cryo_savanna.project.gpu_queue import GpuQueue
+    from cryo_savanna.project.pipeline import Pipeline
+    monkeypatch.setenv("CRYO_SAVANNA_POLL_S", "0.05")
+    project, pl = _fake_project(tmp_path)
+    pl.gpu_queue = GpuQueue(tmp_path / "locks", gpus=False, max_threads=2)
+    long = _external(project)
+    long.options.update({"param1_value": "3", "nr_threads": "2"})
+    a = pl.add_job(long).job
+    b = pl.add_job(_external(project)).job
+    ra = pl.run([a], sec_wait_after=1)
+    deadline = time.time() + 20
+    while Pipeline.read(project).processes[a].status != "Running" and time.time() < deadline:
+        time.sleep(0.1)
+    rb = pl.run([b], sec_wait_after=1)
+    assert (ra.threads, rb.threads, ra.gpus) == (2, 1, []) and not pl.oversubscribed
+    time.sleep(0.5)
+    held = pl.held_jobs()
+    assert held[b].waiting_for_threads and held[b].stoppable and "waiting for 1 thread (the local queue)" in \
+        held[b].describe()
+    assert not held[a].waiting_for_threads
+    _wait(project, [a, b])
+    big = _external(project)
+    big.options["nr_threads"] = "3"
+    c = pl.add_job(big).job
+    rc = pl.run([c], sec_wait_after=1)
+    assert pl.oversubscribed == [rc] and (rc.threads, rc.thread_limit) == (3, 2)
+    _wait(project, [c])
+    assert Pipeline.read(project).processes[c].status == "Succeeded"  # alone on the machine: it ran
+
+
+def test_a_job_relion_starts_in_the_background_is_counted_once(tmp_path):
+    """RELION starts a local job in the background (system("... &")): its processes are no longer under the run that
+    took its threads, but in its session and process group. They are not counted again (was: 96 of 48 for one job
+    of 4 MPI x 12 threads)."""
+    import subprocess
+    import sys
+
+    from cryo_savanna import gpu_wait as W
+    from cryo_savanna.project.gpu_queue import WAITER
+    locks = tmp_path / "locks"
+    job = ("(exec %s -c 'import time; time.sleep(6)' --o External/job001/ --j 3 &) ; sleep 6" % sys.executable)
+    run = subprocess.Popen([sys.executable, "-I", str(WAITER), "--locks", str(locks), "--threads", "3",
+                            "--max-threads", "8", "--label", "run", "--", "/bin/sh", "-c", job],
+                           stdout=subprocess.DEVNULL, start_new_session=True)  # as Pipeliner.run starts it
+    try:
+        deadline = time.time() + 20
+        while time.time() < deadline:
+            table = W.process_table()
+            jobs = [pid for pid, (_, args) in table.items() if "External/job001/ --j 3" in args
+                    and not args.startswith("/bin/sh")]
+            if jobs and W.held_threads(str(locks)):
+                break
+            time.sleep(0.1)
+        assert jobs, "the job did not start"
+        assert table[jobs[0]][0] != run.pid  # not under its run any more
+        tracked, untracked, _ = W.threads_in_use(str(locks), table)
+        assert (tracked, untracked) == (3, 0)
+        plain = dict(table)  # without process groups and sessions (a ps that cannot give them): counted again
+        assert W.relion_threads(plain, {run.pid}) == 3
+    finally:
+        os.killpg(run.pid, 9)
+        run.wait()
+
+
+def test_usage_counts_threads_and_gpus_of_the_machine(tmp_path, monkeypatch):
+    import fcntl
+
+    from cryo_savanna import gpu_wait as W
+    from cryo_savanna.project import gpu_queue as G
+    q = G.GpuQueue(tmp_path)
+    monkeypatch.setattr(W, "process_table", lambda: {10: (1, "relion_refine --o Class2D/job001/run --j 3"),
+                                                      11: (1, "relion_refine_mpi --o Class3D/job002/run --gpu")})
+    monkeypatch.setattr(W, "gpu_index", lambda: {"GPU-a": "0", "GPU-b": "1", "GPU-c": "2"})
+    monkeypatch.setattr(W, "busy_gpus", lambda table, ids: {"GPU-b", "1"})
+    fd = os.open(W.lock_path(str(tmp_path), "0"), os.O_RDWR | os.O_CREAT)
+    fcntl.flock(fd, fcntl.LOCK_EX)
+    fd2, _ = W.try_threads(str(tmp_path), 8, 64, "Refine3D/job009", lambda: {})
+    try:
+        u = G.usage(q, 64)
+    finally:
+        os.close(fd)
+        os.close(fd2)
+    assert (u.threads, u.gpus, u.gpu_count) == (3 + 1 + 8, ["0", "1"], 3)
+    assert u.text() == "RELION here: 12/64 threads, 2/3 GPUs"
+    assert "8 threads: Refine3D/job009" in u.detail and "4 threads: RELION jobs started without" in u.detail
+    assert G.Usage(0, 8, [], 0).text() == "RELION here: 0/8 threads"  # no GPUs: not mentioned
+    assert G.Usage(0, 8, [], 0).ram_text() == ""  # RAM unknown: not shown
+    assert G.Usage(0, 8, [], 0, "", 12.345, 64.0).ram_text() == "RAM 12.35/64.00 GB (19%)"
+
+
+def test_the_ram_in_use_of_this_machine(monkeypatch):
+    from cryo_savanna.env import machine as M
+    gib = 1024 ** 2  # kB
+    meminfo = (f"MemTotal:       {64 * gib} kB\nMemFree:         {4 * gib} kB\nMemAvailable:   {40 * gib} kB\n"
+               f"Buffers:          {1 * gib} kB\nCached:          {30 * gib} kB\nSwapCached:     0 kB\n"
+               f"Shmem:            {2 * gib} kB\nSReclaimable:     {3 * gib} kB\n")
+    real = M.Path.read_text
+    monkeypatch.setattr(M.Path, "read_text", lambda self, *a, **k: meminfo if str(self) == "/proc/meminfo"
+                        else real(self, *a, **k))
+    assert M.local_ram_use_gb(lambda cmd: "") == (64 - 4 - 1 - 30 - 3 + 2, 64)  # as htop: used + shared
+    assert M.meminfo_used_gb(f"MemTotal: {8 * gib} kB\nMemFree: {6 * gib} kB\nCached: {9 * gib} kB\n") == (2, 8)
+    assert M.meminfo_used_gb("nothing") is None
+    vm = ("Mach Virtual Memory Statistics: (page size of 16384 bytes)\nPages free:      60288.\n"
+          "Pages active:      65536.\nPages inactive:    367534.\nPages wired down:      32768.\n"
+          "Pages occupied by compressor:      32768.\n")
+    assert M.parse_vm_stat(vm) == 2.0  # (64 + 32 + 32) Ki pages of 16 KiB
+    assert M.parse_vm_stat("nothing") is None
+
+
 # ---------------------------------------------------------------------------- time left of other jobs
 def test_relions_progress_bar_gives_the_time_left_of_the_step(tmp_path):
     job = tmp_path / "CtfRefine" / "job014"

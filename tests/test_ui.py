@@ -750,6 +750,8 @@ def test_cards_of_scheduled_jobs_say_what_their_run_waits_for(window, spa_copy):
     rec = RunRecord("r1", [job], "cryo-savanna", 1, "host", "me", time.time(), [], gpus=["0"])
     card = w.graph.nodes[job]
     for held, text in ((Held(rec, True, [], ["0"]), "waiting for a GPU"),
+                       (Held(rec, True, [], [], 8), "waiting for threads"),
+                       (Held(rec, True, [], ["0"], 8), "waiting for GPU/threads"),
                        (Held(rec, True, ["Select/job010/particles.star"]), "waiting for input"),
                        (Held(rec, False), "in a run")):
         w.actions.runs.emit({job: held})

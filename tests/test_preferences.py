@@ -396,3 +396,42 @@ def test_slow_work_runs_in_a_thread_with_the_window_alive(qtbot):
     assert got == [1]
     qtbot.waitUntil(lambda: got == [1, 2], timeout=3000)
     timer.stop()
+
+
+def test_the_local_queue_preferences_and_the_status_bar(qtbot, tmp_path, spa_project, monkeypatch):
+    from cryo_savanna.project.gpu_queue import Usage, cpu_threads
+    s = QSettings(str(tmp_path / "s.ini"), QSettings.IniFormat)
+    w = make(qtbot, spa_project, s)
+    w.load_now()
+    qtbot.waitUntil(lambda: not w._usage_busy, timeout=30000)  # the look when it opened, at this machine
+    w.usage_fn = lambda: Usage(12, 64, ["0"], 4, "8 threads: Refine3D/job009", 30.5, 251.4)
+    q = w.actions.pipeliner.gpu_queue  # on by default: both queues, all logical CPUs
+    assert q.gpus and q.max_threads == cpu_threads() and P.setting(s, "show_usage")
+    assert w.usage_timer.isActive()
+    w._poll_usage()
+    qtbot.waitUntil(lambda: "RELION here: 12/64 threads, 1/4 GPUs" in w.status_state.text(), timeout=5000)
+    assert "RELION here: 12/64 threads, 1/4 GPUs   ·   RAM 30.50/251.40 GB (12%)" in w.status_state.text()
+    assert w.status_state.text().index("updated") < w.status_state.text().index("RELION here")
+    assert "8 threads: Refine3D/job009" in w.status_state.toolTip()
+
+    def fake_exec(dlg):
+        assert dlg.thread_queue.isChecked() and dlg.thread_limit.value() == 0 and dlg.show_usage.isChecked()
+        dlg.thread_limit.setValue(16)
+        dlg.show_usage.setChecked(False)
+        dlg.gpu_queue.setChecked(False)
+        dlg.accept()
+        return P.PreferencesDialog.Accepted
+    monkeypatch.setattr(P.PreferencesDialog, "exec", fake_exec)
+    w.show_preferences()
+    q = w.actions.pipeliner.gpu_queue
+    assert not q.gpus and q.max_threads == 16
+    assert not w.usage_timer.isActive() and "RELION here" not in w.status_state.text()
+    assert "RAM" not in w.status_state.text()
+
+    def all_off(dlg):
+        dlg.thread_queue.setChecked(False)
+        dlg.accept()
+        return P.PreferencesDialog.Accepted
+    monkeypatch.setattr(P.PreferencesDialog, "exec", all_off)
+    w.show_preferences()
+    assert w.actions.pipeliner.gpu_queue is None
