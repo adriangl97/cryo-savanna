@@ -4,8 +4,8 @@
 
 Main-data-path links are solid. Other links (references, masks, ...) are dashed and drawn for
 the selected job only, unless all links are switched on. Painting is plain QPainter on a raster
-viewport, and jobs become plain status-coloured blocks when zoomed far out, so it stays usable
-over X11 forwarding. Dragging scrolls the cards on the X server and sends only the strip that comes
+viewport, and zoomed out the cards show only their type and job number, in larger text (plain
+status-coloured blocks when even that is too small), so it stays usable over X11 forwarding. Dragging scrolls the cards on the X server and sends only the strip that comes
 into view: the view has no scroll bars and nothing over the cards, which would otherwise be painted
 again (and sent again) at every step of a drag. Its controls (GraphControls) are in the main window's
 filter row. Zooming repaints, and sends, the whole view: the wheel's steps are gathered into frames
@@ -14,6 +14,7 @@ spaced by how long a frame takes.
 
 from __future__ import annotations
 
+import math
 import time
 
 from qtpy.QtCore import QEvent, QPoint, QPointF, QRectF, Qt, QTimer, Signal
@@ -53,6 +54,10 @@ PAD_L, PAD_R, PAD_V = 15.0, 10.0, 6.0  # text padding inside a card (left includ
 MIN_CARD_W = 230.0
 STAR_W = 16.0  # kept free right of the header for the star, so a star does not change the layout
 MARGIN = 4.0  # around a card, for its frame (the selection's, the job editor input's)
+COMPACT_LOD = 0.35  # zoomed out below this, a card shows only its type and job number, scaled up to fill it
+MIN_TEXT = 0.45  # ... that text at least this fraction of the full card's text on screen; else a block in the
+# status colour (like a minimap)
+COMPACT_PAD = 3.0  # above and below the compact card's text
 WHEEL_STEP = 1.15  # zoom factor of one notch of the mouse wheel
 ZOOM_FRAME_S = 0.04  # at least this long between two wheel-zoom frames (longer when a frame takes longer)
 
@@ -127,6 +132,8 @@ class JobNodeItem(QGraphicsItem):
         self.update()
 
     def set_summary(self, summary: JobSummary | None) -> None:
+        if summary == self.summary and self.summary is not None:  # the same again: nothing to paint
+            return
         self.summary = summary
         self._update_tooltip()
         self.update()
@@ -173,8 +180,7 @@ class JobNodeItem(QGraphicsItem):
         info = self.info
         if info is None:
             return ""
-        number = info.process.name.rstrip("/").split("/")[-1]
-        text = f"{number} · {info.status}" + ("*" if info.pending_update else "")
+        text = f"{self.job_number()} · {info.status}" + ("*" if info.pending_update else "")
         if style.held_text(info.status, self.held):  # a scheduled job a run still going holds
             text += " · " + style.held_text(info.status, self.held)
         q = self.queue_job
@@ -231,14 +237,8 @@ class JobNodeItem(QGraphicsItem):
         r = QRectF(-self.w / 2, -self.h / 2, self.w, self.h)
         color = style.status_color(self.info.status if self.info else "")
         selected = self.isSelected()
-        if lod < 0.35:  # too small to read: a block in the status colour, like a minimap
-            if self.input_labels:  # a frame of its own, outside the selection's
-                p.setPen(Qt.NoPen)
-                p.setBrush(style.INPUT_COLOR)
-                p.drawRect(r.adjusted(-MARGIN, -MARGIN, MARGIN, MARGIN))
-            p.setPen(QPen(pal.color(QPalette.Highlight), 3 / lod) if selected else Qt.NoPen)
-            p.setBrush(color)
-            p.drawRect(r)
+        if lod < COMPACT_LOD:
+            self._paint_compact(p, r, lod, color, selected, pal)
             return
         if self.input_labels:  # a frame round the card, so that a selected input shows both
             p.setPen(QPen(style.INPUT_COLOR, 3))
@@ -297,6 +297,75 @@ class JobNodeItem(QGraphicsItem):
             p.setFont(fonts.small)
             p.setPen(QColor("#ffffff"))
             p.drawText(badge, Qt.AlignCenter, text)
+
+    def _compact_text(self, r: QRectF, strip_w: float) -> tuple[float, float, bool]:
+        """The compact card's text: its scale filling the card (narrower for a long type), the scale its height
+        allows, and whether type and job number go on one line (a short card) rather than two."""
+        fonts = self.view.fonts
+        header, number = card_lines(self.info, self.view.type_names)[0], self.job_number()
+        width = r.width() - strip_w - 8 - PAD_R - 2  # 2: slack for rounding, so a text that fits is not elided
+        height = r.height() - 2 * COMPACT_PAD
+        hw, nw = fonts.fm_header.horizontalAdvance(header), fonts.fm_body.horizontalAdvance(number)
+        two = min(height / (2 * fonts.line), width / max(1, hw, nw))
+        one = min(height / fonts.line, width / max(1, hw + fonts.fm_body.horizontalAdvance("  ") + nw))
+        return (one, height / fonts.line, True) if one > two else (two, height / (2 * fonts.line), False)
+
+    def job_number(self) -> str:
+        return self.info.process.name.rstrip("/").split("/")[-1] if self.info is not None else ""
+
+    def _paint_compact(self, p: QPainter, r: QRectF, lod: float, color: QColor, selected: bool, pal: QPalette) -> None:
+        """Zoomed out: the card's frame and status strip, and its type and job number only, scaled up to fill the card
+        but never larger on screen than the full card's text. A block in the status colour when that text would be
+        too small to read."""
+        def pen(c, px: float) -> QPen:  # in screen pixels, at any zoom
+            q = QPen(c, px)
+            q.setCosmetic(True)
+            return q
+
+        strip_w = min(max(7.0, 3 / lod), r.width() / 5)  # at least 3 pixels on screen
+        fonts = self.view.fonts
+        k, k_height, one_line = self._compact_text(r, strip_w) if self.info is not None else (0.0, 0.0, False)
+        readable = MIN_TEXT / lod  # the smallest scale that can still be read
+        if k < readable <= k_height:  # only its width is short: elided rather than unreadable
+            k = readable
+        block = k < readable
+        k = min(k, 1 / lod)
+        if self.input_labels:  # a frame of its own, outside the selection's
+            p.setPen(pen(style.INPUT_COLOR, 3))
+            p.setBrush(Qt.NoBrush)
+            p.drawRoundedRect(r.adjusted(-3 / lod, -3 / lod, 3 / lod, 3 / lod), 8, 8)
+        if selected:
+            p.setPen(pen(pal.color(QPalette.Highlight), 3))
+        elif self._hover:
+            p.setPen(pen(pal.color(QPalette.Text), 1.5))
+        else:
+            p.setPen(pen(pal.color(QPalette.Mid), 1) if not block else Qt.NoPen)
+        p.setBrush(color if block else pal.color(QPalette.Base))
+        p.drawRoundedRect(r, 6, 6)
+        if block:
+            return
+        p.setPen(Qt.NoPen)
+        p.setBrush(color)
+        p.drawRoundedRect(QRectF(r.left(), r.top(), strip_w, r.height()), 3, 3)
+
+        header, number = card_lines(self.info, self.view.type_names)[0], self.job_number()
+        x = r.left() + strip_w + 8
+        w = (r.right() - PAD_R - x) / k
+        number_color = color if self.info.status != "Succeeded" else pal.color(QPalette.PlaceholderText)
+        p.save()  # the view does not save the painter's state (DontSavePainterState)
+        p.translate(x, r.center().y() - k * fonts.line * (0.5 if one_line else 1))
+        p.scale(k, k)
+        p.setFont(fonts.header)
+        p.setPen(pal.color(QPalette.Text))
+        shown = fonts.fm_header.elidedText(header, Qt.ElideRight, math.ceil(w))  # up: _compact_text left slack
+        p.drawText(QRectF(0, 0, w, fonts.line), Qt.AlignLeft | Qt.AlignVCenter, shown)
+        nx, ny = (fonts.fm_header.horizontalAdvance(shown) + fonts.fm_body.horizontalAdvance("  "), 0.0) if one_line \
+            else (0.0, fonts.line)
+        p.setFont(fonts.body)
+        p.setPen(number_color)
+        p.drawText(QRectF(nx, ny, max(0.0, w - nx), fonts.line), Qt.AlignLeft | Qt.AlignVCenter,
+                   fonts.fm_body.elidedText(number, Qt.ElideRight, math.ceil(max(0.0, w - nx))))
+        p.restore()
 
     def hoverEnterEvent(self, e):
         self._hover = True

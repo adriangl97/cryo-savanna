@@ -49,6 +49,7 @@ from cryo_savanna.ui.job_info import JobInfoPanel
 from cryo_savanna.ui.job_tree import STATUS_FILTERS, JobTreeView
 from cryo_savanna.ui.log_panel import LogPanel
 from cryo_savanna.ui.rebuild_dialog import ask_generate, run_rebuild
+from cryo_savanna.ui.pacing import pace_splitters
 from cryo_savanna.ui.preferences import (
     PreferencesDialog,
     TextDialog,
@@ -204,6 +205,7 @@ class MainWindow(QMainWindow):
         self._restore_settings()
         self.open_project(project_dir)
         self._check_version()
+        pace_splitters(self)  # drags of the window's splitters, paced (ui/pacing.py)
 
     # ------------------------------------------------------------------ UI
     def _build_ui(self) -> None:

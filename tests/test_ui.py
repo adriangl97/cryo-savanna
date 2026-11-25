@@ -784,6 +784,27 @@ def test_toolbar_has_the_project_then_the_job_actions(window, spa_project):
     assert w.graph.transform().m11() > before
 
 
+def test_graph_zoomed_out_cards_show_type_and_number(window, spa_project):
+    from qtpy.QtGui import QImage, QPainter, QTransform
+    from qtpy.QtWidgets import QStyleOptionGraphicsItem
+    from cryo_savanna.ui.job_graph import COMPACT_LOD, MIN_TEXT
+    w = window(spa_project)
+    item = w.graph.nodes["Class2D/job006/"]
+    img = QImage(400, 300, QImage.Format_ARGB32)
+    texts = []
+    for lod in (0.34, 0.2, 0.05):  # painted without errors at every zoom
+        p = QPainter(img)
+        p.setTransform(QTransform.fromScale(lod, lod))
+        p.drawText = lambda *a, p=p, lod=lod: texts.append((lod, a[-1]))
+        item.paint(p, QStyleOptionGraphicsItem())
+        p.end()
+    assert (0.34, "2D classification") in texts and (0.34, "job006") in texts  # the compact card's text, in full
+    assert not [t for lod, t in texts if lod == 0.05]  # too small: a block
+    r = item.boundingRect()
+    k, _, _ = item._compact_text(r.adjusted(4, 4, -4, -4), 7.0)
+    assert k * COMPACT_LOD >= MIN_TEXT  # larger than the full card's text would be there
+
+
 def test_graph_wheel_steps_are_drawn_together(window, spa_project, qtbot):
     from qtpy.QtCore import QPoint, QPointF
     from qtpy.QtGui import QWheelEvent

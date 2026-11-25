@@ -32,6 +32,7 @@ from qtpy.QtWidgets import (
 from cryo_savanna.jobdefs.flags import ADVANCED_TAB, EXTRA_ARGS, has_advanced_tab
 from cryo_savanna.jobdefs.model import JobVariant, OptionDef
 from cryo_savanna.project.presets import PresetError, PresetStore, check_name, is_input
+from cryo_savanna.ui.pacing import pace_splitters
 
 
 def tab_of(variant: JobVariant) -> dict[str, str]:
@@ -213,6 +214,7 @@ class ManagePresetsDialog(QDialog):
         split.addWidget(left)
         split.addWidget(right)
         split.setSizes([240, 520])
+        pace_splitters(split)
         lay = QVBoxLayout(self)
         lay.addWidget(split, 1)
         lay.addWidget(self.note)
