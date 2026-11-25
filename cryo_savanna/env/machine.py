@@ -128,6 +128,50 @@ def local_ram_gb(run: Runner = run_quiet) -> float | None:
     return total
 
 
+def parse_vm_stat(text: str) -> float | None:
+    """GB in use of macOS's `vm_stat`: active, wired and compressed pages (Activity Monitor's "Memory Used")."""
+    size = re.search(r"page size of (\d+) bytes", text)
+    if not size:
+        return None
+    pages = 0
+    for key in ("Pages active", "Pages wired down", "Pages occupied by compressor"):
+        m = re.search(rf"^{key}:\s+(\d+)", text, re.M)
+        if m:
+            pages += int(m.group(1))
+    return pages * int(size.group(1)) / 1024 ** 3
+
+
+def meminfo_used_gb(text: str) -> tuple[float, float] | None:
+    """(GB in use, GB in all) of /proc/meminfo, as htop's memory meter counts them: MemTotal - MemFree - Buffers -
+    Cached - SReclaimable, plus Shmem (htop shows used + shared: tmpfs and shared memory are in Cached but cannot be
+    dropped). The page cache the kernel can drop is not in use."""
+    total, free = _meminfo_gb(text), _meminfo_gb(text, "MemFree")
+    if total is None or free is None:
+        return None
+    buffers, cached, reclaimable, shared = (_meminfo_gb(text, k) or 0.0
+                                            for k in ("Buffers", "Cached", "SReclaimable", "Shmem"))
+    gone = free + buffers + cached + reclaimable
+    used = total - gone if total >= gone else total - free  # as htop, when the kernel's numbers do not add up
+    return min(total, max(0.0, used + shared)), total
+
+
+def local_ram_use_gb(run: Runner = run_quiet) -> tuple[float, float] | None:
+    """(GB in use, GB in all) of this machine's RAM now, by every program (not a cgroup's or SLURM's share), as htop
+    shows it (meminfo_used_gb; macOS: as Activity Monitor). None when it cannot be told."""
+    try:
+        text = Path("/proc/meminfo").read_text()
+    except OSError:
+        text = ""
+    if text:
+        return meminfo_used_gb(text)
+    if sys.platform == "darwin":
+        out = run(["sysctl", "-n", "hw.memsize"]).strip()
+        used = parse_vm_stat(run(["vm_stat"]))
+        if out.isdigit() and used is not None:
+            return used, int(out) / 1024 ** 3
+    return None
+
+
 def parse_nvidia_smi(text: str) -> list[tuple[int, str, str, float | None]]:
     """(index, uuid, name, memory GB) of `nvidia-smi --query-gpu=index,uuid,name,memory.total
     --format=csv,noheader,nounits` (memory in MiB)."""

@@ -162,7 +162,9 @@ def job_processes(project_dir: str | os.PathLike, job: str, pipeliner_pids: Iter
 
 
 def _lock_holders(paths: Iterable[str | os.PathLike], table: dict[int, Proc]) -> set[int]:
-    """This user's processes that have one of ``paths`` open: /proc/<pid>/fd (Linux), else lsof (macOS)."""
+    """This user's processes that have one of ``paths`` open for writing (as the runs holding the locks have them:
+    one only looking at them, such as the status bar of a cryo-savanna window, opens them read-only for a moment):
+    /proc/<pid>/fd (Linux), else lsof (macOS)."""
     uid = os.getuid()
     keys = set()
     for path in paths:
@@ -187,16 +189,34 @@ def _lock_holders(paths: Iterable[str | os.PathLike], table: dict[int, Proc]) ->
                     st = os.stat(f"/proc/{pid}/fd/{fd}")
                 except OSError:
                     continue
-                if (st.st_dev, st.st_ino) in keys:
+                if (st.st_dev, st.st_ino) in keys and not _read_only(pid, fd):
                     out.add(pid)
                     break
         return out
     try:
-        r = subprocess.run(["lsof", "-w", "-t", "--", *map(str, paths)], capture_output=True, text=True, timeout=20,
-                           stdin=subprocess.DEVNULL)
+        r = subprocess.run(["lsof", "-w", "-F", "pa", "--", *map(str, paths)], capture_output=True, text=True,
+                           timeout=20, stdin=subprocess.DEVNULL)
     except (OSError, subprocess.SubprocessError):
         return out
-    return {int(w) for w in r.stdout.split() if w.isdigit() and int(w) in table and table[int(w)].uid == uid}
+    pid = 0
+    for line in r.stdout.splitlines():  # p<pid>, then f<fd> and a<access: r, w or u> for each file it has open
+        if line[:1] == "p" and line[1:].isdigit():
+            pid = int(line[1:])
+        elif line[:1] == "a" and line[1:2] in ("w", "u") and pid in table and table[pid].uid == uid:
+            out.add(pid)
+    return out
+
+
+def _read_only(pid: int, fd: str) -> bool:
+    """Whether a file descriptor of a process is open read-only (/proc/<pid>/fdinfo); False when it cannot be told."""
+    try:
+        with open(f"/proc/{pid}/fdinfo/{fd}") as fh:
+            for line in fh:
+                if line.startswith("flags:"):
+                    return int(line.split()[1], 8) & 0o3 == os.O_RDONLY
+    except (OSError, ValueError, IndexError):
+        pass
+    return False
 
 
 _PIPELINER = re.compile(r"(?:^|[\s/])relion_pipeliner(?:\s|$)")

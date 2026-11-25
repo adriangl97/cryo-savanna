@@ -78,7 +78,7 @@ has to be checked before it is used. The runners (`*_runner.py`, `runner_common.
 | `cryo_savanna/project/processes.py` | Force abort: a local job's processes (under the pipeliner cryo-savanna started, or writing to its directory), killed, and the job marked aborted |
 | `cryo_savanna/project/failure_hints.py` | Why a job failed: known messages in run.err / run.out, read with the job summaries (`project/summary.py`) |
 | `cryo_savanna/project/staleness.py` | Out-of-date jobs: finished jobs whose inputs were written again after they ran, and those after them; the order to run them again in (`Pipeliner.rerun`, Job → Run out-of-date jobs again…) |
-| `cryo_savanna/project/gpu_queue.py`, `cryo_savanna/gpu_wait.py` | The local GPU queue: which GPUs a run takes, and the waiter (standard library only) that holds their locks and becomes the run's relion_pipeliner |
+| `cryo_savanna/project/gpu_queue.py`, `cryo_savanna/gpu_wait.py` | The local GPU and thread queues: which GPUs and how many threads a run takes, the waiter (standard library only) that holds their locks and becomes the run's relion_pipeliner, the threads of RELION jobs counted from command lines, and the status bar's look at what is in use |
 | `cryo_savanna/project/autocontinue.py` | Continuing relion_refine jobs from their last iteration: the editor's Continue, and after the SLURM time limit (`ui/actions/running.py`) |
 | `cryo_savanna/project/submit_script.py`, `cryo_savanna/ui/submit_preview.py` | The job editor's "Preview submission script…": the template filled in as RELION does, and its checks |
 | `cryo_savanna/project/rebuild.py`, `cryo_savanna/ui/rebuild_dialog.py` | A pipeline rebuilt from job folders (lost `default_pipeline.star`, jobs run from the command line), and its review |

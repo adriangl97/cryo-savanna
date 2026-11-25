@@ -89,7 +89,7 @@ FAKE = """
         open(os.environ["FAKE_LOG"] + "." + name + ".aln", "w").write(open(aln).read())
         if os.path.exists(stack[:-4] + "_CTF.txt"):
             open(os.environ["FAKE_LOG"] + "." + name + ".ctf", "w").write(open(stack[:-4] + "_CTF.txt").read())
-    vols = ["_Vol"]
+    vols = ["_Vol"] if volz else []  # -VolZ 0: no reconstruction
     if arg("-SplitSum") == "1":
         assert os.path.exists(stack[:-4] + "_EVN.mrc") and os.path.exists(stack[:-4] + "_ODD.mrc")
         vols += ["_EVN_Vol", "_ODD_Vol"]
@@ -304,6 +304,41 @@ def test_align_and_reconstruct(project, fake_aretomo):
     fake_aretomo.unlink()
     assert run_runner(project, job, values(at_patch="2 2")).returncode == 0
     assert not fake_aretomo.exists()
+
+
+def test_align_without_reconstruction(project, fake_aretomo):
+    """'Reconstruct tomograms?' No: AreTomo3 aligns only (-VolZ 0); no tomograms.star, no tomogram node."""
+    job = "External/job015/"
+    vals = values(do_recon="No", do_halves="Yes", flip_vol="xyz, rotated (-FlipVol 2)", recon_method=A.RECON_WBP)
+    res = run_runner(project, job, vals)
+    assert res.returncode == 0, res.stderr + res.stdout
+    assert "WARNING" not in res.stdout  # the picking warnings are about tomograms
+    d = project / job
+    c = calls(fake_aretomo)[0]
+    assert flag(c, "-Cmd") == "1" and flag(c, "-VolZ") == "0" and flag(c, "-SplitSum") == "0"
+    assert not {"-Wbp", "-FlipVol", "-CorrCTF", "-ExtZ"} & set(c)
+    assert not (d / "aretomo/TS_01/TS_01_Vol.mrc").exists() and not (d / A.TOMOGRAMS).exists()
+    g, _ = table(d / A.ALIGNED, "global")
+    assert [x["rlnTomoName"] for x in g] == NAMES
+    s, _ = table(d / A.SUMMARY, "global")
+    assert [x[A.COL_STATUS] for x in s] == ["done"] * 5 and s[0][A.COL_TOMOGRAM] == ""
+    nodes = (d / P.OUTPUT_NODES).read_text()
+    assert A.NODE_ALIGNED in nodes and A.NODE_TOMOGRAMS not in nodes
+    # continue: the aligned tilt series count as done without a tomogram
+    fake_aretomo.unlink()
+    assert run_runner(project, job, vals).returncode == 0
+    assert not fake_aretomo.exists()
+    # only reconstructing with the input's alignment, but no reconstruction: nothing to do
+    res = run_runner(project, "External/job016/", values(do_recon="No", alignment=A.ALIGN_INPUT, in_tiltseries=ALIGNED_SET))
+    assert res.returncode == 1 and "Reconstruct tomograms?" in res.stderr
+
+
+def test_reconstruct_defaults_to_yes():
+    v = CATALOG.variant("align")
+    assert v.default_values(ENV)["do_recon"] == "Yes" and A.reconstruct({})  # jobs from before the option
+    group_of = {r.keys[0]: r.group for t in v.tabs for r in t.rows}
+    for k in ("at_bin", "vol_z", "recon_method", "sart", "flip_vol", "do_halves"):
+        assert v.group_active(group_of[k], values()) and not v.group_active(group_of[k], values(do_recon="No"))
 
 
 def test_ctf_into_the_tilt_series(project, fake_aretomo):

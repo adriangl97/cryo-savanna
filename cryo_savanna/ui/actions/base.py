@@ -108,7 +108,9 @@ class ActionsBase(QObject):
         self.ops: PipelineOps | None = None
         self.staleness: StalenessChecker | None = None
         self.stale: dict = {}  # job -> Stale, at the last look
-        self.gpu_queue_on = True  # Preferences → local GPU queue: runs here wait for their GPUs (set_gpu_queue)
+        # Preferences → local GPU and thread queues: runs here wait for their GPUs / threads (set_local_queue)
+        self.gpu_queue_on = True
+        self.max_threads = 0  # the thread queue's limit; 0: off
         self.auto_continue = False  # Preferences: continue relion_refine jobs that hit the SLURM time limit
         self._continuing: dict[str, tuple[str, float]] = {}  # job -> (SLURM id, until when): to continue (running.py)
         self.snapshot: ProjectSnapshot | None = None
@@ -184,7 +186,7 @@ class ActionsBase(QObject):
     def set_project(self, project_dir: Path) -> None:
         self.project_dir = Path(project_dir)
         self.pipeliner = Pipeliner(project_dir)
-        self.pipeliner.gpu_queue = GpuQueue() if self.gpu_queue_on else None
+        self.pipeliner.gpu_queue = self._local_queue()
         self.pipeliner.own_scratch = self.editor.own_scratch
         self.ops = PipelineOps(project_dir)
         self.staleness = StalenessChecker(project_dir)
@@ -273,11 +275,21 @@ class ActionsBase(QObject):
         if self._look_again or (result is not None and project != self.project_dir):
             self._look_at_project()
 
-    def set_gpu_queue(self, on: bool) -> None:
-        """Preferences → local GPU queue: runs of jobs that use GPUs here wait until those GPUs are free."""
-        self.gpu_queue_on = on
+    def _local_queue(self) -> GpuQueue | None:
+        if not self.gpu_queue_on and self.max_threads <= 0:
+            return None
+        return GpuQueue(gpus=self.gpu_queue_on, max_threads=self.max_threads)
+
+    def set_local_queue(self, gpus: bool, max_threads: int = 0) -> None:
+        """Preferences → local GPU queue: runs of jobs that use GPUs here wait until those GPUs are free; local thread
+        queue (``max_threads`` > 0): runs of jobs that compute here wait until enough of the threads are free."""
+        self.gpu_queue_on, self.max_threads = gpus, max(0, max_threads)
         if self.pipeliner is not None:
-            self.pipeliner.gpu_queue = GpuQueue() if on else None
+            self.pipeliner.gpu_queue = self._local_queue()
+
+    def set_gpu_queue(self, on: bool) -> None:
+        """The GPU queue alone on or off (the thread queue as it is)."""
+        self.set_local_queue(on, self.max_threads)
 
     def set_own_scratch(self, on: bool) -> None:
         """Preferences → a subdirectory of its own when the scratch directory is in use (project/scratch.py):
@@ -304,12 +316,14 @@ class ActionsBase(QObject):
         def finished(result):
             self._pending.discard(signals)
             self.message.emit(f"{what}: done")
+            self._warn_oversubscribed()
             if done is not None:
                 done(result)
             self.changed.emit()
 
         def failed(msg: str):
             self._pending.discard(signals)
+            self._warn_oversubscribed()
             self.message.emit(f"{what}: failed")
             if on_error is not None:
                 on_error(msg)
@@ -320,6 +334,24 @@ class ActionsBase(QObject):
         signals.error.connect(failed)
         self.message.emit(f"{what}…")
         self.pool.start(_Task(fn, signals))
+
+    def _warn_oversubscribed(self) -> None:
+        """Runs just started that ask for more threads than the thread queue's limit: say they will oversubscribe
+        the machine (they wait until no RELION job runs here, then start: gpu_wait.py)."""
+        pl = self.pipeliner
+        if pl is None or not getattr(pl, "oversubscribed", None):  # a stand-in pipeliner (tests) has none
+            return
+        recs, pl.oversubscribed = pl.oversubscribed, []
+        lines = "\n".join(f"  {', '.join(j.rstrip('/') for j in r.jobs)}: {r.threads} threads (MPI procs × threads)"
+                          for r in recs)
+        limit = recs[0].thread_limit
+        box = QMessageBox(QMessageBox.Warning, "More threads than the limit",
+                          f"These runs ask for more threads than the {limit} of the local thread queue "
+                          f"(Preferences):\n\n{lines}\n\nEach waits until no other RELION job runs on this machine, "
+                          "then starts and oversubscribes it. Stop it with Job → Stop runs… and lower its MPI procs or "
+                          "threads if that is not what you want.", QMessageBox.Ok, self.window)
+        box.setObjectName("oversubscribed")
+        box.open()
 
     def wait(self, ms: int = 60000) -> bool:
         """Wait for queued operations (closing the window, tests); -1: as long as it takes."""

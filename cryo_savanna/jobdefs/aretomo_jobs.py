@@ -114,6 +114,9 @@ def align_options() -> tuple[list[OptionDef], list[Tab], dict[int, Group]]:
         _o("ext_phase", "Phase shift and search range (°):", "", "For a phase plate (-ExtPhase), e.g. 90 30. "
            "Empty: none."),
         # Reconstruction
+        _yn("do_recon", "Reconstruct tomograms?", "Yes", "No: only align the tilt series (CTF estimation and "
+            "alignment, -VolZ 0), writing aligned_tilt_series.star but no tomograms (no tomograms.star), e.g. "
+            "to reconstruct them with RELION's Reconstruct tomograms. Needs 'Align with AreTomo3'."),
         _o("at_bin", "Binning:", "4", "Binning of the tomogram relative to the tilt series (-AtBin). Up to three "
            "numbers: the second and third give further tomograms (_2ND_Vol: WBP, _3RD_Vol: SART) in "
            "aretomo/<name>/; tomograms.star lists the first."),
@@ -155,19 +158,22 @@ def align_options() -> tuple[list[OptionDef], list[Tab], dict[int, Group]]:
            f"'module avail' (${CUDA_ENV_VAR} overrides it)."),
     ]
     tabs = [
-        Tab("Input", tuple(Row((k,)) for k in ("in_tiltseries", "tomo_names", "angpix", "do_halves", "keep_stacks"))),
+        Tab("Input", (Row(("in_tiltseries",)), Row(("tomo_names",)), Row(("angpix",)), Row(("do_halves",), group=3),
+                      Row(("keep_stacks",)))),
         Tab("Alignment", (
             Row(("alignment",)), Row(("tilt_axis_mode",), group=1), Row(("tilt_axis",), group=1),
             Row(("align_z",), group=1), Row(("tomo_align_z",), group=1), Row(("at_patch",), group=1), Row(("tilt_cor",), group=1),
             Row(("tilt_offset",), group=1), Row(("dark_tol",), group=1), Row(("ctf_to_star",), group=1),
             Row(("ext_phase",), group=1))),
         Tab("Reconstruction", (
-            Row(("at_bin",)), Row(("vol_z",)), Row(("ext_z",)), Row(("recon_method",)), Row(("sart",), group=2),
-            Row(("corr_ctf",)), Row(("recon_range",)), Row(("flip_vol",)), Row(("flip_int",)),
+            Row(("do_recon",)), Row(("at_bin",), group=3), Row(("vol_z",), group=3), Row(("ext_z",), group=3),
+            Row(("recon_method",), group=3), Row(("sart",), group=2), Row(("corr_ctf",), group=3),
+            Row(("recon_range",), group=3), Row(("flip_vol",), group=3), Row(("flip_int",), group=3),
             Row(("aretomo_args",)))),
         Tab("Compute", tuple(Row((k,)) for k in ("gpu_ids", "per_gpu", "skip_done", "aretomo_exe", "cuda_module"))),
     ]
-    groups = {1: Group(1, None, "alignment", A.ALIGN_ARETOMO), 2: Group(2, None, "recon_method", A.RECON_SART)}
+    groups = {1: Group(1, None, "alignment", A.ALIGN_ARETOMO), 2: Group(2, 3, "recon_method", A.RECON_SART),
+              3: Group(3, None, "do_recon")}
     return opts, tabs, groups
 
 

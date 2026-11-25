@@ -180,6 +180,25 @@ polling interval (Preferences, or `--poll`), and views of running jobs read new 
   runs… stops it (the job stays Scheduled). It starts when the GPUs are free, also when cryo-savanna is
   closed. The locks are files in `/tmp/cryo-savanna-gpu-locks/` (else in
   `~/.cache/cryo-savanna/`), released when the run's processes end, so nothing is left to clean up.
+- **Local thread queue** (Preferences, on by default): jobs that run on this machine (not sent to a queue)
+  and have "Number of MPI procs" or "Number of threads" take MPI procs × threads of a limit (all logical CPUs of
+  the machine by default; Preferences → Local thread queue → Limit). A run of several jobs takes what its
+  biggest job takes. Started while too few threads are free, a job waits: it shows "Scheduled · waiting for
+  threads" (or "waiting for GPU/threads" when it also waits for GPUs: it takes both at once, or neither), its
+  run says how many threads it waits for in the Overview, and Job → Stop runs… stops it. In use are the threads
+  other runs of cryo-savanna took (of anyone on the machine, in any project) and those of RELION jobs started
+  without it (RELION's own GUI, a script, an older cryo-savanna), counted from their command lines: `--j N` of
+  each process of a RELION job, one per MPI rank of a `relion_*_mpi` program without `--j`. Jobs with neither
+  option (Import, Subset selection, Join star files…) never wait. A job that asks for more threads than the limit
+  waits until no RELION job runs on this machine, then starts and oversubscribes it: cryo-savanna warns when it
+  is started, and its run.out says so. The threads are held by a `threads-<pid>.lock` file next to the GPU locks,
+  released when the run's processes end.
+- **Threads, GPUs and RAM in use** (Preferences → Status bar, on by default): the status bar shows, next to
+  "updated HH:MM:SS", the threads RELION jobs use on this machine out of the thread queue's limit, and how many
+  of its GPUs are in use (locked by a run of the queue, or with a RELION job on them in nvidia-smi), looked at
+  every 10 s, and the machine's RAM in use (by every program, not only RELION) of its total, as
+  "RAM 12.34/64.00 GB (19%)" (GB of 1024³ bytes).
+  Its tooltip says which runs hold the threads and GPUs.
 
 ## Box sizes
 
@@ -591,6 +610,17 @@ in the shell wins over this preference.
 
 On by default: runs of jobs that use GPUs of this machine wait until those GPUs are free (see
 [Running jobs](#running-jobs)). Off: they start at once, as in RELION's GUI.
+
+### Local thread queue
+
+On by default: runs of jobs that compute on this machine wait until enough of its threads are free (see
+[Running jobs](#running-jobs)). **Limit**: the threads RELION jobs may take together; "all logical CPUs" (0)
+counts them on each machine cryo-savanna runs on. Off: they start at once, as in RELION's GUI.
+
+### Status bar: threads, GPUs and RAM in use
+
+On by default: the status bar shows the threads (of the thread queue's limit) and GPUs RELION jobs use on this
+machine, and its RAM in use of the total. Off: they are not looked at.
 
 ### Continue jobs that hit the SLURM time limit
 

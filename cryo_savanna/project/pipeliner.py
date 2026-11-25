@@ -77,6 +77,8 @@ class RunRecord:
     repeat: int = 1
     log: str = ""  # relative to the project
     gpus: list[str] = field(default_factory=list)  # the GPUs of this machine it waits for and keeps (gpu_queue.py)
+    threads: int = 0  # the threads of this machine it waits for and keeps (the thread queue; gpu_queue.py)
+    thread_limit: int = 0  # the thread queue's limit when it started (more threads asked for: oversubscribed)
     scratch: dict[str, str] = field(default_factory=dict)  # job -> the savanna_NNN it was given (scratch.py)
 
     def is_alive(self) -> bool | None:
@@ -119,6 +121,7 @@ class Held:
     current: bool  # the job the run is at now (not one after it)
     waiting_for: list[str] = field(default_factory=list)  # its input files not there yet (RELION waits for them)
     gpus_waiting: list[str] = field(default_factory=list)  # the run waits for these GPUs (the local GPU queue)
+    threads_waiting: int = 0  # the run waits for this many threads (the local thread queue)
 
     @property
     def waiting(self) -> bool:
@@ -131,15 +134,23 @@ class Held:
         return self.current and bool(self.gpus_waiting)
 
     @property
+    def waiting_for_threads(self) -> bool:
+        """The run waits for threads (gpu_queue.py): its relion_pipeliner has not started yet."""
+        return self.current and self.threads_waiting > 0
+
+    @property
     def stoppable(self) -> bool:
-        """Nothing of the job runs yet (its inputs or its GPUs are awaited): its run can be ended now."""
-        return self.waiting or self.waiting_for_gpus
+        """Nothing of the job runs yet (its inputs, GPUs or threads are awaited): its run can be ended now."""
+        return self.waiting or self.waiting_for_gpus or self.waiting_for_threads
 
     def describe(self) -> str:
         started = time.strftime("%d %b %H:%M", time.localtime(self.run.started))
         text = f"in a run started {started} (relion_pipeliner {self.run.pid} on {self.run.host})"
-        if self.waiting_for_gpus:
-            text += ", waiting for GPU " + ", ".join(self.gpus_waiting) + " (the local GPU queue)"
+        if self.waiting_for_gpus or self.waiting_for_threads:
+            what = ((["GPU " + ", ".join(self.gpus_waiting)] if self.gpus_waiting else []) +
+                    ([f"{self.threads_waiting} thread{'s' if self.threads_waiting != 1 else ''}"]
+                     if self.threads_waiting else []))
+            text += ", waiting for " + " and ".join(what) + " (the local queue)"
         elif self.waiting:
             text += ", waiting for " + ", ".join(self.waiting_for)
         elif not self.current:
@@ -161,7 +172,9 @@ class Pipeliner:
         # settings: RELION's GUI tools (relion_display, napari for tomography) need OpenGL
         self.environ = environ if environ is not None else external_environ()
         self._records: dict[str, RunRecord] = {}  # run record file -> its record (see runs)
-        self.gpu_queue: GpuQueue | None = None  # runs that use GPUs here wait for them (Preferences; gpu_queue.py)
+        # runs that use GPUs or threads here wait for them (Preferences: the local GPU and thread queues; gpu_queue.py)
+        self.gpu_queue: GpuQueue | None = None
+        self.oversubscribed: list[RunRecord] = []  # runs started asking for more threads than the limit (to warn)
         # a job starting with a scratch directory another job uses gets a savanna_NNN of it (Preferences; scratch.py)
         self.own_scratch = False
 
@@ -364,20 +377,26 @@ class Pipeliner:
         cmd = [self._require(), "--RunJobs", " ".join(jobs), "--schedule", schedule, "--repeat", str(repeat),
                "--min_wait", str(min_wait), "--min_wait_before", str(min_wait_before),
                "--sec_wait_after", str(sec_wait_after)]
-        gpus = self.gpu_queue.gpus_of(list(jobstars.values()), self.environ) if self.gpu_queue is not None else []
-        if gpus and self.gpu_queue is not None:  # waits for them, then becomes the relion_pipeliner
+        q = self.gpu_queue
+        gpus = q.gpus_of(list(jobstars.values()), self.environ) if q is not None else []
+        threads = q.threads_of(jobstars.values()) if q is not None else 0
+        limit = q.max_threads if q is not None and threads else 0
+        if (gpus or threads) and q is not None:  # waits for them, then becomes the relion_pipeliner
             label = f"{', '.join(j.rstrip('/') for j in jobs)} in {self.project_dir} ({_user()})"
-            cmd = self.gpu_queue.command(cmd, gpus, label)
+            cmd = q.command(cmd, gpus, label, threads)
         runs = self._gui_dir("runs")
         log = runs / f"{rid}.log"
         with open(log, "ab") as out:
             proc = subprocess.Popen(cmd, cwd=self.project_dir, env=self.environ, stdin=subprocess.DEVNULL, stdout=out,
                                     stderr=subprocess.STDOUT, start_new_session=True, close_fds=True)
         rec = RunRecord(rid, list(jobs), schedule, proc.pid, socket.gethostname(), _user(), time.time(), cmd, repeat,
-                        str(log.relative_to(self.project_dir)), gpus, own)
+                        str(log.relative_to(self.project_dir)), gpus, scratch=own, threads=threads,
+                        thread_limit=limit)
         tmp = runs / f"{rid}.json.tmp"  # complete or absent: runs() reads each record only once
         tmp.write_text(json.dumps(asdict(rec), indent=1))
         os.replace(tmp, runs / f"{rid}.json")
+        if threads > limit > 0:
+            self.oversubscribed.append(rec)
         return rec
 
     def rerun(self, jobs: list[str]) -> tuple[list[str], RunRecord]:
@@ -459,13 +478,31 @@ class Pipeliner:
                                                                                              STATUS_RUNNING)]
             if not ahead or rec.is_alive() is not True:
                 continue
-            gpus = rec.gpus if rec.gpus and is_waiting(_command_line(rec.pid)) else []
+            queued = (rec.gpus or rec.threads) and is_waiting(_command_line(rec.pid))
+            gpus, threads = (rec.gpus, rec.threads) if queued else ([], 0)
+            if gpus and threads:  # what it waits for now: the last thing its waiter said
+                said = self._waiting_for(rec)
+                gpus, threads = (gpus, 0) if said == "gpus" else ([], threads) if said == "threads" else (gpus, threads)
             for k, job in enumerate(ahead):
                 pr = p.processes[job]
                 missing = ([n for n in pr.inputs if not (self.project_dir / n).exists()]
                            if k == 0 and pr.status == STATUS_SCHEDULED else [])
-                out[job] = Held(rec, k == 0, missing, gpus if k == 0 else [])
+                out[job] = Held(rec, k == 0, missing, gpus if k == 0 else [], threads if k == 0 else 0)
         return out
+
+    def _waiting_for(self, rec: RunRecord) -> str:
+        """"gpus" or "threads": what the waiter of a run (gpu_wait.py) said last it waits for; "" when unknown."""
+        try:
+            with open(self.project_dir / rec.log, "rb") as fh:
+                fh.seek(0, os.SEEK_END)
+                fh.seek(max(0, fh.tell() - 4096))
+                tail = fh.read().decode("utf-8", "replace")
+        except OSError:
+            return ""
+        last = tail.rsplit("local queue: waiting: ", 1)
+        if len(last) < 2:
+            return ""
+        return "gpus" if last[1].startswith("GPU ") else "threads"
 
     def _check_free(self, jobs: list[str]) -> None:
         """Refuse to run jobs that a run still going is to run already (two pipeliners for one job: both
@@ -638,15 +675,18 @@ class Pipeliner:
 
     def _lock_leftovers(self, runs: list[RunRecord], table: dict[int, processes.Proc] | None = None
                         ) -> list[processes.Proc]:
-        """What keeps the GPU locks of the last of ``runs`` (newest first) besides its relion_pipeliner, if it was
-        started here through the GPU queue."""
+        """What keeps the GPU or thread locks of the last of ``runs`` (newest first) besides its relion_pipeliner,
+        if it was started here through the local queue."""
         rec = runs[0] if runs else None
-        if rec is None or rec.host != socket.gethostname() or not rec.gpus or "--locks" not in rec.command[:-1]:
+        if rec is None or rec.host != socket.gethostname() or not (rec.gpus or rec.threads) \
+                or "--locks" not in rec.command[:-1]:
             return []
         from cryo_savanna import gpu_wait
+        from cryo_savanna.project.gpu_queue import thread_lock_files
         lock_dir = rec.command[rec.command.index("--locks") + 1]
-        return processes.lock_leftovers(self.project_dir, [gpu_wait.lock_path(lock_dir, g) for g in rec.gpus],
-                                        rec.pid, table)
+        files = [gpu_wait.lock_path(lock_dir, g) for g in rec.gpus] + \
+            (thread_lock_files(lock_dir, rec.pid) if rec.threads else [])
+        return processes.lock_leftovers(self.project_dir, files, rec.pid, table)
 
     def force_abort(self, job: str, procs: list[processes.Proc]) -> None:
         """Kill ``procs`` (force_abort_targets) and mark the job as aborted; also what the job started since

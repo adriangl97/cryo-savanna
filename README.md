@@ -84,6 +84,7 @@ and can be used interchangeably, even at the same time, on the same project.
   again…** runs them again with their own settings, in order, in one run.
 - **Preview submission script…** in the job editor: the `run_submit.script`.
 - **Local GPU queue**: jobs started on this machine while their GPUs are in use by other RELION or external jobs will wait for them.
+- **Local thread queue**: jobs started on this machine wait until enough threads are free, counting those of every RELION job running here (also from RELION's own GUI or other projects); the status bar shows the threads, GPUs and RAM in use.
 - Jobs that hit the **SLURM time limit** are continued from their last iteration (Preferences; at most 3 times),
   and Continue has the last iteration filled in.
 - Failed jobs show their **likely cause** in the Overview and the tree (GPU or RAM out of memory, the

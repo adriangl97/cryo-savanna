@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import sys
 import time
+from collections.abc import Callable
 from html import escape as html_escape
 from pathlib import Path
 
@@ -36,6 +37,7 @@ from cryo_savanna import COPYRIGHT, LICENSE_NOTICE, __version__
 from cryo_savanna.env.relion_env import RelionEnv, relion_version, version_warning
 from cryo_savanna.images.cache import ThumbCache
 from cryo_savanna.jobdefs.model import JobDefs
+from cryo_savanna.project.gpu_queue import GpuQueue, Usage, usage
 from cryo_savanna.project.main_inputs import MainInputs
 from cryo_savanna.project.rebuild import find_job_dirs
 from cryo_savanna.project.slurm import QueueState, SlurmClient, SlurmError, SlurmMonitor
@@ -57,7 +59,11 @@ from cryo_savanna.ui.preferences import (
     apply_relion_defaults,
     setting,
     shortcuts_html,
+    thread_limit,
 )
+
+
+USAGE_POLL_S = 10.0  # seconds between looks at the threads and GPUs in use on this machine (a ps, two nvidia-smi)
 
 
 def _intervals(poll_s: float, queue_poll_s: float) -> tuple[float, float]:
@@ -173,6 +179,14 @@ class MainWindow(QMainWindow):
         self._queue_pool = QThreadPool(self)
         self._queue_pool.setMaxThreadCount(1)
         self._queue_tasks: set[_Call] = set()
+        # the threads and GPUs RELION jobs use on this machine (Preferences → Status bar), looked at in its own thread
+        self._usage_pool = QThreadPool(self)
+        self._usage_pool.setMaxThreadCount(1)
+        self._usage_tasks: set[_Call] = set()
+        self._usage_busy = False
+        self.usage: Usage | None = None
+        self.usage_error = ""
+        self.usage_fn: Callable[[], Usage] | None = None  # None: gpu_queue.usage (tests put a fake here)
         self.type_names = job_type_names(self.defs)
         self.snapshot: ProjectSnapshot | None = None
         self.current: str | None = None
@@ -202,7 +216,10 @@ class MainWindow(QMainWindow):
         self.clock.start(30_000)
         self.queue_timer = QTimer(self)
         self.queue_timer.timeout.connect(self._poll_queue)
+        self.usage_timer = QTimer(self)
+        self.usage_timer.timeout.connect(self._poll_usage)
         self._restore_settings()
+        self._apply_usage_setting()
         self.open_project(project_dir)
         self._check_version()
         pace_splitters(self)  # drags of the window's splitters, paced (ui/pacing.py)
@@ -413,9 +430,11 @@ class MainWindow(QMainWindow):
         apply_relion_defaults(s, self.env)
         self._pipeliner_exe = self.env.which("relion_pipeliner")
         self.actions.set_own_scratch(setting(s, "scratch_own"))
-        self.actions.set_gpu_queue(setting(s, "gpu_queue"))
+        self.actions.set_local_queue(setting(s, "gpu_queue"),
+                                     thread_limit(s) if setting(s, "thread_queue") else 0)
         self.actions.auto_continue = setting(s, "auto_continue")
         self.actions.editor.refresh_defaults()  # an open editor shows the new scratch directory
+        self._apply_usage_setting()
         style.apply_theme(QApplication.instance(), setting(s, "theme"))
         self.actions.set_editor_place(setting(s, "editor"))
         self._update_status()
@@ -597,6 +616,41 @@ class MainWindow(QMainWindow):
             box.setObjectName("version_warning")  # macOS shows no title on message boxes
             box.open()
 
+    # ------------------------------------------------------------------ threads and GPUs in use here
+    def _apply_usage_setting(self) -> None:
+        """Preferences → Status bar: look at the threads and GPUs in use every USAGE_POLL_S, or not at all."""
+        if setting(self.settings, "show_usage"):
+            if not self.usage_timer.isActive():
+                self.usage_timer.start(int(USAGE_POLL_S * 1000))
+            self._poll_usage()  # now, also with a new limit
+        else:
+            self.usage_timer.stop()
+            self.usage, self.usage_error = None, ""
+            self._update_status()
+
+    def _poll_usage(self) -> None:
+        if self._usage_busy:
+            return
+        self._usage_busy = True
+        limit = thread_limit(self.settings)
+        fn = self.usage_fn or (lambda: usage(GpuQueue(), limit))
+        call = _Call(("usage",), fn)
+        call.signals.done.connect(self._on_usage)
+        self._usage_tasks.add(call)
+        self._usage_pool.start(call)
+
+    @Slot(object, object)
+    def _on_usage(self, tag, result) -> None:
+        self._usage_tasks = {t for t in self._usage_tasks if t.tag is not tag}
+        self._usage_busy = False
+        if not setting(self.settings, "show_usage"):
+            return  # switched off while it looked
+        if isinstance(result, Exception):
+            self.usage, self.usage_error = None, f"{type(result).__name__}: {result}"
+        else:
+            self.usage, self.usage_error = result, ""
+        self._update_status()
+
     # ------------------------------------------------------------------ SLURM
     def _poll_queue(self) -> None:
         if self._queue_busy or self.slurm_monitor is None or self.snapshot is None:
@@ -747,8 +801,12 @@ class MainWindow(QMainWindow):
         parts = [f"{len(snap.jobs)} jobs"] + [f"{n} {s.lower()}" for s, n in counts.items() if s != "Succeeded"]
         self.status_project.setText(f"{snap.project_dir}   ·   " + ", ".join(parts))
         pipeliner = self._pipeliner_exe
-        state = [f"updated {time.strftime('%H:%M:%S', time.localtime(snap.loaded_at))}",
-                 f"polling every {self.poll_s:g} s"] + (["read-only"] if self.readonly else [])
+        state = [f"updated {time.strftime('%H:%M:%S', time.localtime(snap.loaded_at))}"]
+        if self.usage is not None:
+            state += [t for t in (self.usage.text(), self.usage.ram_text()) if t]
+        elif self.usage_error:
+            state.append("RELION here: ⚠ cannot tell")
+        state += [f"polling every {self.poll_s:g} s"] + (["read-only"] if self.readonly else [])
         if not pipeliner:
             state.append("relion_pipeliner not found")
         q = self.queue_state
@@ -766,6 +824,14 @@ class MainWindow(QMainWindow):
             state.insert(0, f"⚠ {self._error}")
         self.status_state.setText("   ·   ".join(state))
         tip = f"relion_pipeliner: {pipeliner or 'not on PATH'}"
+        if self.usage is not None:
+            tip += ("\n\nThreads and GPUs RELION jobs use on this machine (anyone's, any project; "
+                    f"limit: Preferences → Local thread queue):\n{self.usage.detail or 'none'}"
+                    + (f"\nGPUs in use: {', '.join(self.usage.gpus)}" if self.usage.gpus else "")
+                    + ("\n\nRAM: in use by every program on this machine (GB = 1024³ bytes)"
+                       if self.usage.ram_text() else ""))
+        elif self.usage_error:
+            tip += f"\n\nThreads and GPUs in use: {self.usage_error}"
         self.status_state.setToolTip(tip + (f"\n\n{self.version_warning}" if self.version_warning else ""))
 
     def show_error(self, text: str, log: str = "") -> None:
@@ -863,7 +929,8 @@ class MainWindow(QMainWindow):
             self.actions.editor_window.placed = self.actions.editor_window.restoreGeometry(s.value("editor_geometry"))
         self.actions.set_editor_place(setting(s, "editor"))
         self.actions.set_own_scratch(setting(s, "scratch_own"))
-        self.actions.set_gpu_queue(setting(s, "gpu_queue"))
+        self.actions.set_local_queue(setting(s, "gpu_queue"),
+                                     thread_limit(s) if setting(s, "thread_queue") else 0)
         self.actions.auto_continue = setting(s, "auto_continue")
         self.actions.hide_editor()
 
@@ -879,6 +946,7 @@ class MainWindow(QMainWindow):
         s.sync()  # now: the program may end without the usual clean-up (app.run_gui)
         self.poll_timer.stop()
         self.queue_timer.stop()
+        self.usage_timer.stop()
         self.clock.stop()
         self.hide()  # the window goes at once; what follows can take a moment
         if not self.actions.wait(5000):  # a change to the project: always let it finish writing
@@ -886,5 +954,6 @@ class MainWindow(QMainWindow):
                   flush=True)
             self.actions.wait(-1)
         self._queue_pool.waitForDone(2000)
+        self._usage_pool.waitForDone(2000)
         self._stop_worker(2000)  # reads still going after this are simply dropped (run_gui)
         super().closeEvent(e)
