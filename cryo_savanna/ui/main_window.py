@@ -219,6 +219,10 @@ class MainWindow(QMainWindow):
         self.search.setClearButtonEnabled(True)
         self.status_filter = QComboBox()
         self.status_filter.addItems(list(STATUS_FILTERS))
+        # as wide as its shorter items (the list shows them in full): room in the filter row for the tree's controls
+        self.status_filter.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
+        self.status_filter.setMinimumContentsLength(12)  # in wide characters: "Failed or aborted" fits
+        self.search.setMinimumWidth(14 * self.search.fontMetrics().averageCharWidth())
         self.hide_failed = QCheckBox("Hide failed/aborted")
         self.starred_only = QCheckBox(f"{style.STAR} Starred")
         self.starred_only.setToolTip("Only starred jobs (and the jobs they come from); Job → Star marks one")
@@ -248,7 +252,11 @@ class MainWindow(QMainWindow):
         filt.addWidget(self.starred_only)
         filt.addWidget(self.hide_failed)
         filt.addSpacing(8)
+        filt.addWidget(self.graph.controls)  # the tree's Fit, zoom and All links: with the tree only
         filt.addWidget(self.view_switch)
+        self.views.currentChanged.connect(
+            lambda i: self.graph.controls.setVisible(self.views.widget(i) is self.graph))
+        self.graph.controls.setVisible(self.views.currentWidget() is self.graph)
         left = QWidget()
         lv = QVBoxLayout(left)
         lv.setContentsMargins(4, 4, 0, 4)
@@ -312,7 +320,7 @@ class MainWindow(QMainWindow):
                                           "padding: 2px 8px; font-weight: bold; }")
         self.act_readonly = tb.addWidget(self.readonly_label)
         self.act_readonly.setVisible(self.readonly)
-        # List/Tree: the switch above the job views (Ctrl+1, Ctrl+2); the tree's own controls are in its corner
+        # List/Tree: the switch above the job views (Ctrl+1, Ctrl+2); the tree's own controls are next to the switch
         self.act_tree = self._action(None, "List", "Ctrl+1", lambda: self.views.setCurrentWidget(self.tree))
         self.act_graph = self._action(None, "Tree", "Ctrl+2", lambda: self.views.setCurrentWidget(self.graph))
         self.act_fit = self._action(None, "Fit tree", "Ctrl+0", self._fit_graph)

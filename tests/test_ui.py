@@ -771,13 +771,35 @@ def test_toolbar_has_the_project_then_the_job_actions(window, spa_project):
     assert _toolbar(w) == ["Open project…", "Refresh", "New job", "Clone…", "Continue…", "Run scheduled (1)…",
                            "Stop runs…"]
     assert not w.act_readonly.isVisible()  # only when read-only
-    # the tree's own controls are in the tree, the other programs in New job
+    # the tree's own controls are next to the List/Tree switch (with the tree only), the other programs in New job
     assert w.all_links is w.graph.controls.all_links
+    w.views.setCurrentWidget(w.tree)
+    assert not w.graph.controls.isVisibleTo(w)
+    w.views.setCurrentWidget(w.graph)
+    assert w.graph.controls.isVisibleTo(w) and w.graph.controls.parent() is not w.graph
     w.all_links.setChecked(True)
     assert w.graph.show_all_links
     before = w.graph.transform().m11()
     w.graph.controls.zoom_in.click()
     assert w.graph.transform().m11() > before
+
+
+def test_graph_wheel_steps_are_drawn_together(window, spa_project, qtbot):
+    from qtpy.QtCore import QPoint, QPointF
+    from qtpy.QtGui import QWheelEvent
+    from qtpy.QtWidgets import QApplication
+    w = window(spa_project)
+    g = w.graph
+    w.views.setCurrentWidget(g)
+    factors = []
+    zoom = g.zoom
+    g.zoom = lambda f: (factors.append(f), zoom(f))
+    vp = g.viewport()
+    for _ in range(4):  # arrive together: one frame
+        QApplication.sendEvent(vp, QWheelEvent(QPointF(50, 50), QPointF(vp.mapToGlobal(QPoint(50, 50))), QPoint(),
+                                               QPoint(0, 120), Qt.NoButton, Qt.NoModifier, Qt.NoScrollPhase, False))
+    qtbot.waitUntil(lambda: not g._zoom_timer.isActive())
+    assert factors == [pytest.approx(1.15 ** 4)]
 
 
 def test_toolbar_tooltips_give_the_shortcut_and_why_not(window, spa_project):

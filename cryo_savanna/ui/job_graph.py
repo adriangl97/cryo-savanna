@@ -5,12 +5,18 @@
 Main-data-path links are solid. Other links (references, masks, ...) are dashed and drawn for
 the selected job only, unless all links are switched on. Painting is plain QPainter on a raster
 viewport, and jobs become plain status-coloured blocks when zoomed far out, so it stays usable
-over X11 forwarding.
+over X11 forwarding. Dragging scrolls the cards on the X server and sends only the strip that comes
+into view: the view has no scroll bars and nothing over the cards, which would otherwise be painted
+again (and sent again) at every step of a drag. Its controls (GraphControls) are in the main window's
+filter row. Zooming repaints, and sends, the whole view: the wheel's steps are gathered into frames
+spaced by how long a frame takes.
 """
 
 from __future__ import annotations
 
-from qtpy.QtCore import QEvent, QPoint, QPointF, QRectF, Qt, Signal
+import time
+
+from qtpy.QtCore import QEvent, QPoint, QPointF, QRectF, Qt, QTimer, Signal
 from qtpy.QtGui import (
     QColor,
     QFont,
@@ -25,7 +31,6 @@ from qtpy.QtGui import (
 )
 from qtpy.QtWidgets import (
     QCheckBox,
-    QFrame,
     QGraphicsItem,
     QGraphicsPathItem,
     QGraphicsScene,
@@ -33,6 +38,7 @@ from qtpy.QtWidgets import (
     QHBoxLayout,
     QStyleOptionGraphicsItem,
     QToolButton,
+    QWidget,
 )
 
 from cryo_savanna.project.snapshot import JobInfo, ProjectSnapshot
@@ -47,6 +53,8 @@ PAD_L, PAD_R, PAD_V = 15.0, 10.0, 6.0  # text padding inside a card (left includ
 MIN_CARD_W = 230.0
 STAR_W = 16.0  # kept free right of the header for the star, so a star does not change the layout
 MARGIN = 4.0  # around a card, for its frame (the selection's, the job editor input's)
+WHEEL_STEP = 1.15  # zoom factor of one notch of the mouse wheel
+ZOOM_FRAME_S = 0.04  # at least this long between two wheel-zoom frames (longer when a frame takes longer)
 
 
 class CardFonts:
@@ -367,15 +375,16 @@ class EdgeItem(QGraphicsPathItem):
 
 # ---------------------------------------------------------------------------- view
 
-class GraphControls(QFrame):
-    """Fit, zoom out / in and "All links", in the tree's top-right corner (over the cards, on a panel)."""
+class GraphControls(QWidget):
+    """Fit, zoom out / in and "All links": a row the main window puts in its filter row, shown with the tree (not
+    over the cards: whatever is over them is painted again at every step of a drag)."""
 
     def __init__(self, view: JobGraphView):
-        super().__init__(view)
+        super().__init__()
         self.setObjectName("graph_controls")
         lay = QHBoxLayout(self)
-        lay.setContentsMargins(6, 3, 6, 3)
-        lay.setSpacing(2)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(0)
 
         def button(text: str, tip: str, slot) -> QToolButton:
             b = QToolButton(self)
@@ -390,22 +399,12 @@ class GraphControls(QFrame):
         self.fit = button("Fit", f"Show the whole tree ({keys})", view.fit)
         self.zoom_out = button("−", "Zoom out (or the mouse wheel)", lambda: view.zoom_centered(1 / 1.25))
         self.zoom_in = button("+", "Zoom in (or the mouse wheel)", lambda: view.zoom_centered(1.25))
-        lay.addSpacing(6)
+        lay.addSpacing(4)
         self.all_links = QCheckBox("All links", self)
         self.all_links.setToolTip("Also draw links to references, masks and other secondary inputs of every job\n"
                                   "(otherwise only for the selected job)")
         self.all_links.toggled.connect(view.set_show_all_links)
         lay.addWidget(self.all_links)
-
-    def paintEvent(self, e) -> None:  # a panel in the palette's colours (they change with the theme)
-        p = QPainter(self)
-        p.setRenderHint(QPainter.Antialiasing, True)
-        bg = QColor(self.palette().color(QPalette.Window))
-        bg.setAlpha(235)
-        p.setBrush(bg)
-        p.setPen(QPen(self.palette().color(QPalette.Mid), 1))
-        p.drawRoundedRect(QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5), 6, 6)
-        p.end()
 
 
 class JobGraphView(QGraphicsView):
@@ -419,6 +418,10 @@ class JobGraphView(QGraphicsView):
         self.setRenderHint(QPainter.Antialiasing, True)
         self.setRenderHint(QPainter.TextAntialiasing, True)
         self.setDragMode(QGraphicsView.ScrollHandDrag)
+        # No scroll bars: both are painted in full at every step of a drag, ten times the pixels of the cards'
+        # newly shown strip over X11. Drag, the wheel, Fit and selecting a job move the view.
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.setTransformationAnchor(QGraphicsView.AnchorUnderMouse)
         self.setViewportUpdateMode(QGraphicsView.SmartViewportUpdate)
         self.setOptimizationFlag(QGraphicsView.DontSavePainterState, True)
@@ -437,20 +440,11 @@ class JobGraphView(QGraphicsView):
         self.inputs: dict[str, list[str]] = {}  # the open job editor's input jobs (set_inputs)
         self.scene().selectionChanged.connect(self._on_selection)
         self.controls = GraphControls(self)
-
-    def _place_controls(self) -> None:
-        c, vp = self.controls, self.viewport().geometry()
-        c.adjustSize()
-        c.move(vp.right() - c.width() - 8, vp.top() + 8)
-        c.raise_()
-
-    def resizeEvent(self, e) -> None:
-        super().resizeEvent(e)
-        self._place_controls()
-
-    def showEvent(self, e) -> None:
-        super().showEvent(e)
-        self._place_controls()
+        self._wheel_factor = 1.0  # the wheel's zoom not drawn yet
+        self._next_zoom = 0.0  # time.monotonic() from which the next wheel-zoom frame may be drawn
+        self._zoom_timer = QTimer(self)
+        self._zoom_timer.setSingleShot(True)
+        self._zoom_timer.timeout.connect(self._wheel_frame)
 
     def set_snapshot(self, snap: ProjectSnapshot) -> None:
         # the running jobs too: their cards are taller (card_progress_lines), so the tree is laid out again when
@@ -600,8 +594,10 @@ class JobGraphView(QGraphicsView):
                 self.centerOn(item)
 
     def zoom(self, factor: float) -> None:
-        s = self.transform().m11() * factor
-        if 0.05 <= s <= 4.0:
+        """Scale by ``factor``, kept within 0.05 to 4 times."""
+        s = self.transform().m11()
+        factor = min(max(s * factor, 0.05), 4.0) / s
+        if abs(factor - 1.0) > 1e-6:
             self.scale(factor, factor)
 
     def zoom_centered(self, factor: float) -> None:
@@ -612,9 +608,24 @@ class JobGraphView(QGraphicsView):
         self.setTransformationAnchor(anchor)
 
     def wheelEvent(self, e):
+        """Gather the wheel's steps (a fine-grained wheel or a touchpad sends many small ones); _wheel_frame draws
+        them, once the events waiting are handled and the last frame's spacing is over."""
         steps = e.angleDelta().y() / 120.0
         if steps:
-            self.zoom(1.15 ** steps)
+            self._wheel_factor *= WHEEL_STEP ** steps
+            if not self._zoom_timer.isActive():
+                self._zoom_timer.start(max(0, round((self._next_zoom - time.monotonic()) * 1000)))
+        e.accept()
+
+    def _wheel_frame(self) -> None:
+        """Zoom by the steps gathered and draw at once, to time it: over X11 the time includes handing the frame
+        to the connection, so frames are spaced by at least as long as one takes and do not pile up."""
+        factor, self._wheel_factor = self._wheel_factor, 1.0
+        start = time.monotonic()
+        self.zoom(factor)
+        self.viewport().repaint()
+        took = time.monotonic() - start
+        self._next_zoom = start + max(ZOOM_FRAME_S, 2 * took)
 
     def contextMenuEvent(self, e) -> None:
         item = self.itemAt(e.pos())

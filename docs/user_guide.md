@@ -47,8 +47,8 @@ sent, so a slow connection stays usable.
   inputs, click "make main input" next to that input in the Overview; "use the default" undoes it.
   The choice is saved in the project (`.cryo-savanna/main_inputs.json`; with `--readonly`, for the
   session only). The tree draws the same links as a graph; references and masks are dashed, for the selected job or for all
-  with "All links". The Tree's top-right corner has Fit (Ctrl+0), zoom out and in (or the mouse wheel) and
-  "All links". The filter (Ctrl+F) finds jobs by name, alias, type, the program of External
+  with "All links". With the Tree shown, the filter row has Fit (Ctrl+0), zoom out and in (or the mouse wheel)
+  and "All links". The filter (Ctrl+F) finds jobs by name, alias, type, the program of External
   jobs, and SLURM state or node; the status menu and "Hide failed/aborted" narrow it further.
   **Job → Star** (Ctrl+B, or right-click) marks a job with ★ in the list and on its card in the tree;
   "★ Starred" shows only the starred jobs and the jobs they come from. Stars are saved in the project
