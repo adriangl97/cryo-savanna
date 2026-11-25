@@ -169,6 +169,10 @@ class ActionsBase(QObject):
         """Enable what makes sense for the selected job, the project and this shell (JobActions)."""
         raise NotImplementedError
 
+    def _kill_to_overwrite(self, job: str) -> Callable[[], None] | None:
+        """What ends a running job before it is overwritten, after asking (RunActions)."""
+        raise NotImplementedError
+
     def _ready(self) -> tuple[Path, Pipeliner, PipelineOps]:
         """The open project, its pipeliner and its operations (set together, by set_project; the actions that
         change a project are enabled only once it is)."""
@@ -232,8 +236,8 @@ class ActionsBase(QObject):
         """(anything to undelete, how many runs Stop runs can stop, the jobs runs still going hold, the jobs out
         of date)."""
         held = pl.held_jobs(pipeline) if pl is not None else {}
-        stoppable = len({r.id for r in pl.repeating_runs()} | {h.run.id for h in held.values() if h.stoppable}) \
-            if pl is not None else 0
+        stoppable = len({r.id for r in pl.repeating_runs()} | {h.run.id for h in held.values() if h.stoppable}
+                        | {r.id for r, _ in pl.stuck_runs(pipeline, held)}) if pl is not None else 0
         stale = checker.check(pipeline) if checker is not None and pipeline is not None else {}
         return ops is not None and bool(ops.trash()), stoppable, held, stale
 

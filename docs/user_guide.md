@@ -102,9 +102,10 @@ polling interval (Preferences, or `--poll`), and views of running jobs read new 
   scheduled jobs; *Run all now* starts each in its own `relion_pipeliner`, so they run side by side (it
   asks first when several would run on this machine rather than the queue). Above 20 jobs it asks again as a safety measure.
 - **Clone** (Ctrl+D), **Continue**, **Overwrite** (the job goes to Trash/ and runs again in the same
-  directory with new settings), **Schedule**, **Run scheduled** (Ctrl+R), **Stop runs** (a repeating run stops after its
+  directory with new settings, **Schedule**, **Run scheduled** (Ctrl+R), **Stop runs** (a repeating run stops after its
   current job. A run that waits for the input files of its next job stops now, and the job stays
-  Scheduled), **Abort** (see below), **Clean**,
+  Scheduled,
+  **Abort** (see below), **Clean**,
   **Set alias** (F2), **Star** (Ctrl+B), **Mark as finished / failed**, **Delete** (Del, to Trash/), **Undelete**.
   Trash/ keeps one copy per job directory: overwriting or deleting a job whose earlier version is
   already there (after an overwrite) deletes that version for good, and the confirmation says so.
@@ -121,7 +122,10 @@ polling interval (Preferences, or `--poll`), and views of running jobs read new 
   `>> run.out`, as RELION starts them, also from its own GUI), asks before it kills them (SIGTERM, then
   SIGKILL after 5 s), and marks the job aborted (RELION_JOB_EXIT_ABORTED, and a line at the end of run.err),
   so a run of several jobs stops as for an abort. Files the job was writing may be left incomplete. A job
-  started on another machine is force-aborted from a cryo-savanna there.
+  started on another machine is force-aborted from a cryo-savanna there. When no process of the job is left
+  but the relion_pipeliner that ran it still waits for it, Force abort (and Overwrite) offers to end that
+  run: the job's RELION_JOB_EXIT_ABORTED is written, and its relion_pipeliner is stopped (under the pipeline
+  lock) if it does not end by itself within 30 s.
 - **CLI tools** (menu bar, and New job → RELION command-line tools): RELION programs that RELION's GUI has no job for (relion_image_handler,
   relion_reconstruct, …) as job forms; they run as External jobs and appear in the pipeline.
   With MPI they run locally only, with at most RELION_ERROR_LOCAL_MPI processes (default 32), as

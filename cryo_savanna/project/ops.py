@@ -74,7 +74,9 @@ from cryo_savanna.project.lock import PipelineLock
 from cryo_savanna.project.pipeline import Node, Pipeline, Process
 from cryo_savanna.project.star import StarBlock, StarError, read_star, write_star
 from cryo_savanna.relion_consts import (
+    STATUS_ABORTED,
     STATUS_FAILED,
+    STATUS_RUNNING,
     STATUS_SCHEDULED,
     STATUS_SUCCEEDED,
     job_type_for_label,
@@ -228,6 +230,19 @@ class PipelineOps:
             missing = {n for n in pr.outputs if not self._path(n).exists()}
             kept, _ = split_pipeline(p, set(), missing)
             kept.write(self.project_dir, self.pipeline_name, lock)
+
+    def mark_aborted(self, job: str) -> bool:
+        """Set a job the pipeline still has as Running to Aborted, and nothing else (its outputs stay as they are):
+        for a job whose processes were killed and that no relion_pipeliner will set so (Pipeliner.wait_released).
+        False when it was not Running any more."""
+        with self._lock("markAsAborted") as lock:
+            p = self._read()
+            pr = self._process(p, job)
+            if pr.status != STATUS_RUNNING:
+                return False
+            pr.status = STATUS_ABORTED
+            p.write(self.project_dir, self.pipeline_name, lock)
+            return True
 
     def _glob(self, pattern: str) -> list[str]:
         # glob(3) as RELION uses it: sorted, paths relative to the project

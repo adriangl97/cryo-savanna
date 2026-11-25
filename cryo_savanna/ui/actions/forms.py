@@ -225,9 +225,6 @@ class FormActions(_Base):
             QMessageBox.warning(self.window, "Overwrite", f"{(job or 'The job').rstrip('/')} is not in the pipeline any more.")
             return
         p = snap.pipeline
-        if snap.jobs[job].status == "Running":
-            QMessageBox.warning(self.window, "Overwrite", f"{self._label(job)} is running: abort it first.")
-            return
         if alias:
             others = Pipeline(job_counter=p.job_counter, processes={n: pr for n, pr in p.processes.items() if n != job})
             try:
@@ -235,7 +232,13 @@ class FormActions(_Base):
             except OpsError as e:
                 QMessageBox.warning(self.window, "Alias", str(e))
                 return
-        ask = (f"Overwrite {self._label(job)}?\n\nIts directory and files go to Trash/, and the job "
+        end = None  # a running job: ended first (its processes killed), after asking (RunActions)
+        if snap.jobs[job].status == "Running":
+            end = self._kill_to_overwrite(job)
+            if end is None:
+                return
+        ask = (f"Overwrite {self._label(job)}?\n\n" + ("It is ended first, then its" if end else "Its")
+               + " directory and files go to Trash/, and the job "
                f"{'is scheduled' if schedule_only else 'runs'} again as {job.rstrip('/')} with these settings.")
         users = p.children(job)
         if users:
@@ -248,6 +251,8 @@ class FormActions(_Base):
         refs = self.editor.reference_maps()  # several reference maps: their list goes in the job's directory
 
         def overwrite_and_run():
+            if end is not None:
+                end()
             res = pl.overwrite_job(job, js, alias or None, refs)
             rec = None if schedule_only else pl.run([res.job])
             return res, rec

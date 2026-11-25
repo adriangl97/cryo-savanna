@@ -15,8 +15,9 @@ import pytest
 from cryo_savanna.env.relion_env import RelionEnv
 from cryo_savanna.jobdefs.model import JobDefs
 from cryo_savanna.project import processes as P
+from cryo_savanna.project.jobstar import JobStar
 from cryo_savanna.project.pipeline import Pipeline
-from cryo_savanna.project.pipeliner import Pipeliner
+from cryo_savanna.project.pipeliner import Pipeliner, PipelinerError
 from cryo_savanna.project.star import write_star
 
 UID = os.getuid()
@@ -320,3 +321,227 @@ def test_lock_leftovers_are_only_those_of_the_run():
         t[400] = P.Proc(400, 1, UID, "S", "relion_pipeliner --RunJobs External/job020/ --schedule cryo-savanna")
         holders.add(400)  # another run got the GPUs since
         assert P.lock_leftovers("/p", ["/l"], 100, t) == []
+
+
+def test_a_killed_job_of_a_run_started_here_can_then_be_overwritten(tmp_path, monkeypatch):
+    """Overwrite of a running job (ui/actions/running.py _kill_to_overwrite): kill it, wait until its
+    relion_pipeliner has set it Aborted and ended (wait_released), then overwrite it in its place."""
+    from tests.fixtures.fake_pipeliner import install
+    install(tmp_path / "bin")
+    project = tmp_path / "p"
+    project.mkdir()
+    write_star(project / "default_pipeline.star", Pipeline(job_counter=1).to_blocks(), atomic=False)
+    environ = dict(os.environ, PATH=f"{tmp_path / 'bin'}{os.pathsep}{os.environ['PATH']}")
+    pl = Pipeliner(project, exe=str(tmp_path / "bin/relion_pipeliner"), environ=environ)
+    js = JobDefs.load().variant("relion.external").new_jobstar(RelionEnv({}))
+    js.options.update({"fn_exe": ext_script(project), "do_queue": "No", "nr_threads": "1"})
+    job = pl.add_job(js).job
+    rec = pl.run([job])
+    monkeypatch.setattr(P, "TERM_WAIT_S", 0.3)
+    try:
+        deadline = time.time() + 20
+        procs, _ = pl.force_abort_targets(job)
+        while len(procs) < 2 and time.time() < deadline:
+            time.sleep(0.1)
+            procs, _ = pl.force_abort_targets(job)
+        assert Pipeline.read(project).processes[job].status == "Running"
+        pl.force_abort(job, procs)
+        pl.wait_released(job, poll_s=0.1, settle_s=0, release_s=20)  # settle 0: only its run's own end counts
+        assert rec.is_alive() is False and Pipeline.read(project).processes[job].status == "Aborted"
+        res = pl.overwrite_job(job, js)
+        assert res.job == job and Pipeline.read(project).processes[job].status == "Scheduled"
+        assert (project / "Trash" / job).is_dir()
+    finally:
+        for p in P.job_processes(project, job, [rec.pid]):
+            os.kill(p.pid, 9)
+
+
+def test_a_killed_job_no_run_here_runs_is_set_aborted(spa_copy):
+    """Started elsewhere (RELION's GUI): nothing here sets it Aborted, so wait_released does after settle_s."""
+    job = "Polish/job015/"  # Running in the pipeline, no run recorded
+    pl = Pipeliner(spa_copy, exe="/bin/false", environ={})
+    pl.wait_released(job, poll_s=0.05, settle_s=0.2)
+    assert Pipeline.read(spa_copy).processes[job].status == "Aborted"
+    pl.wait_released(job, poll_s=0.05, settle_s=0)  # not Running any more: at once
+
+
+def test_overwrite_of_a_running_job_from_the_window_kills_it_first(qtbot, tmp_path, spa_copy, monkeypatch):
+    pytest.importorskip("pytestqt")
+    from qtpy.QtCore import QSettings
+    from qtpy.QtWidgets import QMessageBox
+
+    from cryo_savanna.jobdefs.flags import FlagSource
+    from cryo_savanna.project.jobstar import JobStar
+    from cryo_savanna.ui.main_window import MainWindow
+    job = "Polish/job015/"  # Running in the pipeline
+    for f in ("RELION_JOB_EXIT_SUCCESS", "RELION_JOB_EXIT_FAILURE", "RELION_JOB_EXIT_ABORTED"):
+        (spa_copy / job / f).unlink(missing_ok=True)
+    star = spa_copy / job / "job.star"
+    star.write_text(re.sub(r"(do_queue\s+)Yes", r"\1No", star.read_text()))  # run on a machine
+    for box in ("question", "warning", "critical", "information"):
+        monkeypatch.setattr(QMessageBox, box, lambda *args, box=box, **k: pytest.fail(f"{box}: {args[1:]}"))
+    w = MainWindow(spa_copy, poll_s=1000, env=RelionEnv({}), flag_source=FlagSource(which=lambda p: None),
+                   settings=QSettings(str(tmp_path / "s.ini"), QSettings.IniFormat))
+    qtbot.addWidget(w)
+    w.load_now()
+    w.select_job(job)
+    a = w.actions
+    told = []
+    monkeypatch.setattr(QMessageBox, "information", lambda *args, **k: told.append(args[2]))
+    assert a._kill_to_overwrite(job) is None and "no process of it" in told[0]  # nothing of it runs here
+
+    sh = start(spa_copy, job)
+    try:
+        wait_found(spa_copy, job, 2)
+        asked = []
+        monkeypatch.setattr(a, "_confirm_kill", lambda label, procs, **k: asked.append(k) or False)
+        assert a._kill_to_overwrite(job) is None and sh.poll() is None  # said no: left running
+        assert asked[0]["button"] == "Kill and overwrite"
+        monkeypatch.setattr(a, "_confirm_kill", lambda label, procs, **k: True)
+        monkeypatch.setattr(QMessageBox, "question", lambda *args, **k: QMessageBox.Yes)
+        overwritten = []
+        monkeypatch.setattr(a.pipeliner, "wait_released", lambda j: overwritten.append(("released", j)))
+        def overwrite_job(j, *rest):
+            overwritten.append(("overwrite", j))
+            raise PipelinerError("stop here")  # (what an overwrite does is tested in test_pipeliner.py)
+        monkeypatch.setattr(a.pipeliner, "overwrite_job", overwrite_job)
+        warned = []
+        monkeypatch.setattr(QMessageBox, "warning", lambda *args, **k: warned.append(args[2]))
+        a.editor.job = job
+        a._submit_overwrite(JobStar.read(star), "", schedule_only=True)
+        a.wait()
+        assert sh.wait(10) is not None and (spa_copy / job / "RELION_JOB_EXIT_ABORTED").exists()
+        assert overwritten == [("released", job), ("overwrite", job)]  # in that order, after the kill
+        qtbot.waitUntil(lambda: bool(warned), timeout=5000)  # (signalled to the window)
+        assert warned[0].startswith("stop here")
+    finally:
+        sh.kill()
+
+
+def _stuck_run(tmp_path, waits: str):
+    """A run whose job ended without RELION's exit file (a crash, the out-of-memory killer) and whose
+    relion_pipeliner waits for it (FAKE_PIPELINER_WAITS, as RELION's): what Stop runs could not see."""
+    from tests.fixtures.fake_pipeliner import install
+    install(tmp_path / "bin")
+    project = tmp_path / "p"
+    project.mkdir()
+    write_star(project / "default_pipeline.star", Pipeline(job_counter=1).to_blocks(), atomic=False)
+    environ = dict(os.environ, PATH=f"{tmp_path / 'bin'}{os.pathsep}{os.environ['PATH']}", FAKE_PIPELINER_WAITS=waits)
+    pl = Pipeliner(project, exe=str(tmp_path / "bin/relion_pipeliner"), environ=environ)
+    crash = project / "crash.sh"
+    crash.write_text("#!/bin/sh\nexit 139\n")
+    crash.chmod(0o755)
+    js = JobDefs.load().variant("relion.external").new_jobstar(RelionEnv({}))
+    js.options.update({"fn_exe": str(crash), "do_queue": "No", "nr_threads": "1"})
+    job = pl.add_job(js).job
+    rec = pl.run([job])
+    deadline = time.time() + 20
+    while not (project / job / "run.err").exists() and time.time() < deadline:
+        time.sleep(0.1)
+    time.sleep(0.5)  # the job has ended: the pipeliner waits
+    return project, pl, job, rec
+
+
+def _age(project: Path, job: str, s: float = 3600) -> None:
+    """Its directory as if nothing changed in it for ``s`` seconds (stuck_runs waits STUCK_GRACE_S)."""
+    then = time.time() - s
+    for f in (project / job, project / job / "run.out", project / job / "run.err"):
+        if f.exists():
+            os.utime(f, (then, then))
+
+
+def test_a_run_waiting_for_a_job_that_ended_without_exit_file_can_be_stopped(tmp_path):
+    project, pl, job, rec = _stuck_run(tmp_path, "1")
+    try:
+        assert rec.is_alive() is True and Pipeline.read(project).processes[job].status == "Running"
+        assert pl.stuck_runs() == []  # its directory just changed: perhaps a job being started
+        _age(project, job)
+        assert pl.stuck_runs() == [(rec, job)]
+        assert (rec.id, "stuck") in [(r.id, k) for r, k in pl.stoppable_runs()]
+        pl.end_stuck(rec, job, wait_s=20)  # the exit file it waits for: it ends by itself
+        assert rec.is_alive() is False and Pipeline.read(project).processes[job].status == "Aborted"
+        assert "no process of this job was left" in (project / job / "run.err").read_text()
+        assert pl.stuck_runs() == [] and pl.stoppable_runs() == []
+    finally:
+        if rec.is_alive():
+            os.kill(rec.pid, 9)
+
+
+def test_a_stuck_run_that_does_not_see_the_exit_file_is_ended(tmp_path):
+    project, pl, job, rec = _stuck_run(tmp_path, "forever")
+    try:
+        _age(project, job)
+        assert pl.stuck_runs() == [(rec, job)]
+        pl.end_stuck(rec, job, wait_s=0.5)
+        assert rec.is_alive() is False and Pipeline.read(project).processes[job].status == "Aborted"
+        js = JobStar.read(project / job / "job.star")
+        assert pl.overwrite_job(job, js).job == job  # and it can be overwritten
+    finally:
+        if rec.is_alive():
+            os.kill(rec.pid, 9)
+
+
+def test_a_job_with_processes_left_is_not_stuck(tmp_path):
+    project, pl, job, rec = _stuck_run(tmp_path, "1")
+    sh = start(project, job)  # a program of it still runs (as one started in the background)
+    try:
+        wait_found(project, job, 1)
+        _age(project, job)
+        assert pl.stuck_runs() == []
+        with pytest.raises(PipelinerError, match="running again"):
+            pl.end_stuck(rec, job)
+        assert not (project / job / "RELION_JOB_EXIT_ABORTED").exists()
+    finally:
+        sh.kill()
+        if rec.is_alive():
+            os.kill(rec.pid, 9)
+
+
+def test_a_stuck_run_from_the_window(qtbot, tmp_path, monkeypatch):
+    """Stop runs lists it (and counts it), and Force abort of its job, which finds no process, offers to end it."""
+    pytest.importorskip("pytestqt")
+    from qtpy.QtCore import QSettings
+    from qtpy.QtWidgets import QInputDialog, QMessageBox
+
+    from cryo_savanna.jobdefs.flags import FlagSource
+    from cryo_savanna.ui.main_window import MainWindow
+    for box in ("question", "warning", "critical", "information"):
+        monkeypatch.setattr(QMessageBox, box, lambda *args, box=box, **k: pytest.fail(f"{box}: {args[1:]}"))
+    runs = []
+    for i in (1, 2):
+        project, pl, job, rec = _stuck_run(tmp_path / str(i), "1")
+        _age(project, job)
+        runs.append((project, job, rec))
+    try:
+        project, job, rec = runs[0]
+        w = MainWindow(project, poll_s=1000, env=RelionEnv({}), flag_source=FlagSource(which=lambda p: None),
+                       settings=QSettings(str(tmp_path / "s.ini"), QSettings.IniFormat))
+        qtbot.addWidget(w)
+        w.load_now()
+        a = w.actions
+        a.look_at_project_now()
+        assert a.act_stop_runs.isEnabled() and "(1)" in a.act_stop_runs.text()
+        shown = []
+        monkeypatch.setattr(QInputDialog, "getItem", lambda parent, title, text, items, *r: shown.append(items)
+                            or (items[0], True))
+        a.stop_runs()
+        a.wait()
+        assert "is not running any more" in shown[0][0]
+        assert rec.is_alive() is False and Pipeline.read(project).processes[job].status == "Aborted"
+
+        project, job, rec = runs[1]  # Force abort: no process of it, its run waits
+        w.close()
+        w = MainWindow(project, poll_s=1000, env=RelionEnv({}), flag_source=FlagSource(which=lambda p: None),
+                       settings=QSettings(str(tmp_path / "s2.ini"), QSettings.IniFormat))
+        qtbot.addWidget(w)
+        w.load_now()
+        w.select_job(job)
+        a = w.actions
+        monkeypatch.setattr(a, "_confirm_end_run", lambda label, r, title, button, then="": r.pid == rec.pid)
+        a.force_abort(job)
+        a.wait()
+        assert rec.is_alive() is False and Pipeline.read(project).processes[job].status == "Aborted"
+    finally:
+        for _, _, r in runs:
+            if r.is_alive():
+                os.kill(r.pid, 9)
