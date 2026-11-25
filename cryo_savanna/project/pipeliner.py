@@ -45,6 +45,7 @@ from cryo_savanna.project.ops import TRASH_DIR, PipelineOps, placeholder
 from cryo_savanna.project.pipeline import Pipeline
 from cryo_savanna.relion_consts import (
     RELION_JOB_ABORT_NOW,
+    RELION_JOB_EXIT_ABORTED,
     RELION_JOB_EXIT_SUCCESS,
     STATUS_RUNNING,
     STATUS_SCHEDULED,
@@ -53,6 +54,10 @@ from cryo_savanna.relion_consts import (
 
 GUI_DIR = ".cryo-savanna"
 SCHEDULE = "cryo-savanna"  # one pipeline_cryo-savanna.log for all single runs (RELION writes it in the project)
+ABORT_SETTLE_S = 30.0  # wait_released: how long a job no run here runs has for its own program to set it Aborted
+ABORT_RELEASE_S = 120.0  # wait_released: how long a run here has to see its killed job and end
+STUCK_GRACE_S = 30.0  # stuck_runs: a job's directory unchanged this long (not one being started)
+STUCK_END_S = 30.0  # end_stuck: how long a stuck run has to see its job's exit file and end by itself
 
 
 class PipelinerError(RuntimeError):
@@ -480,12 +485,49 @@ class Pipeliner:
         current job), (run, "waiting") for a run on this host that waits for the input files of its next job
         (its relion_pipeliner can be ended now: nothing of the job has started)."""
         out: dict[str, tuple[RunRecord, str]] = {r.id: (r, "repeating") for r in self.repeating_runs()}
-        for held in self.held_jobs(pipeline).values():
-            if held.stoppable and held.run.id not in out:
-                out[held.run.id] = (held.run, "waiting")
+        p = pipeline if pipeline is not None else Pipeline.read(self.project_dir)
+        held = self.held_jobs(p)
+        for h in held.values():
+            if h.stoppable and h.run.id not in out:
+                out[h.run.id] = (h.run, "waiting")
+        for rec, _job in self.stuck_runs(p, held):
+            out[rec.id] = (rec, "stuck")  # (a repeating run too: it would never get to the end of its job)
         return sorted(out.values(), key=lambda x: x[0].started, reverse=True)
 
-    def end_run(self, rec: RunRecord) -> None:
+    def stuck_runs(self, pipeline: Pipeline | None = None, held: dict[str, Held] | None = None
+                   ) -> list[tuple[RunRecord, str]]:
+        """(run, job) for the runs started here whose relion_pipeliner waits for a job that no longer runs: the
+        job it is at is Running in the pipeline, was run on this machine (not submitted to a queue), has no exit
+        file, has no process left on this machine, and nothing in its directory changed for STUCK_GRACE_S (not
+        a job being started). RELION's pipeliner waits for the job's exit file for ever, so a program that
+        ended without writing one (a crash, the out-of-memory killer, killed by hand) leaves the run going,
+        holding the job and the run's GPUs, until it is ended (end_stuck)."""
+        p = pipeline if pipeline is not None else Pipeline.read(self.project_dir)
+        held = held if held is not None else self.held_jobs(p)
+        now = time.time()
+        maybe = []
+        for job, h in held.items():
+            d = self.project_dir / job
+            if not h.current or h.stoppable or p.processes[job].status != STATUS_RUNNING or _exit_file(d):
+                continue
+            try:
+                if JobStar.read(d / "job.star").options.get("do_queue", "No") == "Yes":
+                    continue  # its processes are on the cluster (a SLURM job that ended: SlurmMonitor marks it)
+                changed = max((d / f).stat().st_mtime for f in ("", "run.out", "run.err") if (d / f).exists())
+            except (OSError, ValueError, KeyError):
+                continue
+            if now - changed >= STUCK_GRACE_S:
+                maybe.append((h.run, job))
+        if not maybe:
+            return []
+        try:
+            table = processes.process_table()
+        except processes.ForceAbortError:
+            return []
+        return [(rec, job) for rec, job in maybe
+                if not processes.job_processes(self.project_dir, job, [rec.pid], table=table)]
+
+    def end_run(self, rec: RunRecord, why: str = "a run that waits for its inputs") -> None:
         """End the relion_pipeliner of a run that waits for input files (stoppable_runs). It is ended while
         cryo-savanna holds RELION's pipeline lock, so it is not in the middle of writing the pipeline (RELION
         writes the file in place: a pipeliner ended there leaves it empty). The jobs it was to run stay
@@ -495,7 +537,7 @@ class Pipeliner:
         args = _command_line(rec.pid)
         if rec.is_alive() is not True or (args is not None and "--RunJobs" not in args):
             return  # it ended meanwhile
-        with PipelineLock(self.project_dir, message="cryo-savanna: stopping a run that waits for its inputs"):
+        with PipelineLock(self.project_dir, message=f"cryo-savanna: stopping {why}"):
             try:
                 os.kill(rec.pid, signal.SIGTERM)
             except ProcessLookupError:
@@ -505,6 +547,31 @@ class Pipeliner:
                 time.sleep(0.2)
         if rec.is_alive():
             raise PipelinerError(f"relion_pipeliner {rec.pid} did not stop.")
+
+    def end_stuck(self, rec: RunRecord, job: str, wait_s: float | None = None) -> None:
+        """End a run whose job no longer runs (stuck_runs; or one whose processes cannot be found here): write
+        the job's RELION_JOB_EXIT_ABORTED, which its relion_pipeliner waits for, so that it sets the job Aborted
+        and ends as after a force abort. One that has not ended after ``wait_s`` is ended (end_run), and the
+        job set Aborted here."""
+        if rec.host != socket.gethostname():
+            raise PipelinerError(f"That run was started on {rec.host}: stop it from a cryo-savanna there.")
+        d = self.project_dir / job
+        if processes.job_processes(self.project_dir, job, [rec.pid]):
+            raise PipelinerError(f"{job.rstrip('/')} is running again: abort it (Job → Abort) instead.")
+        if d.is_dir() and not _exit_file(d):
+            (d / RELION_JOB_EXIT_ABORTED).touch()
+            with open(d / "run.err", "a") as fh:  # where RELION's GUI and this window show why a job ended
+                fh.write(f"\n ++++ cryo-savanna: no process of this job was left on {socket.gethostname()}, "
+                         f"{time.ctime()}: {RELION_JOB_EXIT_ABORTED} written for the relion_pipeliner "
+                         f"waiting for it ({rec.pid})\n")
+        (d / RELION_JOB_ABORT_NOW).unlink(missing_ok=True)
+        deadline = time.monotonic() + (STUCK_END_S if wait_s is None else wait_s)
+        while rec.is_alive() is True and time.monotonic() < deadline:
+            time.sleep(0.2)
+        if rec.is_alive() is True:
+            self.end_run(rec, f"the run of {job.rstrip('/')}, whose job is not running any more")
+        if job in Pipeline.read(self.project_dir).processes:
+            PipelineOps(self.project_dir).mark_aborted(job)
 
     def stop_schedule(self, rec: RunRecord) -> bool:
         """Stop a repeating run after the current job (RELION checks RUNNING_PIPELINER_<schedule>)."""
@@ -592,11 +659,46 @@ class Pipeliner:
         if left:
             processes.kill(self.project_dir, job, left)
 
+    def wait_released(self, job: str, poll_s: float = 0.5, settle_s: float | None = None,
+                      release_s: float | None = None) -> None:
+        """After a force abort (or scancel) of ``job``, wait until it can be overwritten: the pipeline no longer
+        has it as Running, and no run of it started here is still going (its relion_pipeliner sees the exit
+        file, sets the job Aborted and ends; while it is going it looks the job up by name, see held_jobs).
+
+        A job that no run here runs (started by RELION's GUI, or by a relion_pipeliner of another program) and
+        that is still Running after ``settle_s`` is set Aborted here. A run here that has not ended after
+        ``release_s`` is ended (end_run, under the pipeline lock), and the job set Aborted here."""
+        settle = ABORT_SETTLE_S if settle_s is None else settle_s
+        release = ABORT_RELEASE_S if release_s is None else release_s
+        start = time.monotonic()
+        while True:
+            pr = Pipeline.read(self.project_dir).processes.get(job)
+            if pr is None:
+                raise PipelinerError(f"{job.rstrip('/')} is not in the pipeline any more.")
+            going = [r for r in self.runs_of(job) if r.is_alive() is True]
+            if not going and pr.status != STATUS_RUNNING:
+                return
+            waited = time.monotonic() - start
+            if not going and waited >= settle:
+                PipelineOps(self.project_dir).mark_aborted(job)
+                return
+            if waited >= release:  # it does not see the exit file: ended (under the lock), the job set Aborted
+                for rec in going:
+                    self.end_run(rec, f"the run of {job.rstrip('/')}, killed for an overwrite")
+                PipelineOps(self.project_dir).mark_aborted(job)
+                return
+            time.sleep(poll_s)
+
     def clean(self, job: str, harsh: bool = False) -> None:
         number = Pipeline.read(self.project_dir).processes[job].job_number
         if number is None:
             raise PipelinerError(f"not a job: {job}")
         self._call("--harsh_clean" if harsh else "--gentle_clean", str(number))
+
+
+def _exit_file(job_dir: Path) -> bool:
+    """Whether a job wrote one of RELION's exit files (it ended)."""
+    return any((job_dir / f).exists() for f in processes.EXITS)
 
 
 def _command_line(pid: int) -> list[str] | None:

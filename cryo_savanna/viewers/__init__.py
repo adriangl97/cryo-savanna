@@ -4,12 +4,26 @@
 
 Drawing is plain raster (pyqtgraph without OpenGL): images are downsampled to the size they are
 shown at before they reach Qt, and file reads run in a thread pool, so the views stay smooth over
-X11 forwarding.
+X11 forwarding. pyqtgraph pans and zooms by drawing the whole view again, so every pyqtgraph view's
+drags and wheel turns are paced (ui/pacing.py): a quick pan sends a few frames, not one per mouse move.
 """
 
 import pyqtgraph as pg
 
+from cryo_savanna.ui.pacing import FramePacer
+
 pg.setConfigOptions(useOpenGL=False, antialias=False, imageAxisOrder="row-major", background="w", foreground="k")
+
+_graphics_view_init = pg.GraphicsView.__init__
+
+
+def _paced_init(self, *args, **kwargs) -> None:  # every pyqtgraph view (PlotWidget, GraphicsLayoutWidget, ...)
+    _graphics_view_init(self, *args, **kwargs)
+    FramePacer(self.viewport())  # after __init__: it sets the viewport
+
+
+if getattr(pg.GraphicsView.__init__, "__name__", "") != "_paced_init":  # once, also if this module is reloaded
+    pg.GraphicsView.__init__ = _paced_init
 
 
 def apply_plot_theme(pal) -> None:

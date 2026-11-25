@@ -202,11 +202,23 @@ class RunActions(_Base):
             self.message.emit("No run that can be stopped is going.")
             return
 
+        stuck = dict((r.id, j) for r, j in pl.stuck_runs(snap.pipeline if snap is not None else None)) \
+            if any(k == "stuck" for _, k in runs) else {}
+
         def label(rec, kind) -> str:
-            what = (f"{rec.repeat}× · stops after its current job" if kind == "repeating"
-                    else "waits for its inputs or its GPUs · stops now")
+            if kind == "repeating":
+                what = f"{rec.repeat}× · stops after its current job"
+            elif kind == "stuck":
+                what = (f"{self._label(stuck[rec.id])} is not running any more, but its relion_pipeliner "
+                        f"({rec.pid}) still waits for it · ends now, the job marked aborted")
+            else:
+                what = "waits for its inputs or its GPUs · stops now"
             return (f"{time.strftime('%d %b %H:%M', time.localtime(rec.started))} · {what} · "
                     + ", ".join(self._label(j) for j in rec.jobs))
+        runs = [(r, k) for r, k in runs if k != "stuck" or r.id in stuck]  # (one that ended meanwhile: not shown)
+        if not runs:
+            self.message.emit("No run that can be stopped is going.")
+            return
         labels = [label(r, k) for r, k in runs]
         choice, ok = QInputDialog.getItem(self.window, "Stop runs", "Stop this run:", labels, 0, False)
         if not ok:
@@ -214,6 +226,9 @@ class RunActions(_Base):
         rec, kind = runs[labels.index(choice)]
         if kind == "repeating":
             self._run("Stop repeating run", lambda: pl.stop_schedule(rec))
+        elif kind == "stuck":
+            job = stuck[rec.id]
+            self._run(f"End the run of {self._label(job)}", lambda: pl.end_stuck(rec, job))
         else:
             self._run("Stop run", lambda: pl.end_run(rec))
 
@@ -271,6 +286,11 @@ class RunActions(_Base):
             QMessageBox.warning(self.window, "Force abort", str(e))
             return
         if not procs:
+            rec = self._waiting_run(job)
+            if rec is not None:  # its processes are gone, its relion_pipeliner still waits for its exit file
+                if self._confirm_end_run(label, rec, "Force abort", "End the run"):
+                    self._run(f"End the run of {label}", lambda: pl.end_stuck(rec, job))
+                return
             where = (f"It was started on {host}: force abort it from a cryo-savanna there." if host else
                      "It may run on another machine, or it has just ended. If it is not running anywhere, use "
                      "Job → Mark as failed.")
@@ -281,20 +301,93 @@ class RunActions(_Base):
             return
         self._run(f"Force abort {label}", lambda: pl.force_abort(job, procs))
 
-    def _confirm_kill(self, label: str, procs: list) -> bool:
+    def _waiting_run(self, job: str):
+        """The run started here that is at ``job`` and still going (its relion_pipeliner waits for the job's
+        exit file), or None."""
+        h = self._held_now().get(job)
+        return h.run if h is not None and h.current and not h.stoppable else None
+
+    def _confirm_end_run(self, label: str, rec, title: str, button: str, then: str = "") -> bool:
+        box = QMessageBox(QMessageBox.Warning, title,
+                          f"No process of {label} is left on this machine, but the relion_pipeliner that ran it "
+                          f"({rec.pid}) still waits for it to end (it ended without writing RELION's exit file: a "
+                          "crash, the out-of-memory killer, or killed by hand).\n\n"
+                          f"End that run{then}? The job is marked as aborted, and its relion_pipeliner ends (it is "
+                          "stopped if it does not by itself). The jobs after it in that run are not run.",
+                          parent=self.window)
+        end = box.addButton(button, QMessageBox.DestructiveRole)
+        box.addButton(QMessageBox.Cancel)
+        box.setDefaultButton(QMessageBox.Cancel)
+        box.exec()
+        return box.clickedButton() is end
+
+    def _confirm_kill(self, label: str, procs: list, title: str = "Force abort", then: str = "",
+                      button: str = "Kill") -> bool:
         shown = [f"{p.pid:>7}  {p.args if len(p.args) <= 110 else p.args[:107] + '...'}" for p in procs[:12]]
         if len(procs) > len(shown):
             shown.append(f"... and {len(procs) - len(shown)} more")
-        box = QMessageBox(QMessageBox.Warning, "Force abort",
-                          f"Kill these {len(procs)} process(es) of {label}?\n\n" + "\n".join(shown) +
+        box = QMessageBox(QMessageBox.Warning, title,
+                          f"Kill these {len(procs)} process(es) of {label}{then}?\n\n" + "\n".join(shown) +
                           f"\n\nThey get SIGTERM, then SIGKILL after {processes.TERM_WAIT_S:g} s.",
                           parent=self.window)
         box.setDetailedText("\n".join(f"{p.pid}  (parent {p.ppid})  {p.args}" for p in procs))
-        kill = box.addButton("Kill", QMessageBox.DestructiveRole)
+        kill = box.addButton(button, QMessageBox.DestructiveRole)
         box.addButton(QMessageBox.Cancel)
         box.setDefaultButton(QMessageBox.Cancel)
         box.exec()
         return box.clickedButton() is kill
+
+    def _kill_to_overwrite(self, job: str) -> Callable[[], None] | None:
+        """For an Overwrite of a running job: after asking, what ends it now (its processes on this machine
+        killed, or its SLURM job cancelled) and waits until it can be overwritten (Pipeliner.wait_released), to
+        run before the overwrite; None when it cannot be ended from here or the user said no."""
+        pl, label = self._ready()[1], self._label(job)
+        q = self.queue.live.get(job) if self.queue is not None else None
+        if q is not None and self.slurm is not None:
+            ask = (f"{label} is {'waiting' if q.pending else 'running'} in SLURM ({q.describe()}).\n\n"
+                   f"Cancel it now (scancel {q.id}) and overwrite it?")
+            if QMessageBox.question(self.window, "Overwrite", ask) != QMessageBox.Yes:
+                return None
+            slurm_id = q.id
+
+            def cancel() -> None:
+                self._scancel(job, slurm_id)
+                pl.wait_released(job)
+            return cancel
+        if self._queued(job):  # in a queue cryo-savanna does not watch: its processes are not here
+            QMessageBox.warning(self.window, "Overwrite", f"{label} is running in a queue: abort it first, and "
+                                "overwrite it once it has stopped.")
+            return None
+        try:
+            procs, host = pl.force_abort_targets(job)
+        except processes.ForceAbortError as e:
+            QMessageBox.warning(self.window, "Overwrite", str(e))
+            return None
+        if not procs:
+            rec = self._waiting_run(job)
+            if rec is not None:  # its processes are gone, its relion_pipeliner still waits for its exit file
+                if not self._confirm_end_run(label, rec, "Overwrite", "End the run and overwrite",
+                                             then=" and overwrite the job"):
+                    return None
+
+                def end_run() -> None:
+                    pl.end_stuck(rec, job)
+                    pl.wait_released(job)
+                return end_run
+            where = (f"It was started on {host}: abort it from a cryo-savanna there." if host else
+                     "It may run on another machine, or it has just ended. If it is not running anywhere, use "
+                     "Job → Mark as failed, then overwrite it.")
+            QMessageBox.information(self.window, "Overwrite", f"{label} is running, and no process of it was found "
+                                    "on this machine.\n\n" + where)
+            return None
+        if not self._confirm_kill(label, procs, title="Overwrite", then=" and overwrite it",
+                                  button="Kill and overwrite"):
+            return None
+
+        def kill() -> None:
+            pl.force_abort(job, procs)
+            pl.wait_released(job)
+        return kill
 
     def _choose_abort(self, job: str, q) -> str:
         """"cancel" (scancel), "stop" (RELION's abort file) or "" for a job in the SLURM queue."""

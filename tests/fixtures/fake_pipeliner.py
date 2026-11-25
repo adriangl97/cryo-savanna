@@ -115,6 +115,10 @@ def run(name):
         f.write(" ++++ Executing new job on %%s\n ++++ with the following command(s): \n%%s\n ++++ \n" %% (time.ctime(), cmd))
     # close_fds=False: as RELION's system(), the job gets what the pipeliner holds (the GPU locks of gpu_wait.py)
     subprocess.run("%%s >> %%srun.out 2>> %%srun.err" %% (cmd, name, name), shell=True, close_fds=False)
+    # FAKE_PIPELINER_WAITS: as RELION's pipeliner, wait for the job's exit file (1), or never end (forever)
+    waits = os.environ.get("FAKE_PIPELINER_WAITS", "")
+    while waits and (waits == "forever" or not any(os.path.exists(name + m) for m, _ in EXITS)):
+        time.sleep(0.1)
     status = next((s for marker, s in EXITS if os.path.exists(name + marker)), "Failed")
     outputs = []
     if status == "Succeeded" and os.path.exists(name + "RELION_OUTPUT_NODES.star"):

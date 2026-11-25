@@ -654,7 +654,15 @@ def _tail(p: Path, limit: int = 512 * 1024) -> str:
 # ---------------------------------------------------------------------------- factory
 
 def build_view(spec: R.ViewSpec, ctx: R.JobContext, cache: ThumbCache | None, request_tool=None) -> QWidget:
-    """The widget for a view; ``request_tool(kind, arg)`` opens a selection tool (JobActions.request_tool)."""
+    """The widget for a view; ``request_tool(kind, arg)`` opens a selection tool (JobActions.request_tool). Its
+    splitters' drags are paced (ui/pacing.py), as its pyqtgraph views' are (viewers/__init__.py)."""
+    from cryo_savanna.ui.pacing import pace_splitters
+    view = _build_view(spec, ctx, cache, request_tool)
+    pace_splitters(view)
+    return view
+
+
+def _build_view(spec: R.ViewSpec, ctx: R.JobContext, cache: ThumbCache | None, request_tool=None) -> QWidget:
     a, project = spec.args, ctx.project_dir
     if spec.kind == R.MICROGRAPHS:
         return MicrographViewer(project, a.get("star", ""), cache, ctf=a.get("ctf", False),

@@ -86,6 +86,7 @@ from cryo_savanna.project.scratch import SCRATCH_KEY
 from cryo_savanna.project.scratch import base_dir as scratch_base_dir
 from cryo_savanna.project.selection import interactive_kind
 from cryo_savanna.ui.flag_panel import AdvancedPanel, FlagsTask
+from cryo_savanna.ui.pacing import pace_splitters
 from cryo_savanna.ui.presets_dialog import ManagePresetsDialog, SavePresetDialog
 
 MODE_NEW, MODE_CONTINUE, MODE_OVERWRITE = "new", "continue", "overwrite"
@@ -552,6 +553,7 @@ class JobEditor(QWidget):
         split.addWidget(self.help)
         split.setStretchFactor(0, 4)
         split.setStretchFactor(1, 1)
+        pace_splitters(split)
 
         lay = QVBoxLayout(self)
         lay.addLayout(top)
