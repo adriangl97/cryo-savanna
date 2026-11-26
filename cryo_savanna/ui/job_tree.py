@@ -24,6 +24,7 @@ COLUMNS = ("Job", "Type", "Status", "Queue", "Summary", "Modified", "Also uses")
 COL_JOB, COL_TYPE, COL_STATUS, COL_QUEUE, COL_SUMMARY, COL_MODIFIED, COL_ALSO = range(len(COLUMNS))
 
 FITTED = (COL_JOB, COL_STATUS, COL_QUEUE, COL_SUMMARY)  # columns kept as wide as their contents
+FEW_ROWS = 4  # changes of up to this many rows leave the fitted columns as they are (JobTreeView._many_changes)
 
 STATUS_FILTERS = {
     "All statuses": None,
@@ -128,9 +129,16 @@ class JobTreeView(QTreeView):
 
     # ------------------------------------------------------------------ public
     @contextlib.contextmanager
-    def _many_changes(self):
+    def _many_changes(self, rows: int | None = None):
         """Around a change of many rows: the fitted columns are measured once at the end, not after
-        every cell (each time over every row: seconds for the summaries of a few hundred jobs)."""
+        every cell (each time over every row: seconds for the summaries of a few hundred jobs).
+
+        ``rows``: how many rows change, when known. Up to FEW_ROWS, the columns are left as they are: Qt
+        measures a column (and paints the header again) only when a text in it changes, while measuring
+        at the end always paints the header, which over X11 is sent at every poll while a job runs."""
+        if rows is not None and rows <= FEW_ROWS:
+            yield
+            return
         h = self.header()
         fitted = [c for c in FITTED if h.sectionResizeMode(c) == QHeaderView.ResizeToContents]
         for c in fitted:
@@ -142,23 +150,24 @@ class JobTreeView(QTreeView):
                 h.setSectionResizeMode(c, QHeaderView.ResizeToContents)
 
     def set_snapshot(self, snap: ProjectSnapshot) -> None:
+        prev = self._snapshot
+        if prev is not None and snap.structure_key() == self._structure:
+            # every poll while a job runs: only the rows of the jobs that changed are filled again (aliases
+            # and parents are in the structure key, summaries and the queue come by their own calls)
+            self._snapshot = snap
+            changed = [name for name, info in snap.jobs.items() if prev.jobs.get(name) != info]
+            with self._many_changes(len(changed)):
+                for name in changed:
+                    self._fill_row(self._items[name], snap.jobs[name], snap)
+            if changed and self.proxy.is_active():  # no filter: every row is shown already
+                self.proxy.refilter()
+            return
         with self._many_changes():
             self._set_snapshot(snap)
 
     def _set_snapshot(self, snap: ProjectSnapshot) -> None:
-        prev, self._snapshot = self._snapshot, snap
+        self._snapshot = snap
         key = snap.structure_key()
-        if key == self._structure:
-            # every poll while a job runs: only the rows of the jobs that changed are filled again (aliases
-            # and parents are in the structure key, summaries and the queue come by their own calls)
-            changed = False
-            for name, info in snap.jobs.items():
-                if prev is None or prev.jobs.get(name) != info:
-                    self._fill_row(self._items[name], info, snap)
-                    changed = True
-            if changed and self.proxy.is_active():  # no filter: every row is shown already
-                self.proxy.refilter()
-            return
         selected = self.current_job()
         scroll = self.verticalScrollBar().value()
         first = self._structure is None
@@ -191,32 +200,38 @@ class JobTreeView(QTreeView):
     def set_stale(self, stale: dict) -> None:
         """The finished jobs that are out of date (project/staleness.py): shown with their status."""
         old, self.stale = self.stale, stale
-        with self._many_changes():
-            for name in old.keys() | stale.keys():
-                if old.get(name) != stale.get(name) and name in self._items and self._snapshot is not None \
-                        and name in self._snapshot.jobs:
-                    self._fill_summary(self._items[name], self._snapshot.jobs[name], self.summaries.get(name))
+        self._refill(old, stale)
+
+    def _refill(self, old: dict, new: dict) -> None:
+        """Fill the status and summary again of the jobs whose entry differs between ``old`` and ``new``."""
+        snap = self._snapshot
+        if snap is None:
+            return
+        changed = [name for name in old.keys() | new.keys()
+                   if old.get(name) != new.get(name) and name in self._items and name in snap.jobs]
+        with self._many_changes(len(changed)):
+            for name in changed:
+                self._fill_summary(self._items[name], snap.jobs[name], self.summaries.get(name))
 
     def set_runs(self, held: dict) -> None:
         """The jobs runs still going are to run (Pipeliner.held_jobs): shown with their status."""
         old, self.held = self.held, held
-        with self._many_changes():
-            for name in old.keys() | held.keys():
-                if old.get(name) != held.get(name) and name in self._items and self._snapshot is not None \
-                        and name in self._snapshot.jobs:  # only those that changed (as set_stale)
-                    self._fill_summary(self._items[name], self._snapshot.jobs[name], self.summaries.get(name))
+        self._refill(old, held)  # only those that changed (as set_stale)
 
     def set_queue(self, state) -> None:
         """Show each job's place in the SLURM queue (a slurm.QueueState)."""
         self.queue = state
         self.setColumnHidden(COL_QUEUE, not state.available)
-        with self._many_changes():
-            for name, row in self._items.items():
-                self._fill_queue(row, name)
-                info = self._snapshot.jobs.get(name) if self._snapshot is not None else None
-                if info is not None and info.status == "Running":  # its run time: the SLURM job's
-                    self._fill_summary(row, info, self.summaries.get(name))
-        if self.proxy.is_active():
+        moved = [name for name, row in self._items.items()  # at every look at the queue: mostly none
+                 if style.queue_entry(state, name)[:2] != (row[COL_QUEUE].text(), row[COL_QUEUE].toolTip())]
+        jobs = self._snapshot.jobs if self._snapshot is not None else {}
+        running = [name for name in self._items if name in jobs and jobs[name].status == "Running"]
+        with self._many_changes(len(moved) + len(running)):
+            for name in moved:
+                self._fill_queue(self._items[name], name)
+            for name in running:  # its run time: the SLURM job's
+                self._fill_summary(self._items[name], jobs[name], self.summaries.get(name))
+        if moved and self.proxy.is_active():  # the filter looks at the queue's text, not at the run time
             self.proxy.refilter()
 
     def _fill_queue(self, row: list[QStandardItem], name: str) -> None:
@@ -235,7 +250,8 @@ class JobTreeView(QTreeView):
         if self._snapshot is None:
             return
         now = time.time()
-        with self._many_changes():
+        running = sum(info.status == "Running" for info in self._snapshot.jobs.values())
+        with self._many_changes(running):  # "Modified" is not a fitted column
             for name, row in self._items.items():
                 info = self._snapshot.jobs[name]
                 row[COL_MODIFIED].setText(style.ago(info.modified, now))
@@ -246,7 +262,7 @@ class JobTreeView(QTreeView):
         self.summaries.update(summaries)
         if self._snapshot is None:
             return
-        with self._many_changes():
+        with self._many_changes(len(summaries)):
             for name, s in summaries.items():
                 row = self._items.get(name)
                 if row is not None:
@@ -259,11 +275,11 @@ class JobTreeView(QTreeView):
         """Mark the jobs the open job editor takes inputs from ({job: [field labels]}; {} clears): a tinted
         row, the job in bold, and the fields in its tooltip."""
         old, self.inputs = self.inputs, dict(inputs)
-        with self._many_changes():
-            for name in old.keys() | self.inputs.keys():
-                row = self._items.get(name)
-                if row is not None and old.get(name) != self.inputs.get(name):
-                    self._fill_input(row, name)
+        changed = [name for name in old.keys() | self.inputs.keys()
+                   if name in self._items and old.get(name) != self.inputs.get(name)]
+        with self._many_changes(len(changed)):
+            for name in changed:
+                self._fill_input(self._items[name], name)
 
     def _fill_input(self, row: list[QStandardItem], name: str) -> None:
         """Only what changes is set: every set makes the sorted, filtered list work the row out again."""

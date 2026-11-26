@@ -123,6 +123,7 @@ class Held:
     gpus_waiting: list[str] = field(default_factory=list)  # the run waits for these GPUs (the local GPU queue)
     threads_waiting: int = 0  # the run waits for this many threads (the local thread queue)
     scheduled: bool = True  # the pipeline has it as Scheduled (not Running: its run has not started it)
+    after: str = ""  # a job further down its run: the job the run is at now, which has to end first
 
     @property
     def waiting(self) -> bool:
@@ -164,7 +165,8 @@ class Held:
         elif self.waiting:
             text += ", waiting for " + ", ".join(self.waiting_for)
         elif not self.current:
-            text += ", after the job it runs now"
+            text += (f", after {self.after.rstrip('/') or 'the job it is at now'}: a run starts each of its jobs "
+                     "once the one before has ended")
         elif self.not_started:
             text += ", not started yet"
         return text
@@ -411,6 +413,30 @@ class Pipeliner:
             self.oversubscribed.append(rec)
         return rec
 
+    def run_scheduled(self, jobs: list[str], together: bool = False, repeat: int = 1, **run_args) -> list[RunRecord]:
+        """Run scheduled jobs (Job → Run scheduled…). A relion_pipeliner runs its jobs one after the other, each
+        once the one before has ended, whether its inputs are there or not: so jobs that do not take inputs from
+        each other get a run each and start at once (staleness.independent_groups), and those that do share one,
+        each after the jobs it reads from. ``together`` (or a repeating run, as RELION's scheduler repeats its
+        list): all in one run, in this order."""
+        if not jobs:
+            raise PipelinerError("no jobs to run")
+        if together or repeat > 1 or len(jobs) == 1:
+            return [self.run(jobs, repeat=repeat, **run_args)]
+        from cryo_savanna.project.staleness import independent_groups
+        self._check_free(jobs)  # all of them before the first run starts
+        groups = independent_groups(Pipeline.read(self.project_dir), jobs)
+        started: list[RunRecord] = []
+        for group in groups:
+            try:
+                started.append(self.run(group, repeat=repeat, **run_args))
+            except Exception as e:
+                if not started:
+                    raise
+                done = "; ".join(", ".join(j.rstrip("/") for j in r.jobs) for r in started)
+                raise PipelinerError(f"{e}\n\nStarted before this: {done}") from e
+        return started
+
     def rerun(self, jobs: list[str]) -> tuple[list[str], RunRecord]:
         """Run finished jobs again with their own settings (out of date: project/staleness.py): each is
         overwritten (its files to Trash/, as Overwrite does), then all run in one relion_pipeliner, each after the
@@ -500,7 +526,7 @@ class Pipeliner:
                 missing = ([n for n in pr.inputs if not (self.project_dir / n).exists()]
                            if k == 0 and pr.status == STATUS_SCHEDULED else [])
                 out[job] = Held(rec, k == 0, missing, gpus if k == 0 else [], threads if k == 0 else 0,
-                                pr.status == STATUS_SCHEDULED)
+                                pr.status == STATUS_SCHEDULED, after=ahead[0] if k else "")
         return out
 
     def _waiting_for(self, rec: RunRecord) -> str:

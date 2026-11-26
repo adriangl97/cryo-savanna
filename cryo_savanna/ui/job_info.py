@@ -43,6 +43,7 @@ from cryo_savanna.project.snapshot import ProjectSnapshot, stamp
 from cryo_savanna.results.registry import MICROGRAPHS, TABLE_PLOT, JobContext, ViewSpec, context_for, views_for
 from cryo_savanna.ui import style
 from cryo_savanna.ui.flag_panel import FlagsTask
+from cryo_savanna.ui.richtext import set_html
 
 FIXED_TABS = 2  # Overview, Options; the viewers follow
 
@@ -149,9 +150,9 @@ class JobInfoPanel(QTabWidget):
             self._refresh_overview()
 
     def _refresh_overview(self) -> None:
-        scroll = self.overview.verticalScrollBar().value()
-        self.overview.setHtml(self._overview_html())
-        self.overview.verticalScrollBar().setValue(scroll)
+        # only what changed is laid out and painted again (ui/richtext.py): at every poll while the job shown
+        # runs, its last change and progress, not the whole panel over X11
+        set_html(self.overview, self._overview_html())
 
     def keep_job(self, snap: ProjectSnapshot) -> None:
         """A new snapshot in which the job shown is as it was: nothing is read or drawn again."""
@@ -161,7 +162,7 @@ class JobInfoPanel(QTabWidget):
         reload_options = name != self._job or name is None or snap.jobs.get(name) is None
         self._snap, self._job = snap, name
         if name is None or name not in snap.jobs:
-            self.overview.setHtml("<p>Select a job.</p>")
+            set_html(self.overview, "<p>Select a job.</p>")
             self.options.clear()
             self._set_viewers(None)
             return

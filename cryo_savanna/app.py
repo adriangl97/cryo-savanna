@@ -90,6 +90,12 @@ def run_gui(project: Path, tomo: bool | None, readonly: bool, poll_s: float | No
     gc_guard.install(app)  # garbage collected in a reading thread can deadlock with the GUI thread
     app.setApplicationName("cryo-savanna")
     app.setStyle("Fusion")
+    # No animated menus, lists or tooltips, whatever the desktop's theme asks for (KDE's can): over X11 every frame
+    # of an animation is sent whole
+    from qtpy.QtCore import Qt
+    for effect in (Qt.UI_AnimateMenu, Qt.UI_FadeMenu, Qt.UI_AnimateCombo, Qt.UI_AnimateTooltip, Qt.UI_FadeTooltip,
+                   Qt.UI_AnimateToolBox):
+        QApplication.setEffectEnabled(effect, False)
     chosen = choose_project(project, readonly)  # not a project: start one here, open another, or close
     if chosen is None:
         return 0

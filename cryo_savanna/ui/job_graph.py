@@ -300,9 +300,13 @@ class JobNodeItem(QGraphicsItem):
 
     def _compact_text(self, r: QRectF, strip_w: float) -> tuple[float, float, bool]:
         """The compact card's text: its scale filling the card (narrower for a long type), the scale its height
-        allows, and whether type and job number go on one line (a short card) rather than two."""
+        allows, and whether type and job number go on one line (a short card) rather than two; (0, 0, False)
+        before the card has its job."""
+        info = self.info
+        if info is None:
+            return 0.0, 0.0, False
         fonts = self.view.fonts
-        header, number = card_lines(self.info, self.view.type_names)[0], self.job_number()
+        header, number = card_lines(info, self.view.type_names)[0], self.job_number()
         width = r.width() - strip_w - 8 - PAD_R - 2  # 2: slack for rounding, so a text that fits is not elided
         height = r.height() - 2 * COMPACT_PAD
         hw, nw = fonts.fm_header.horizontalAdvance(header), fonts.fm_body.horizontalAdvance(number)
@@ -324,7 +328,8 @@ class JobNodeItem(QGraphicsItem):
 
         strip_w = min(max(7.0, 3 / lod), r.width() / 5)  # at least 3 pixels on screen
         fonts = self.view.fonts
-        k, k_height, one_line = self._compact_text(r, strip_w) if self.info is not None else (0.0, 0.0, False)
+        info = self.info
+        k, k_height, one_line = self._compact_text(r, strip_w)
         readable = MIN_TEXT / lod  # the smallest scale that can still be read
         if k < readable <= k_height:  # only its width is short: elided rather than unreadable
             k = readable
@@ -342,16 +347,16 @@ class JobNodeItem(QGraphicsItem):
             p.setPen(pen(pal.color(QPalette.Mid), 1) if not block else Qt.NoPen)
         p.setBrush(color if block else pal.color(QPalette.Base))
         p.drawRoundedRect(r, 6, 6)
-        if block:
+        if block or info is None:  # (no job yet: k is 0, a block)
             return
         p.setPen(Qt.NoPen)
         p.setBrush(color)
         p.drawRoundedRect(QRectF(r.left(), r.top(), strip_w, r.height()), 3, 3)
 
-        header, number = card_lines(self.info, self.view.type_names)[0], self.job_number()
+        header, number = card_lines(info, self.view.type_names)[0], self.job_number()
         x = r.left() + strip_w + 8
         w = (r.right() - PAD_R - x) / k
-        number_color = color if self.info.status != "Succeeded" else pal.color(QPalette.PlaceholderText)
+        number_color = color if info.status != "Succeeded" else pal.color(QPalette.PlaceholderText)
         p.save()  # the view does not save the painter's state (DontSavePainterState)
         p.translate(x, r.center().y() - k * fonts.line * (0.5 if one_line else 1))
         p.scale(k, k)

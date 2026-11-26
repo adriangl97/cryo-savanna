@@ -10,7 +10,7 @@ from collections.abc import Callable
 from html import escape as html_escape
 from pathlib import Path
 
-from qtpy.QtCore import QObject, QRunnable, QSettings, Qt, QThread, QThreadPool, QTimer, Signal, Slot
+from qtpy.QtCore import QEvent, QObject, QRunnable, QSettings, Qt, QThread, QThreadPool, QTimer, Signal, Slot
 from qtpy.QtGui import QFont, QKeySequence
 from qtpy.QtWidgets import (
     QAction,
@@ -145,6 +145,60 @@ class SummaryWorker(QObject):
                 batch, last = {}, time.monotonic()
         if batch:
             self.ready.emit(self.project_dir, batch)
+
+
+class StatusLine(QWidget):
+    """The status bar's text on the right: warnings, the time the project was last read, then the rest. The time
+    changes at every poll while a job runs, so it is a label of its own, of a fixed size that fits any time: only it
+    is painted again (over X11, sent). A label that can change size asks the status bar to lay itself out again at
+    every new text, and the status bar then paints all of itself."""
+
+    SEP = "   ·   "
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        lay = QHBoxLayout(self)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(0)
+        self.head, self.time, self.tail = QLabel(), QLabel(), QLabel()
+        lay.addWidget(self.head)
+        lay.addWidget(self.time, 0, Qt.AlignVCenter)  # its fixed height may be less than the bar's
+        lay.addWidget(self.tail)
+        self._fit_time()
+        self.head.hide()
+        self.tail.hide()
+
+    def _fit_time(self) -> None:
+        fm = self.time.fontMetrics()
+        widest = max((f"updated {d}{d}:{d}{d}:{d}{d}" for d in "0123456789"), key=fm.horizontalAdvance)
+        text = self.time.text()
+        self.time.setMinimumSize(0, 0)
+        self.time.setMaximumSize(16777215, 16777215)
+        self.time.setText(widest)
+        size = self.time.sizeHint()
+        self.time.setText(text)
+        self.time.setFixedSize(size)
+
+    def changeEvent(self, e) -> None:
+        super().changeEvent(e)
+        if e.type() in (QEvent.FontChange, QEvent.StyleChange):
+            self._fit_time()
+
+    def set_parts(self, head: list[str], time_text: str, tail: list[str]) -> None:
+        for label, text in ((self.head, self.SEP.join(head) + self.SEP if head else ""), (self.time, time_text),
+                            (self.tail, self.SEP + self.SEP.join(tail) if tail else "")):
+            if label.text() != text:
+                label.setText(text)
+            if label is not self.time:
+                label.setVisible(bool(text))
+
+    def text(self) -> str:
+        return self.head.text() + self.time.text() + self.tail.text()
+
+    def setToolTip(self, tip: str) -> None:
+        super().setToolTip(tip)
+        for label in (self.head, self.time, self.tail):
+            label.setToolTip(tip)
 
 
 class MainWindow(QMainWindow):
@@ -391,7 +445,7 @@ class MainWindow(QMainWindow):
             self.actions.editor_inputs.connect(view.set_inputs)
 
         self.status_project = QLabel()
-        self.status_state = QLabel()
+        self.status_state = StatusLine()
         self.statusBar().addWidget(self.status_project, 1)
         self.statusBar().addPermanentWidget(self.status_state)
 
@@ -450,7 +504,9 @@ class MainWindow(QMainWindow):
         version = self.relion_version or ("still asking" if self._version_call is not None else "?")
         rows = [("cryo-savanna", f"v{__version__}"), ("Job definitions", f"RELION {self.defs.version}"),
                 ("relion_pipeliner", f"{exe} ({version})" if exe else "not on PATH"),
-                ("Qt", f"{qtpy.API_NAME} {qtpy.QT_VERSION}"), ("Project", str(self.loader.project_dir))]
+                ("Qt", f"{qtpy.API_NAME} {qtpy.QT_VERSION}")]
+        loader = getattr(self, "loader", None)  # none when the folder given at the start was not opened
+        rows.append(("Project", str(loader.project_dir) if loader is not None else "none open"))
         notice = html_escape(LICENSE_NOTICE).replace("\n", "<br>")
         html = "<h3>cryo-savanna</h3><p>A GUI for RELION 5.1 projects.</p><table cellpadding=3>" + "".join(
             f"<tr><td style='color:gray'>{k}</td><td>{html_escape(v)}</td></tr>" for k, v in rows) + "</table>" + (
@@ -726,6 +782,10 @@ class MainWindow(QMainWindow):
     def _on_summaries(self, project_dir: Path, batch: dict[str, JobSummary]) -> None:
         if project_dir != self.loader.project_dir:  # queued by the reader of the project open before
             return
+        # a running job is summarized again at every change of its files, mostly to the same summary
+        batch = {n: s for n, s in batch.items() if self.summaries.get(n) != s}
+        if not batch:
+            return
         self.summaries.update(batch)
         self.tree.set_summaries(batch)
         self.graph.set_summaries(batch)
@@ -801,7 +861,8 @@ class MainWindow(QMainWindow):
         parts = [f"{len(snap.jobs)} jobs"] + [f"{n} {s.lower()}" for s, n in counts.items() if s != "Succeeded"]
         self.status_project.setText(f"{snap.project_dir}   ·   " + ", ".join(parts))
         pipeliner = self._pipeliner_exe
-        state = [f"updated {time.strftime('%H:%M:%S', time.localtime(snap.loaded_at))}"]
+        updated = f"updated {time.strftime('%H:%M:%S', time.localtime(snap.loaded_at))}"
+        state = []
         if self.usage is not None:
             state += [t for t in (self.usage.text(), self.usage.ram_text()) if t]
         elif self.usage_error:
@@ -818,11 +879,10 @@ class MainWindow(QMainWindow):
             if q.error:
                 text = f"SLURM: ⚠ {q.error}"
             state.append(text)
+        warnings = [f"⚠ {self._error}"] if self._error else []
         if self.version_warning:
-            state.insert(0, f"⚠ RELION {self.relion_version} (made for {self.defs.version})")
-        if self._error:
-            state.insert(0, f"⚠ {self._error}")
-        self.status_state.setText("   ·   ".join(state))
+            warnings.append(f"⚠ RELION {self.relion_version} (made for {self.defs.version})")
+        self.status_state.set_parts(warnings, updated, state)
         tip = f"relion_pipeliner: {pipeliner or 'not on PATH'}"
         if self.usage is not None:
             tip += ("\n\nThreads and GPUs RELION jobs use on this machine (anyone's, any project; "

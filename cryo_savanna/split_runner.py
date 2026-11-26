@@ -211,7 +211,7 @@ def failed_job_inputs(job):
     """The input of the failed job: {"particles", "optimisation_set", "tomograms", "trajectories",
     "is_tomo"} (paths relative to the project; "" when not given). From job.star, else note.txt."""
     is_tomo, opts = _job_star(job)
-    out = {"particles": "", "optimisation_set": "", "tomograms": "", "trajectories": "", "is_tomo": bool(is_tomo)}
+    out = {"particles": "", "optimisation_set": "", "tomograms": "", "trajectories": "", "is_tomo": bool(is_tomo)}  # type: dict
     if is_tomo and opts.get("use_direct_entries", "No") != "Yes" and opts.get("in_optimisation", "").strip():
         out["optimisation_set"] = opts["in_optimisation"].strip()
     elif is_tomo and opts.get("in_particles", "").strip():
@@ -264,7 +264,7 @@ def _is_row(s):
 def _particle_table(path):
     """Which loop holds the particles: (block name, its columns). data_particles, else the first loop with
     rlnImageName (a STAR file of RELION 3.0)."""
-    block, columns, in_header, found = None, [], False, []
+    block, columns, in_header, found = None, [], False, []  # type: str | None, list[str], bool, list
     with open(path, "r", errors="replace") as fh:
         for raw in fh:
             s = raw.strip()
@@ -296,7 +296,7 @@ def read_particles(path, labels):
         raise Usage("%s: the particles have no rlnImageName (were they extracted?)" % path)
     at = [columns.index(x) for x in labels]
     rows, optics = [], []
-    block, in_loop, optics_cols = None, False, []
+    block, in_loop, optics_cols = None, False, []  # type: str | None, bool, list[str]
     with open(path, "r", errors="replace") as fh:
         for raw in fh:
             s = raw.strip()
@@ -333,7 +333,7 @@ def rejected_rows(path, names, ids, whole=None):
     rlnMicrographName), every particle that has the value of one of those particles there."""
     labels = [IMAGE_NAME, "rlnOpticsGroup", "rlnMicrographName", "rlnTomoName"]
     table, labels, rows, optics = read_particles(path, labels)
-    by_name = {}
+    by_name = {}  # type: dict[str, list[int]]
     for i, r in enumerate(rows):
         by_name.setdefault(r[0], []).append(i)
     rejected, missing = set(), []
@@ -349,7 +349,7 @@ def rejected_rows(path, names, ids, whole=None):
         if "groups" not in cache:
             number = dict((o.get("rlnOpticsGroup", str(i + 1)), i + 1) for i, o in enumerate(optics))
             at = labels.index("rlnOpticsGroup") if "rlnOpticsGroup" in labels else None
-            groups = {}
+            groups = {}  # type: dict[int, list[int]]
             for i in ordered():
                 groups.setdefault(number.get(rows[i][at], 0) if at is not None else 1, []).append(i)
             cache["groups"] = groups

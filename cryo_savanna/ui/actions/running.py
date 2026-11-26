@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING
 
 from qtpy.QtCore import Qt, QTimer
 from qtpy.QtWidgets import (
+    QCheckBox,
     QDialog,
     QDialogButtonBox,
     QFormLayout,
@@ -65,6 +66,15 @@ class RunScheduledDialog(QDialog):
         self.sec_wait_after = QSpinBox()
         self.sec_wait_after.setRange(1, 3600)
         self.sec_wait_after.setValue(10)
+        self.separate = QCheckBox("Start jobs that do not use each other's outputs at once, each in a run of its own")
+        self.separate.setChecked(True)
+        self.separate.setToolTip(
+            "A run starts each of its jobs once the one before has ended, even when its inputs are already there.\n"
+            "Ticked: jobs that do not take inputs from each other run side by side; a job that does runs after\n"
+            "those it reads from, in their run. Not ticked: all in one run, one after the other (as RELION's\n"
+            "scheduler). Jobs on the same GPUs wait for each other only with Preferences → Local GPU queue.\n"
+            "A repeating run (more than once) always runs them all in one run.")
+        self.repeat.valueChanged.connect(lambda n: self.separate.setEnabled(n <= 1))
         form = QFormLayout()
         form.addRow("Run the jobs this many times:", self.repeat)
         form.addRow("Wait at least (min) between repeats:", self.min_wait)
@@ -75,9 +85,12 @@ class RunScheduledDialog(QDialog):
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
         lay = QVBoxLayout(self)
-        lay.addWidget(QLabel("Jobs run one after the other, each waiting for its input files. "
-                             "The run stops at the first failed or aborted job."))
+        intro = QLabel("Each job waits for its input files. A run starts its jobs one after the other, each once "
+                       "the one before has ended, and stops at the first failed or aborted job.")
+        intro.setWordWrap(True)
+        lay.addWidget(intro)
         lay.addWidget(self.list)
+        lay.addWidget(self.separate)
         lay.addLayout(form)
         lay.addWidget(buttons)
 
@@ -87,7 +100,8 @@ class RunScheduledDialog(QDialog):
 
     def run_args(self) -> dict:
         return dict(repeat=self.repeat.value(), min_wait=self.min_wait.value(),
-                    min_wait_before=self.min_wait_before.value(), sec_wait_after=self.sec_wait_after.value())
+                    min_wait_before=self.min_wait_before.value(), sec_wait_after=self.sec_wait_after.value(),
+                    together=not self.separate.isChecked())
 
 
 
@@ -189,7 +203,12 @@ class RunActions(_Base):
         if dlg.exec() != QDialog.Accepted or not dlg.selected():
             return
         selected, args = dlg.selected(), dlg.run_args()
-        self._run("Run scheduled jobs", lambda: pl.run(selected, **args))
+
+        def done(runs) -> None:
+            if len(runs) > 1:
+                self.message.emit(f"Started {len(runs)} runs side by side: " + "; ".join(
+                    ", ".join(self._label(j) for j in r.jobs) for r in runs))
+        self._run("Run scheduled jobs", lambda: pl.run_scheduled(selected, **args), done)
 
     def stop_runs(self) -> None:
         """Stop a run (Pipeliner.stoppable_runs): a repeating one after the job it runs (RELION's pipeliner

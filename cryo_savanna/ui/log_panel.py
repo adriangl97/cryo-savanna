@@ -16,6 +16,8 @@ from cryo_savanna.project.snapshot import Stamp, stamp
 LOG_FILES = ("run.out", "run.err", "note.txt")
 MAX_BYTES = 512 * 1024  # only the end of very long logs is shown
 ANCHOR_BYTES = 64  # the last bytes shown, looked at again before text is added to them
+FEW_LINES = 200  # up to this many lines added are put in one at a time (LogView._append)
+MAX_DELETE = 200  # up to this many characters of the unfinished line are taken away one at a time
 
 
 def collapse_progress(text: str) -> str:
@@ -123,17 +125,80 @@ class LogView(QPlainTextEdit):
     def _append(self, text: str) -> None:
         # The last block shows the unfinished last line. Re-render it together with the new text,
         # so "\r" progress updates replace it instead of piling up.
-        full = self._partial + text
+        old = self._partial
+        full = old + text
         cut = full.rfind("\n")
         partial = full[cut + 1:]
         if "\r" in partial:  # only the text after the last carriage return can still be seen
             partial = partial[partial.rstrip("\r").rfind("\r") + 1:]
         self._partial = partial
-        cur = self.textCursor()
+        lines = collapse_progress(full).split("\n")
+        doc = self.document()
+        if len(lines) > FEW_LINES or doc.lastBlock().text() != collapse_progress(old) or \
+                (doc.isEmpty() and len(lines) > 1):  # (appendPlainText adds no block to an empty document)
+            cur = QTextCursor(doc)
+            cur.movePosition(QTextCursor.End)
+            cur.movePosition(QTextCursor.StartOfBlock, QTextCursor.KeepAnchor)
+            cur.insertText("\n".join(lines))
+            return
+        # Qt's view paints only the lines that changed when the unfinished line is written to in place and each new
+        # line is appended on its own. One insert of several lines, an empty line added, or more than one character
+        # taken away up to the end of the text makes it paint all it shows again; over X11 that is sent whole, at
+        # every poll while the job writes.
+        self._set_last_line(lines[0])
+        for line in lines[1:]:
+            # appendPlainText also drops the first line past maximumBlockCount without painting everything again
+            if line:
+                self.appendPlainText(line)
+            else:
+                self.appendPlainText(" ")
+                self._end_cursor().deletePreviousChar()
+
+    def _end_cursor(self) -> QTextCursor:
+        cur = QTextCursor(self.document())
         cur.movePosition(QTextCursor.End)
-        cur.movePosition(QTextCursor.StartOfBlock, QTextCursor.KeepAnchor)
-        cur.removeSelectedText()
-        cur.insertText(collapse_progress(full))
+        return cur
+
+    def _set_last_line(self, new: str) -> None:
+        """Show ``new`` in the last block, in place of what it shows, painting that line only (see _append)."""
+        last = self.document().lastBlock()
+        shown = last.text()
+        if new == shown:
+            return
+        same = _common_prefix(shown, new)
+        keep = last.position() + _units(shown[:same])  # the document counts in UTF-16 code units
+        cur = self._end_cursor()
+        end = cur.position()
+        if _units(new) + 1 < _units(shown) and end - keep <= MAX_DELETE:
+            # shorter (written again after a carriage return): what goes is taken from the end, a character at a time
+            while cur.position() > keep:
+                at = cur.position()
+                cur.deletePreviousChar()
+                if cur.position() >= at:  # nothing could be taken away
+                    break
+            cur.insertText(new[same:])
+            return
+        # more of the line, or written again as long: the new end after the old one, then the old end taken away
+        cur.insertText(new[same:])
+        if end > keep:
+            cur.setPosition(keep)
+            cur.setPosition(end, QTextCursor.KeepAnchor)
+            cur.removeSelectedText()
+
+
+def _common_prefix(a: str, b: str) -> int:
+    """How many characters ``a`` and ``b`` begin with in common."""
+    n = 0
+    for x, y in zip(a, b):
+        if x != y:
+            break
+        n += 1
+    return n
+
+
+def _units(s: str) -> int:
+    """Length of ``s`` in UTF-16 code units, as positions in a QTextDocument are counted."""
+    return len(s) + sum(ord(c) > 0xFFFF for c in s)
 
 
 class LogPanel(QTabWidget):
@@ -154,8 +219,9 @@ class LogPanel(QTabWidget):
         for name, v in self.views.items():
             v.load(job_dir / name if job_dir else None)
         self._update_labels()
-        if job_dir and self.currentIndex() == 0 and (job_dir / "run.err").exists() and \
-                (job_dir / "run.err").stat().st_size > 0 and not (job_dir / "run.out").exists():
+        err = self.views["run.err"].stamp  # (mtime, size), just read by load()
+        if job_dir and self.currentIndex() == 0 and err is not None and err[1] > 0 and \
+                self.views["run.out"].stamp is None:
             self.setCurrentIndex(1)
 
     def show_log(self, name: str, text: str = "") -> None:
@@ -176,4 +242,6 @@ class LogPanel(QTabWidget):
     def _update_labels(self) -> None:
         err = self.views["run.err"]
         has_err = err.stamp is not None and err.stamp[1] > 0
-        self.setTabText(1, "run.err ⚠" if has_err else "run.err")
+        text = "run.err ⚠" if has_err else "run.err"
+        if self.tabText(1) != text:  # Qt lays out and paints the tab bar again at every set, also of the same text
+            self.setTabText(1, text)
