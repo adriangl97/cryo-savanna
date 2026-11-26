@@ -568,6 +568,53 @@ def test_a_run_waits_for_its_threads_and_one_too_big_is_warned_of(tmp_path, monk
     assert Pipeline.read(project).processes[c].status == "Succeeded"  # alone on the machine: it ran
 
 
+def test_the_waiter_takes_nothing_while_inputs_are_missing(tmp_path, monkeypatch, capsys):
+    from cryo_savanna import gpu_wait as W
+    locks = str(tmp_path)
+    looks = []
+
+    def missing(inputs):  # there at the third look; nothing taken before
+        looks.append(W.held_threads(locks))
+        return list(inputs) if len(looks) < 3 else []
+    monkeypatch.setattr(W, "missing_inputs", missing)
+    held = W.wait(locks, [], "mask", poll_s=0, threads=4, max_threads=4, table=lambda: {},
+                  inputs=["PostProcess/job034/postprocess.mrc"])
+    try:
+        assert looks == [[], [], []] and len(W.held_threads(locks)) == 1
+        assert "waiting: input PostProcess/job034/postprocess.mrc not there yet" in capsys.readouterr().out
+    finally:
+        for fd in held:
+            os.close(fd)
+    assert W.parse(["--locks", "/l", "--threads", "2", "--max-threads", "4", "--input", "a b.star", "--input",
+                    "c.star", "--", "relion_pipeliner"])[-1] == ["a b.star", "c.star"]
+
+
+def test_a_run_waiting_for_its_inputs_does_not_keep_the_threads_from_the_job_that_writes_them(tmp_path,
+                                                                                             monkeypatch):
+    """Was: MaskCreate's run took all the threads once they were free, then its relion_pipeliner waited for its
+    input, which the job in between, waiting for those threads, was to write: neither ever started."""
+    from cryo_savanna.project.gpu_queue import GpuQueue
+    from cryo_savanna.project.pipeline import Pipeline
+    from cryo_savanna.ui.style import held_text
+    monkeypatch.setenv("CRYO_SAVANNA_POLL_S", "0.05")
+    project, pl = _fake_project(tmp_path)
+    pl.gpu_queue = GpuQueue(tmp_path / "locks", gpus=False, max_threads=1)
+    later = "Later/job099/micrographs.star"
+    mask = pl.add_job(_external(project, later)).job
+    rm = pl.run([mask], sec_wait_after=1)
+    assert rm.command[rm.command.index("--input") + 1] == later
+    time.sleep(0.5)
+    held = pl.held_jobs()[mask]
+    assert held.waiting and not held.waiting_for_threads and held_text("Scheduled", held) == "waiting for input"
+    between = pl.add_job(_external(project)).job
+    pl.run([between], sec_wait_after=1)
+    _wait(project, [between], timeout=20)  # it got the thread
+    (project / later).parent.mkdir(parents=True)
+    (project / later).write_text("")
+    _wait(project, [mask], timeout=30)
+    assert Pipeline.read(project).processes[mask].status == "Succeeded"
+
+
 def test_a_job_relion_starts_in_the_background_is_counted_once(tmp_path):
     """RELION starts a local job in the background (system("... &")): its processes are no longer under the run that
     took its threads, but in its session and process group. They are not counted again (was: 96 of 48 for one job
@@ -600,6 +647,68 @@ def test_a_job_relion_starts_in_the_background_is_counted_once(tmp_path):
     finally:
         os.killpg(run.pid, 9)
         run.wait()
+
+
+@pytest.mark.parametrize("reaped", [False, True])
+def test_a_run_that_ended_frees_its_threads_though_its_jobs_left_processes(tmp_path, reaped):
+    """RELION goes on once a job has written its exit file, and its relion_pipeliner ends; what the job left behind
+    (MPI processes ending, or hung, a program put in the background) has inherited the run's lock. Was: the lock
+    counted as the run's for as long as those lived (48 of 48 threads, and the next run waiting for threads, with
+    nothing computing). Now only RELION programs among them count, by their command lines."""
+    import subprocess
+    import sys
+
+    from cryo_savanna import gpu_wait as W
+    from cryo_savanna.project import gpu_queue as G
+    from cryo_savanna.project.gpu_queue import WAITER
+    locks = tmp_path / "locks"
+    job = ("(exec sleep 30 &) ; (exec %s -c 'import time; time.sleep(30)' --o External/job001/ --j 3 &) ; exit 0"
+           % sys.executable)
+    # a limit no other RELION job of this machine fills (they count): the run takes its threads at once
+    run = subprocess.Popen([sys.executable, "-I", str(WAITER), "--locks", str(locks), "--threads", "8",
+                            "--max-threads", "100000", "--label", "Refine3D/job011", "--", "/bin/sh", "-c", job],
+                           stdout=subprocess.DEVNULL, start_new_session=True)  # as Pipeliner.run starts it
+
+    real = W.process_table
+
+    def ours():  # the processes of this run only, whatever else runs on this machine
+        full = real()
+        out = W.ProcTable({pid: v for pid, v in full.items() if full.groups.get(pid, (0, 0))[0] == run.pid})
+        out.groups = {pid: full.groups[pid] for pid in out}
+        return out
+    try:
+        deadline = time.time() + 20
+        while time.time() < deadline:
+            table = ours()
+            if W.run_ended(run.pid, table) and any("External/job001/ --j 3" in a for _, a in table.values()):
+                break
+            time.sleep(0.1)
+        if reaped:
+            run.wait(timeout=5)
+            table = ours()
+        assert W.run_ended(run.pid, table), "the run did not end"
+        assert [n for _, n, _ in W.held_threads(str(locks), clean=True)] == [8]  # still open in what it left
+        ended: list = []
+        tracked, untracked, held = W.threads_in_use(str(locks), table, ended=ended)
+        assert (tracked, untracked, held) == (0, 3, []) and [(p, n) for p, n, _ in ended] == [(run.pid, 8)]
+        fd, why = W.try_threads(str(locks), 5, 8, "next", ours)  # 3 + 5 of 8: it starts
+        assert why is None
+        os.close(fd)
+        fd, why = W.try_threads(str(locks), 6, 8, "too many", ours)
+        assert fd is None and why.startswith("3 of 8 threads in use (3 by other RELION jobs)")
+        mp = pytest.MonkeyPatch()
+        mp.setattr(W, "process_table", ours)
+        try:
+            u = G.usage(G.GpuQueue(locks), 8)
+        finally:
+            mp.undo()
+        assert u.threads == 3 and "Refine3D/job011 (process %d): its run has ended" % run.pid in u.detail
+    finally:
+        try:
+            os.killpg(run.pid, 9)
+        except ProcessLookupError:
+            pass
+        run.wait(timeout=5)
 
 
 def test_usage_counts_threads_and_gpus_of_the_machine(tmp_path, monkeypatch):

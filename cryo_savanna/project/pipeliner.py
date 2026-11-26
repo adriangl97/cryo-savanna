@@ -401,7 +401,7 @@ class Pipeliner:
         limit = q.max_threads if q is not None and threads else 0
         if (gpus or threads) and q is not None:  # waits for them, then becomes the relion_pipeliner
             label = f"{', '.join(j.rstrip('/') for j in jobs)} in {self.project_dir} ({_user()})"
-            cmd = q.command(cmd, gpus, label, threads)
+            cmd = q.command(cmd, gpus, label, threads, self._first_inputs(jobs))
         runs = self._gui_dir("runs")
         log = runs / f"{rid}.log"
         with open(log, "ab") as out:
@@ -416,6 +416,15 @@ class Pipeliner:
         if threads > limit > 0:
             self.oversubscribed.append(rec)
         return rec
+
+    def _first_inputs(self, jobs: list[str]) -> list[str]:
+        """The input files of the first of a run's jobs, as the pipeline has them (RELION's pipeliner waits for
+        them before it starts the job); [] when the pipeline cannot be read."""
+        try:
+            pr = Pipeline.read(self.project_dir).processes.get(jobs[0])
+        except (OSError, ValueError, RuntimeError):
+            return []
+        return list(dict.fromkeys(pr.inputs)) if pr is not None else []
 
     def run_scheduled(self, jobs: list[str], together: bool = False, repeat: int = 1, **run_args) -> list[RunRecord]:
         """Run scheduled jobs (Job → Run scheduled…). A relion_pipeliner runs its jobs one after the other, each
@@ -529,12 +538,15 @@ class Pipeliner:
                 pr = p.processes[job]
                 missing = ([n for n in pr.inputs if not (self.project_dir / n).exists()]
                            if k == 0 and pr.status == STATUS_SCHEDULED else [])
+                if missing and "--input" in rec.command:  # its waiter takes nothing before they are there
+                    gpus, threads = [], 0
                 out[job] = Held(rec, k == 0, missing, gpus if k == 0 else [], threads if k == 0 else 0,
                                 pr.status == STATUS_SCHEDULED, after=ahead[0] if k else "")
         return out
 
     def _waiting_for(self, rec: RunRecord) -> str:
-        """"gpus" or "threads": what the waiter of a run (gpu_wait.py) said last it waits for; "" when unknown."""
+        """"gpus", "threads" or "inputs": what the waiter of a run (gpu_wait.py) said last it waits for; "" when
+        unknown."""
         try:
             with open(self.project_dir / rec.log, "rb") as fh:
                 fh.seek(0, os.SEEK_END)
@@ -545,7 +557,7 @@ class Pipeliner:
         last = tail.rsplit("local queue: waiting: ", 1)
         if len(last) < 2:
             return ""
-        return "gpus" if last[1].startswith("GPU ") else "threads"
+        return "gpus" if last[1].startswith("GPU ") else "inputs" if last[1].startswith("input ") else "threads"
 
     def _check_free(self, jobs: list[str]) -> None:
         """Refuse to run jobs that a run still going is to run already (two pipeliners for one job: both

@@ -198,15 +198,19 @@ class GpuQueue:
             return 0
         return max((job_threads(js) for js in jobstars), default=0)
 
-    def command(self, cmd: list[str], gpus: list[str], label: str, threads: int = 0) -> list[str]:
-        """``cmd``, started once ``gpus`` and ``threads`` are free (gpu_wait.py). Isolated (-I): RELION's
-        environment, which the run gets, may set PYTHONPATH or PYTHONHOME for its own Python tools; the
-        relion_pipeliner it becomes still gets all of it."""
+    def command(self, cmd: list[str], gpus: list[str], label: str, threads: int = 0,
+                inputs: Iterable[str] = ()) -> list[str]:
+        """``cmd``, started once the files ``inputs`` are there (those of the run's first job: nothing is taken
+        while its relion_pipeliner would wait for them) and ``gpus`` and ``threads`` are free (gpu_wait.py).
+        Isolated (-I): RELION's environment, which the run gets, may set PYTHONPATH or PYTHONHOME for its own
+        Python tools; the relion_pipeliner it becomes still gets all of it."""
         out = [self.python, "-I", str(WAITER), "--locks", str(self.lock_dir())]
         if gpus:
             out += ["--gpus", ",".join(gpus)]
         if threads > 0 and self.max_threads > 0:
             out += ["--threads", str(threads), "--max-threads", str(self.max_threads)]
+        for f in inputs:
+            out += ["--input", f]
         return out + ["--label", label, "--", *cmd]
 
 
@@ -274,7 +278,8 @@ def usage(queue: GpuQueue, thread_limit: int) -> Usage:
     from cryo_savanna.env.machine import local_ram_use_gb
     lock_dir = queue.lock_dir()
     table = gpu_wait.process_table()
-    tracked, untracked, held = gpu_wait.threads_in_use(str(lock_dir), table)
+    ended: list[tuple[int, int, str]] = []
+    tracked, untracked, held = gpu_wait.threads_in_use(str(lock_dir), table, ended=ended)
     ids = gpu_wait.gpu_index()  # {uuid: number}
     why: dict[str, list[str]] = {}  # GPU -> what makes it in use
     for n, procs in (gpu_wait.busy_gpu_procs(lambda: table, ids) if ids else {}).items():
@@ -290,6 +295,8 @@ def usage(queue: GpuQueue, thread_limit: int) -> Usage:
     detail = [f"{n} threads: {lab}" for _, n, lab in held]
     if untracked:
         detail.append(f"{untracked} threads: RELION jobs started without the queue (their --j, MPI ranks)")
+    detail += [f"{lab or f'process {pid}'}: its run has ended, but processes its jobs left behind still have its "
+               f"lock of {n} threads open (only the threads they compute with count)" for pid, n, lab in ended]
     detail += [f"GPU {g}: " + "; ".join(why[g]) for g in gpus]
     ram = local_ram_use_gb()
     return Usage(tracked + untracked, thread_limit, gpus, len(ids), "\n".join(detail),
