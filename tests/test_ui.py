@@ -879,3 +879,25 @@ def test_new_job_menu_search_recent_and_other_programs(window, spa_project, monk
     assert started[-1] == "relion_image_handler"
     # Recent is kept in the settings: the same in the next window (and every project)
     assert w.settings.value("recent_new_jobs", "").split("\n")[:2] == ["cli:relion_image_handler", f"job:{started[0]}"]
+
+
+def test_stop_runs_offers_a_run_busy_before_scheduled_jobs(window, spa_copy, monkeypatch):
+    """A run that runs a job with Scheduled jobs after it: Stop runs counts it, and choosing it aborts that job."""
+    from qtpy.QtWidgets import QInputDialog
+
+    from tests.test_pipeliner import _live_run
+    proc = _live_run(spa_copy, "b", ["Polish/job015/", "Refine3D/job016/"])
+    try:
+        w = window(spa_copy)
+        a = w.actions
+        a.look_at_project_now()
+        assert a.act_stop_runs.isEnabled() and "(1)" in a.act_stop_runs.text()
+        shown, aborted = [], []
+        monkeypatch.setattr(QInputDialog, "getItem", lambda parent, title, text, items, *r: shown.append(items)
+                            or (items[0], True))
+        monkeypatch.setattr(a, "_abort", aborted.append)
+        a.stop_runs()
+        assert "now · stops once it is aborted" in shown[0][0] and aborted == ["Polish/job015/"]
+    finally:
+        proc.kill()
+        proc.wait()

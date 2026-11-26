@@ -192,10 +192,14 @@ class RunActions(_Base):
         self._run("Run scheduled jobs", lambda: pl.run(selected, **args))
 
     def stop_runs(self) -> None:
-        """Stop a run: a repeating one after the job it runs (RELION's pipeliner checks its flag file), one that
-        waits for the input files of its next job now (its relion_pipeliner is ended; the job stays Scheduled)."""
+        """Stop a run (Pipeliner.stoppable_runs): a repeating one after the job it runs (RELION's pipeliner
+        checks its flag file); one that has not started its job now (its relion_pipeliner is ended; the job
+        stays Scheduled); one whose job no longer runs now (the job marked aborted); one that runs a job with
+        others scheduled after it by aborting that job (it stops there)."""
         pl, snap = self._ready()[1], self.snapshot
-        runs = pl.stoppable_runs(snap.pipeline if snap is not None else None)
+        pipeline = snap.pipeline if snap is not None else None
+        runs = pl.stoppable_runs(pipeline)
+        at = {r.id: pl.current_job(r, pipeline) or "" for r, _ in runs}  # the job each is at ("": none any more)
         if not runs:
             self._look_at_project()
             self.update_state()
@@ -211,11 +215,15 @@ class RunActions(_Base):
             elif kind == "stuck":
                 what = (f"{self._label(stuck[rec.id])} is not running any more, but its relion_pipeliner "
                         f"({rec.pid}) still waits for it · ends now, the job marked aborted")
+            elif kind == "busy":
+                what = f"runs {self._label(at[rec.id])} now · stops once it is aborted (asked next)"
             else:
-                what = "waits for its inputs or its GPUs · stops now"
+                what = (f"has not started {self._label(at[rec.id])} (waits for its inputs, GPUs or threads, or "
+                        "stalled) · stops now, its jobs stay Scheduled" if at[rec.id] else "stops now")
             return (f"{time.strftime('%d %b %H:%M', time.localtime(rec.started))} · {what} · "
                     + ", ".join(self._label(j) for j in rec.jobs))
-        runs = [(r, k) for r, k in runs if k != "stuck" or r.id in stuck]  # (one that ended meanwhile: not shown)
+        runs = [(r, k) for r, k in runs if (k != "stuck" or r.id in stuck)  # (one that ended meanwhile: not shown)
+                and (k != "busy" or at[r.id])]
         if not runs:
             self.message.emit("No run that can be stopped is going.")
             return
@@ -229,13 +237,17 @@ class RunActions(_Base):
         elif kind == "stuck":
             job = stuck[rec.id]
             self._run(f"End the run of {self._label(job)}", lambda: pl.end_stuck(rec, job))
+        elif kind == "busy":
+            self._abort(at[rec.id])  # the run stops at the aborted job; the jobs after it stay Scheduled
         else:
             self._run("Stop run", lambda: pl.end_run(rec))
 
     def abort_job(self) -> None:
-        job = self.current
-        if job is None:
-            return
+        if self.current is not None:
+            self._abort(self.current)
+
+    def _abort(self, job: str) -> None:
+        """Abort ``job``: ask how, then do it."""
         pl = self._ready()[1]
         q = self.queue.live.get(job) if self.queue is not None else None
         if q is not None and self.slurm is not None:

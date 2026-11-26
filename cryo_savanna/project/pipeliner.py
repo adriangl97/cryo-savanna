@@ -122,6 +122,7 @@ class Held:
     waiting_for: list[str] = field(default_factory=list)  # its input files not there yet (RELION waits for them)
     gpus_waiting: list[str] = field(default_factory=list)  # the run waits for these GPUs (the local GPU queue)
     threads_waiting: int = 0  # the run waits for this many threads (the local thread queue)
+    scheduled: bool = True  # the pipeline has it as Scheduled (not Running: its run has not started it)
 
     @property
     def waiting(self) -> bool:
@@ -139,9 +140,18 @@ class Held:
         return self.current and self.threads_waiting > 0
 
     @property
+    def not_started(self) -> bool:
+        """The run is at this job and has not started it, with nothing it is seen to wait for (no input file
+        missing, no GPU or thread awaited): it starts it at any moment, or its relion_pipeliner is stalled
+        (RELION waits for something else, or hangs)."""
+        return self.current and self.scheduled and not (self.waiting or self.waiting_for_gpus
+                                                        or self.waiting_for_threads)
+
+    @property
     def stoppable(self) -> bool:
-        """Nothing of the job runs yet (its inputs, GPUs or threads are awaited): its run can be ended now."""
-        return self.waiting or self.waiting_for_gpus or self.waiting_for_threads
+        """Nothing of the job runs yet (its inputs, GPUs or threads are awaited, or it is not started): its run
+        can be ended now."""
+        return self.current and self.scheduled
 
     def describe(self) -> str:
         started = time.strftime("%d %b %H:%M", time.localtime(self.run.started))
@@ -155,6 +165,8 @@ class Held:
             text += ", waiting for " + ", ".join(self.waiting_for)
         elif not self.current:
             text += ", after the job it runs now"
+        elif self.not_started:
+            text += ", not started yet"
         return text
 
 
@@ -487,7 +499,8 @@ class Pipeliner:
                 pr = p.processes[job]
                 missing = ([n for n in pr.inputs if not (self.project_dir / n).exists()]
                            if k == 0 and pr.status == STATUS_SCHEDULED else [])
-                out[job] = Held(rec, k == 0, missing, gpus if k == 0 else [], threads if k == 0 else 0)
+                out[job] = Held(rec, k == 0, missing, gpus if k == 0 else [], threads if k == 0 else 0,
+                                pr.status == STATUS_SCHEDULED)
         return out
 
     def _waiting_for(self, rec: RunRecord) -> str:
@@ -518,9 +531,14 @@ class Pipeliner:
                 + "\n\nWait for it, or stop that run first (Job → Stop runs…).")
 
     def stoppable_runs(self, pipeline: Pipeline | None = None) -> list[tuple[RunRecord, str]]:
-        """Runs that can be stopped, newest first: (run, "repeating") for a repeating run (it stops after its
-        current job), (run, "waiting") for a run on this host that waits for the input files of its next job
-        (its relion_pipeliner can be ended now: nothing of the job has started)."""
+        """Runs that can be stopped, newest first, and how:
+
+        - "repeating": a repeating run; it stops after its current job;
+        - "waiting": a run on this host at a job it has not started (it waits for its input files, GPUs or
+          threads, or is stalled): its relion_pipeliner can be ended now, and its jobs stay Scheduled;
+        - "stuck": a run whose job no longer runs (stuck_runs): ended, the job marked aborted (end_stuck);
+        - "busy": a run on this host that runs a job now and has Scheduled jobs after it (they show "in a
+          run"): it stops at that job once that job is aborted (current_job)."""
         out: dict[str, tuple[RunRecord, str]] = {r.id: (r, "repeating") for r in self.repeating_runs()}
         p = pipeline if pipeline is not None else Pipeline.read(self.project_dir)
         held = self.held_jobs(p)
@@ -529,7 +547,16 @@ class Pipeliner:
                 out[h.run.id] = (h.run, "waiting")
         for rec, _job in self.stuck_runs(p, held):
             out[rec.id] = (rec, "stuck")  # (a repeating run too: it would never get to the end of its job)
+        for h in held.values():
+            if not h.current and h.run.id not in out:
+                out[h.run.id] = (h.run, "busy")
         return sorted(out.values(), key=lambda x: x[0].started, reverse=True)
+
+    def current_job(self, rec: RunRecord, pipeline: Pipeline | None = None) -> str | None:
+        """The job a run is at: the first of its jobs the pipeline has as Scheduled or Running (held_jobs)."""
+        p = pipeline if pipeline is not None else Pipeline.read(self.project_dir)
+        return next((j for j in rec.jobs if j in p.processes
+                     and p.processes[j].status in (STATUS_SCHEDULED, STATUS_RUNNING)), None)
 
     def stuck_runs(self, pipeline: Pipeline | None = None, held: dict[str, Held] | None = None
                    ) -> list[tuple[RunRecord, str]]:
@@ -565,7 +592,8 @@ class Pipeliner:
                 if not processes.job_processes(self.project_dir, job, [rec.pid], table=table)]
 
     def end_run(self, rec: RunRecord, why: str = "a run that waits for its inputs") -> None:
-        """End the relion_pipeliner of a run that waits for input files (stoppable_runs). It is ended while
+        """End the relion_pipeliner of a run that has not started its job (stoppable_runs "waiting": it waits for
+        input files, GPUs or threads, or is stalled; or a stuck one, see end_stuck). It is ended while
         cryo-savanna holds RELION's pipeline lock, so it is not in the middle of writing the pipeline (RELION
         writes the file in place: a pipeliner ended there leaves it empty). The jobs it was to run stay
         Scheduled."""
@@ -584,6 +612,16 @@ class Pipeliner:
                 time.sleep(0.2)
         if rec.is_alive():
             raise PipelinerError(f"relion_pipeliner {rec.pid} did not stop.")
+        job = self.current_job(rec)
+        if job is not None and Pipeline.read(self.project_dir).processes[job].status == STATUS_SCHEDULED:
+            try:
+                started = processes.job_processes(self.project_dir, job)
+            except processes.ForceAbortError:
+                started = []
+            if started:  # it was starting the job just then
+                raise PipelinerError(f"relion_pipeliner {rec.pid} was stopped, but it had just started "
+                                     f"{job.rstrip('/')}: {len(started)} process(es) of it run. Force abort it "
+                                     "(Job → Abort…), then mark it as failed or overwrite it.")
 
     def end_stuck(self, rec: RunRecord, job: str, wait_s: float | None = None) -> None:
         """End a run whose job no longer runs (stuck_runs; or one whose processes cannot be found here): write

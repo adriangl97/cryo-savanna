@@ -347,3 +347,56 @@ def test_the_note_of_a_job_done_here_has_relions_dates_whatever_the_locale(spa_c
     Pipeliner(spa_copy, exe="/nonexistent").finish_done_here(job, lambda _job: None, "relion_display ...")
     started = last_start(spa_copy / job / "note.txt")  # " ++++ Executing new job on Thu Mar  5 10:00:00 2026"
     assert started is not None and before - 2 <= started <= time.time() + 1
+
+
+def test_a_run_that_has_not_started_its_job_can_be_stopped(spa_copy):
+    """At a Scheduled job with its inputs there and no GPU or thread awaited ("Scheduled · in a run"), but not
+    started: its relion_pipeliner is stalled, or starts it at any moment. Stop runs ends it; the job stays
+    Scheduled."""
+    job = "Refine3D/job016/"
+    (spa_copy / "Polish/job015/shiny.star").write_text("")  # its input: nothing to wait for
+    proc = _live_run(spa_copy, "a", [job])
+    try:
+        pl = Pipeliner(spa_copy, exe="relion_pipeliner", environ={})
+        h = pl.held_jobs()[job]
+        assert h.current and not h.waiting and h.not_started and h.stoppable and "not started yet" in h.describe()
+        [(rec, kind)] = pl.stoppable_runs()
+        assert kind == "waiting" and pl.current_job(rec) == job
+        pl.end_run(rec)
+        assert proc.poll() is not None and pl.held_jobs() == {}
+        assert Pipeline.read(spa_copy).processes[job].status == "Scheduled"
+    finally:
+        proc.kill()
+        proc.wait()
+
+
+def test_a_run_ended_just_as_it_started_its_job_says_so(spa_copy):
+    from tests.test_processes import start, wait_found
+    job = "Refine3D/job016/"
+    (spa_copy / "Polish/job015/shiny.star").write_text("")
+    proc = _live_run(spa_copy, "a", [job])
+    sh = start(spa_copy, job)  # started by the run just then (the pipeline does not say Running yet)
+    try:
+        wait_found(spa_copy, job, 1)
+        pl = Pipeliner(spa_copy, exe="relion_pipeliner", environ={})
+        [(rec, _)] = pl.stoppable_runs()
+        with pytest.raises(PipelinerError, match="had just started Refine3D/job016"):
+            pl.end_run(rec)
+        assert proc.poll() is not None
+    finally:
+        sh.kill()
+        proc.kill()
+        proc.wait()
+
+
+def test_a_run_busy_with_a_job_before_scheduled_ones_is_offered(spa_copy):
+    """Its later jobs show "Scheduled · in a run"; it stops once the job it runs is aborted."""
+    proc = _live_run(spa_copy, "b", ["Polish/job015/", "Refine3D/job016/"])  # Polish/job015/ is Running
+    try:
+        pl = Pipeliner(spa_copy, exe="relion_pipeliner", environ={})
+        assert not pl.held_jobs()["Refine3D/job016/"].current
+        [(rec, kind)] = pl.stoppable_runs()
+        assert (rec.id, kind) == ("b", "busy") and pl.current_job(rec) == "Polish/job015/"
+    finally:
+        proc.kill()
+        proc.wait()
