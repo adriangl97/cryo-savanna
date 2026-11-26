@@ -10,7 +10,7 @@ from collections.abc import Callable
 from html import escape as html_escape
 from pathlib import Path
 
-from qtpy.QtCore import QObject, QRunnable, QSettings, Qt, QThread, QThreadPool, QTimer, Signal, Slot
+from qtpy.QtCore import QEvent, QObject, QRunnable, QSettings, Qt, QThread, QThreadPool, QTimer, Signal, Slot
 from qtpy.QtGui import QFont, QKeySequence
 from qtpy.QtWidgets import (
     QAction,
@@ -37,6 +37,7 @@ from cryo_savanna import COPYRIGHT, LICENSE_NOTICE, __version__
 from cryo_savanna.env.relion_env import RelionEnv, relion_version, version_warning
 from cryo_savanna.images.cache import ThumbCache
 from cryo_savanna.jobdefs.model import JobDefs
+from cryo_savanna.project import tomo_select
 from cryo_savanna.project.gpu_queue import GpuQueue, Usage, usage
 from cryo_savanna.project.main_inputs import MainInputs
 from cryo_savanna.project.rebuild import find_job_dirs
@@ -89,7 +90,10 @@ class _Call(QRunnable):
             result = self.fn()
         except Exception as e:  # noqa: BLE001 - reported in the GUI
             result = e
-        self.signals.done.emit(self.tag, result)
+        try:
+            self.signals.done.emit(self.tag, result)
+        except RuntimeError:  # the window was closed meanwhile: nobody to tell
+            pass
 
 
 class LoaderWorker(QObject):
@@ -147,6 +151,60 @@ class SummaryWorker(QObject):
             self.ready.emit(self.project_dir, batch)
 
 
+class StatusLine(QWidget):
+    """The status bar's text on the right: warnings, the time the project was last read, then the rest. The time
+    changes at every poll while a job runs, so it is a label of its own, of a fixed size that fits any time: only it
+    is painted again (over X11, sent). A label that can change size asks the status bar to lay itself out again at
+    every new text, and the status bar then paints all of itself."""
+
+    SEP = "   ·   "
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        lay = QHBoxLayout(self)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(0)
+        self.head, self.time, self.tail = QLabel(), QLabel(), QLabel()
+        lay.addWidget(self.head)
+        lay.addWidget(self.time, 0, Qt.AlignVCenter)  # its fixed height may be less than the bar's
+        lay.addWidget(self.tail)
+        self._fit_time()
+        self.head.hide()
+        self.tail.hide()
+
+    def _fit_time(self) -> None:
+        fm = self.time.fontMetrics()
+        widest = max((f"updated {d}{d}:{d}{d}:{d}{d}" for d in "0123456789"), key=fm.horizontalAdvance)
+        text = self.time.text()
+        self.time.setMinimumSize(0, 0)
+        self.time.setMaximumSize(16777215, 16777215)
+        self.time.setText(widest)
+        size = self.time.sizeHint()
+        self.time.setText(text)
+        self.time.setFixedSize(size)
+
+    def changeEvent(self, e) -> None:
+        super().changeEvent(e)
+        if e.type() in (QEvent.FontChange, QEvent.StyleChange):
+            self._fit_time()
+
+    def set_parts(self, head: list[str], time_text: str, tail: list[str]) -> None:
+        for label, text in ((self.head, self.SEP.join(head) + self.SEP if head else ""), (self.time, time_text),
+                            (self.tail, self.SEP + self.SEP.join(tail) if tail else "")):
+            if label.text() != text:
+                label.setText(text)
+            if label is not self.time:
+                label.setVisible(bool(text))
+
+    def text(self) -> str:
+        return self.head.text() + self.time.text() + self.tail.text()
+
+    def setToolTip(self, tip: str) -> None:
+        super().setToolTip(tip)
+        for label in (self.head, self.time, self.tail):
+            label.setToolTip(tip)
+
+
 class MainWindow(QMainWindow):
     request_refresh = Signal(bool)
     request_summaries = Signal(object, int, bool)
@@ -179,6 +237,10 @@ class MainWindow(QMainWindow):
         self._queue_pool = QThreadPool(self)
         self._queue_pool.setMaxThreadCount(1)
         self._queue_tasks: set[_Call] = set()
+        # optimisation sets of Select jobs on tomography particles (project/tomo_select.py): (job, its last change)
+        # looked at, and the look going
+        self._optsets_seen: set[tuple[str, float | None]] = set()
+        self._optsets_call: _Call | None = None
         # the threads and GPUs RELION jobs use on this machine (Preferences → Status bar), looked at in its own thread
         self._usage_pool = QThreadPool(self)
         self._usage_pool.setMaxThreadCount(1)
@@ -391,7 +453,7 @@ class MainWindow(QMainWindow):
             self.actions.editor_inputs.connect(view.set_inputs)
 
         self.status_project = QLabel()
-        self.status_state = QLabel()
+        self.status_state = StatusLine()
         self.statusBar().addWidget(self.status_project, 1)
         self.statusBar().addPermanentWidget(self.status_state)
 
@@ -450,7 +512,9 @@ class MainWindow(QMainWindow):
         version = self.relion_version or ("still asking" if self._version_call is not None else "?")
         rows = [("cryo-savanna", f"v{__version__}"), ("Job definitions", f"RELION {self.defs.version}"),
                 ("relion_pipeliner", f"{exe} ({version})" if exe else "not on PATH"),
-                ("Qt", f"{qtpy.API_NAME} {qtpy.QT_VERSION}"), ("Project", str(self.loader.project_dir))]
+                ("Qt", f"{qtpy.API_NAME} {qtpy.QT_VERSION}")]
+        loader = getattr(self, "loader", None)  # none when the folder given at the start was not opened
+        rows.append(("Project", str(loader.project_dir) if loader is not None else "none open"))
         notice = html_escape(LICENSE_NOTICE).replace("\n", "<br>")
         html = "<h3>cryo-savanna</h3><p>A GUI for RELION 5.1 projects.</p><table cellpadding=3>" + "".join(
             f"<tr><td style='color:gray'>{k}</td><td>{html_escape(v)}</td></tr>" for k, v in rows) + "</table>" + (
@@ -497,6 +561,7 @@ class MainWindow(QMainWindow):
         self.info.main_inputs = loader.main_inputs
         self._tomo_decided = not self.tomo_auto
         self.summaries.clear()
+        self._optsets_seen.clear()
         self.tree.clear_summaries()
         self.graph.clear_summaries()
         self._summary_thread = QThread(self)
@@ -587,7 +652,42 @@ class MainWindow(QMainWindow):
             self.logs.refresh()
         if self.queue_state.checked_at == 0 and self.queue_timer.isActive():
             self._poll_queue()  # first look at the queue as soon as the jobs are known
+        self._complete_selections(snap)
         self._update_status()
+
+    # ------------------------------------------------------------------ optimisation sets of Select jobs
+    def _complete_selections(self, snap: ProjectSnapshot) -> None:
+        """Write the optimisation sets of finished Select jobs on tomography particles, which RELION does not
+        write, and add them to the pipeline (in a thread; project/tomo_select.py). Each job is looked at once per
+        change of its files."""
+        if self.readonly or self._optsets_call is not None:
+            return
+        nodes = snap.pipeline.nodes
+        todo = [n for n in tomo_select.candidates(snap.pipeline)
+                if n in snap.jobs and (n, snap.jobs[n].modified) not in self._optsets_seen
+                and any(tomo_select.set_for(f) not in nodes for f in tomo_select.particle_outputs(snap.pipeline, n))]
+        if not todo:
+            return
+        self._optsets_seen.update((n, snap.jobs[n].modified) for n in todo)
+        project, pipeline = snap.project_dir, snap.pipeline
+
+        def work() -> list[str]:
+            return [s for job in todo for s in tomo_select.complete(project, job, pipeline)]
+        call = self._optsets_call = _Call(("optsets", project), work)
+        call.signals.done.connect(self._on_optsets)
+        QThreadPool.globalInstance().start(call)
+
+    @Slot(object, object)
+    def _on_optsets(self, tag, result) -> None:
+        self._optsets_call = None
+        if tag[1] != self.loader.project_dir:  # another project by now
+            return
+        if isinstance(result, Exception):
+            self.statusBar().showMessage(f"Optimisation set of a Select job not written: {result}", 15000)
+        elif result:
+            self.statusBar().showMessage(f"Wrote {', '.join(result)}: the optimisation set of the selected particles, "
+                                         "for the next jobs' \"Input optimisation set\"", 15000)
+            self.refresh(force=True)
 
     # ------------------------------------------------------------------ RELION version
     def _check_version(self) -> None:
@@ -726,6 +826,10 @@ class MainWindow(QMainWindow):
     def _on_summaries(self, project_dir: Path, batch: dict[str, JobSummary]) -> None:
         if project_dir != self.loader.project_dir:  # queued by the reader of the project open before
             return
+        # a running job is summarized again at every change of its files, mostly to the same summary
+        batch = {n: s for n, s in batch.items() if self.summaries.get(n) != s}
+        if not batch:
+            return
         self.summaries.update(batch)
         self.tree.set_summaries(batch)
         self.graph.set_summaries(batch)
@@ -801,7 +905,8 @@ class MainWindow(QMainWindow):
         parts = [f"{len(snap.jobs)} jobs"] + [f"{n} {s.lower()}" for s, n in counts.items() if s != "Succeeded"]
         self.status_project.setText(f"{snap.project_dir}   ·   " + ", ".join(parts))
         pipeliner = self._pipeliner_exe
-        state = [f"updated {time.strftime('%H:%M:%S', time.localtime(snap.loaded_at))}"]
+        updated = f"updated {time.strftime('%H:%M:%S', time.localtime(snap.loaded_at))}"
+        state = []
         if self.usage is not None:
             state += [t for t in (self.usage.text(), self.usage.ram_text()) if t]
         elif self.usage_error:
@@ -818,16 +923,14 @@ class MainWindow(QMainWindow):
             if q.error:
                 text = f"SLURM: ⚠ {q.error}"
             state.append(text)
+        warnings = [f"⚠ {self._error}"] if self._error else []
         if self.version_warning:
-            state.insert(0, f"⚠ RELION {self.relion_version} (made for {self.defs.version})")
-        if self._error:
-            state.insert(0, f"⚠ {self._error}")
-        self.status_state.setText("   ·   ".join(state))
+            warnings.append(f"⚠ RELION {self.relion_version} (made for {self.defs.version})")
+        self.status_state.set_parts(warnings, updated, state)
         tip = f"relion_pipeliner: {pipeliner or 'not on PATH'}"
         if self.usage is not None:
             tip += ("\n\nThreads and GPUs RELION jobs use on this machine (anyone's, any project; "
                     f"limit: Preferences → Local thread queue):\n{self.usage.detail or 'none'}"
-                    + (f"\nGPUs in use: {', '.join(self.usage.gpus)}" if self.usage.gpus else "")
                     + ("\n\nRAM: in use by every program on this machine (GB = 1024³ bytes)"
                        if self.usage.ram_text() else ""))
         elif self.usage_error:

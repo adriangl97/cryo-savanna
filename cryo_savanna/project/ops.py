@@ -231,6 +231,20 @@ class PipelineOps:
             kept, _ = split_pipeline(p, set(), missing)
             kept.write(self.project_dir, self.pipeline_name, lock)
 
+    def add_outputs(self, job: str, outputs: list[tuple[str, str]]) -> list[str]:
+        """Add files a job wrote after it ended to its outputs ((file, node type label) each), as RELION adds
+        those of its RELION_OUTPUT_NODES.star; the nodes added (a file not there, or already a node, is not)."""
+        with self._lock("addOutputNodes") as lock:
+            p = self._read()
+            pr = self._process(p, job)
+            added = [name for name, _ in outputs if name not in p.nodes and self._path(name).is_file()]
+            for name, label in outputs:
+                if name in added:
+                    self._add_output(p, pr, name, label)
+            if added:
+                p.write(self.project_dir, self.pipeline_name, lock)
+            return added
+
     def mark_aborted(self, job: str) -> bool:
         """Set a job the pipeline still has as Running to Aborted, and nothing else (its outputs stay as they are):
         for a job whose processes were killed and that no relion_pipeliner will set so (Pipeliner.wait_released).

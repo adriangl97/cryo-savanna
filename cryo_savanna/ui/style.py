@@ -176,7 +176,8 @@ def lost_text(a) -> str:
 
 def held_text(status: str, held) -> str:
     """What a run still going does with a scheduled job (a pipeliner.Held), for the list and the cards: "waiting
-    for a GPU", "waiting for threads", "waiting for input", "in a run"; "" when no run holds it."""
+    for a GPU", "waiting for threads", "waiting for input", "after job012" (its run starts it once that job, the
+    one it is at, has ended), "in a run" (about to be started); "" when no run holds it."""
     if status != "Scheduled" or held is None:
         return ""
     gpus, threads = held.waiting_for_gpus, getattr(held, "waiting_for_threads", False)
@@ -184,7 +185,12 @@ def held_text(status: str, held) -> str:
         return "waiting for GPU/threads"
     if gpus or threads:
         return "waiting for a GPU" if gpus else "waiting for threads"
-    return "waiting for input" if held.waiting else "in a run"
+    if held.waiting:
+        return "waiting for input"
+    after = getattr(held, "after", "")
+    if not held.current and after:
+        return f"after {after.rstrip('/').split('/')[-1]}"
+    return "in a run"
 
 
 def status_text(status: str, pending: bool) -> str:

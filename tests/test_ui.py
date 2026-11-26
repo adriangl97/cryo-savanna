@@ -753,7 +753,8 @@ def test_cards_of_scheduled_jobs_say_what_their_run_waits_for(window, spa_copy):
                        (Held(rec, True, [], [], 8), "waiting for threads"),
                        (Held(rec, True, [], ["0"], 8), "waiting for GPU/threads"),
                        (Held(rec, True, ["Select/job010/particles.star"]), "waiting for input"),
-                       (Held(rec, False), "in a run")):
+                       (Held(rec, False), "in a run"),
+                       (Held(rec, False, after="Polish/job015/"), "after job015")):
         w.actions.runs.emit({job: held})
         assert card.job_line().endswith("· Scheduled · " + text)
         assert held.describe() in card.toolTip()
@@ -879,3 +880,37 @@ def test_new_job_menu_search_recent_and_other_programs(window, spa_project, monk
     assert started[-1] == "relion_image_handler"
     # Recent is kept in the settings: the same in the next window (and every project)
     assert w.settings.value("recent_new_jobs", "").split("\n")[:2] == ["cli:relion_image_handler", f"job:{started[0]}"]
+
+
+def test_stop_runs_offers_a_run_busy_before_scheduled_jobs(window, spa_copy, monkeypatch):
+    """A run that runs a job with Scheduled jobs after it: Stop runs counts it, and choosing it aborts that job."""
+    from qtpy.QtWidgets import QInputDialog
+
+    from tests.test_pipeliner import _live_run
+    proc = _live_run(spa_copy, "b", ["Polish/job015/", "Refine3D/job016/"])
+    try:
+        w = window(spa_copy)
+        a = w.actions
+        a.look_at_project_now()
+        assert a.act_stop_runs.isEnabled() and "(1)" in a.act_stop_runs.text()
+        shown, aborted = [], []
+        monkeypatch.setattr(QInputDialog, "getItem", lambda parent, title, text, items, *r: shown.append(items)
+                            or (items[0], True))
+        monkeypatch.setattr(a, "_abort", aborted.append)
+        a.stop_runs()
+        assert "now · stops once it is aborted" in shown[0][0] and aborted == ["Polish/job015/"]
+    finally:
+        proc.kill()
+        proc.wait()
+
+
+def test_run_scheduled_dialog_starts_independent_jobs_at_once_by_default(qtbot):
+    from cryo_savanna.ui.actions.running import RunScheduledDialog
+    dlg = RunScheduledDialog(None, [("A/job001/", "A"), ("B/job002/", "B")], None)
+    qtbot.addWidget(dlg)
+    assert dlg.selected() == ["A/job001/", "B/job002/"] and dlg.run_args()["together"] is False
+    dlg.repeat.setValue(3)  # a repeating run is always one run (as RELION's scheduler repeats its list)
+    assert not dlg.separate.isEnabled()
+    dlg.repeat.setValue(1)
+    dlg.separate.setChecked(False)
+    assert dlg.run_args()["together"] is True

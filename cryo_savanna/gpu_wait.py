@@ -4,7 +4,12 @@
 """cryo-savanna's local queue: wait until the GPUs and threads a run needs on this machine are free, then run a
 command that keeps them.
 
-    python3 gpu_wait.py --locks <dir> [--gpus 0,1] [--threads N --max-threads M] [--label <text>] -- <command> ...
+    python3 gpu_wait.py --locks <dir> [--gpus 0,1] [--threads N --max-threads M] [--label <text>]
+                        [--input <file> ...] -- <command> ...
+
+Inputs. Nothing is taken while one of the ``--input`` files (those of the run's first job, relative to the
+directory it runs in) is not there yet: RELION's pipeliner would wait for them (every 60 s) holding what the run
+took, and the job that writes them, in another run, could be waiting for those very threads or GPUs.
 
 GPUs. Each GPU has a lock file in <dir> (``gpu-<id>.lock``, the id as CUDA_VISIBLE_DEVICES names it, else its
 number). While it waits, a GPU also counts as busy when a RELION job computes on it without a lock (one started
@@ -24,7 +29,9 @@ Looking and taking happen under ``threads.mutex``, so two runs never both take t
 The command starts once this process holds everything (GPUs and threads together, or nothing: no two runs each
 holding half of what the other needs). It is then exec'd in this process, which keeps the locks: the command and
 what it starts (RELION's pipeliner and its jobs) hold them until the last of them ends, also when cryo-savanna
-has been closed. A run that ends, or is killed, frees its GPUs and threads: nothing is left to clean up.
+has been closed. A run that ends, or is killed, frees its GPUs and threads: nothing is left to clean up. Its threads
+are free once its relion_pipeliner has ended, also while what its jobs left behind still has the lock open (then
+only the threads those processes compute with count: threads_in_use).
 
 project/gpu_queue.py starts it; standard library only (it runs with the python cryo-savanna runs with, but must
 not depend on cryo-savanna's imports: it is started with RELION's environment).
@@ -49,15 +56,20 @@ def _say(text):
 
 
 def parse(argv):
-    """(lock dir, GPU ids, label, command, threads, thread limit)."""
-    usage = "usage: gpu_wait.py --locks DIR [--gpus 0,1] [--threads N --max-threads M] [--label TEXT] -- COMMAND ..."
+    """(lock dir, GPU ids, label, command, threads, thread limit, input files)."""
+    usage = ("usage: gpu_wait.py --locks DIR [--gpus 0,1] [--threads N --max-threads M] [--label TEXT] "
+             "[--input FILE ...] -- COMMAND ...")
     if "--" not in argv:
         raise SystemExit(usage)
     i = argv.index("--")
     head, cmd = argv[:i], argv[i + 1:]
     opts = {}
+    inputs = []
     for k in range(0, len(head) - 1, 2):
-        opts[head[k]] = head[k + 1]
+        if head[k] == "--input":
+            inputs.append(head[k + 1])
+        else:
+            opts[head[k]] = head[k + 1]
     gpus = [g for g in opts.get("--gpus", "").split(",") if g]
     try:
         threads, limit = int(opts.get("--threads", "0")), int(opts.get("--max-threads", "0"))
@@ -67,7 +79,7 @@ def parse(argv):
         threads = limit = 0
     if "--locks" not in opts or not (gpus or threads) or not cmd:
         raise SystemExit("gpu_wait.py: --locks, --gpus or --threads, and a command are needed")
-    return opts["--locks"], gpus, opts.get("--label", ""), cmd, threads, limit
+    return opts["--locks"], gpus, opts.get("--label", ""), cmd, threads, limit, inputs
 
 
 def lock_path(lock_dir, gpu):
@@ -102,6 +114,40 @@ def try_lock(lock_dir, gpus):
     return held
 
 
+def flock_held(paths, text=None):
+    """{path: whether a process holds an flock on it} from /proc/locks (Linux), without opening or locking the files
+    (a look that took the lock for a moment would make a run trying to take it then believe it taken); None
+    without /proc/locks."""
+    if text is None:
+        try:
+            with open("/proc/locks") as fh:
+                text = fh.read()
+        except OSError:
+            return None
+    exact, inodes = set(), set()
+    for line in text.splitlines():  # "1: FLOCK  ADVISORY  WRITE 1234 fd:01:5678 0 EOF"; "1: -> FLOCK ..." waits
+        w = line.split()
+        if len(w) < 6 or w[1] != "FLOCK":
+            continue
+        dev = w[5].split(":")
+        try:
+            exact.add((int(dev[0], 16), int(dev[1], 16), int(dev[2])))
+            inodes.add(int(dev[2]))
+        except (ValueError, IndexError):
+            continue
+    out = {}
+    for path in paths:
+        try:
+            st = os.stat(path)
+        except OSError:
+            out[path] = False
+            continue
+        key = (os.major(st.st_dev), os.minor(st.st_dev), st.st_ino)
+        # btrfs, overlayfs: stat's device is not the one /proc/locks gives (an anonymous one, major 0)
+        out[path] = key in exact or (key[0] == 0 and st.st_ino in inodes)
+    return out
+
+
 def holder(lock_dir, gpu):
     """What the lock file of a GPU says holds it (the label written by the run holding it)."""
     try:
@@ -120,8 +166,11 @@ def _nvidia_smi(args):
     return r.stdout if r.returncode == 0 else ""
 
 
-# a RELION program (by its name, also with a path or in `which ...`), or a job directory given as where to write
-RELION_JOB = re.compile(r"(?:^|[\s/`'\"])relion(?:_\w+)?(?:[\s`'\"]|$)"
+# a RELION program (relion_<name>, also with a path or in `which ...`; RELION's GUI, relion, only as the program
+# itself: "relion" as a word is also a tmux or screen session, a module or a conda environment), or a job
+# directory given as where to write
+RELION_JOB = re.compile(r"(?:^|[\s/`'\"])relion_\w+(?:[\s`'\"]|$)"
+                        r"|^(?:\S*/)?relion(?:\s|$)"
                         r"|(?:--o|--odir|\d?>>?)\s*['\"]?(?:\S*/)?[A-Za-z0-9_]+/job\d{3,}/")
 
 
@@ -186,24 +235,31 @@ def gpu_index():
     return ids
 
 
-def busy_gpus(table=process_table, ids=None):
-    """The GPUs (by number and by UUID) on which nvidia-smi lists a compute process of a RELION job; empty when it
+def busy_gpu_procs(table=process_table, ids=None):
+    """{GPU number: [(pid, command line)]} of the compute processes of RELION jobs nvidia-smi lists; {} when it
     cannot tell. Other programs computing there do not count. ``ids``: gpu_index(), when already asked."""
     ids = gpu_index() if ids is None else ids
     if not ids:
-        return set()
+        return {}
     apps = []
     for line in _nvidia_smi(["--query-compute-apps=gpu_uuid,pid", "--format=csv,noheader"]).splitlines():
         parts = [p.strip() for p in line.split(",")]
         if len(parts) == 2 and parts[0] in ids and parts[1].isdigit():
             apps.append((parts[0], int(parts[1])))
-    out = set()  # type: set[str]
+    out = {}  # type: dict[str, list[tuple[int, str]]]
     if apps:
         procs = table()
         for uuid, pid in apps:
             if is_relion_job(pid, procs):
-                out.update((uuid, ids[uuid]))
+                out.setdefault(ids[uuid], []).append((pid, procs[pid][1] if pid in procs else ""))
     return out
+
+
+def busy_gpus(table=process_table, ids=None):
+    """The GPUs (by number and by UUID) on which nvidia-smi lists a compute process of a RELION job (busy_gpu_procs)."""
+    ids = gpu_index() if ids is None else ids
+    numbers = set(busy_gpu_procs(table, ids))
+    return numbers | {uuid for uuid, n in ids.items() if n in numbers}
 
 
 # ---------------------------------------------------------------------------- threads
@@ -271,23 +327,27 @@ def thread_lock_path(lock_dir, pid, k=0):
 
 def held_threads(lock_dir, clean=False):
     """[(pid, threads, label)] of the runs holding threads now (their lock file is locked). ``clean``: remove the
-    files of runs that ended (only under the mutex, which those taking threads hold)."""
+    files of runs that ended (only under the mutex, which those taking threads hold); otherwise only a look, with
+    /proc/locks where there is one (flock_held)."""
     out = []  # type: list[tuple[int, int, str]]
     try:
         names = sorted(os.listdir(lock_dir))
     except OSError:
         return out
-    for name in names:
-        m = re.match(r"^threads-(\d+)(?:-\d+)?\.lock$", name)
-        if not m:
-            continue
-        path = os.path.join(lock_dir, name)
+    found = [(m, os.path.join(lock_dir, n)) for n in names for m in [re.match(r"^threads-(\d+)(?:-\d+)?\.lock$", n)]
+             if m]
+    looked = None if clean else flock_held([path for _, path in found])
+    for m, path in found:
         try:
             fd = os.open(path, os.O_RDONLY)
         except OSError:
             continue
         try:
             try:
+                if looked is not None:
+                    if not looked.get(path):
+                        continue
+                    raise OSError(errno.EWOULDBLOCK, "held")
                 fcntl.flock(fd, fcntl.LOCK_SH | fcntl.LOCK_NB)
             except OSError as e:
                 if e.errno not in (errno.EWOULDBLOCK, errno.EAGAIN, errno.EACCES):
@@ -307,9 +367,34 @@ def held_threads(lock_dir, clean=False):
     return out
 
 
-def threads_in_use(lock_dir, table, clean=False):
-    """(threads taken by runs of the queue, threads of RELION jobs running without it, [(pid, threads, label)])."""
+def run_ended(pid, table):
+    """Whether the run that took a lock, process ``pid`` (gpu_wait.py, then the command it became: the run's
+    relion_pipeliner), has ended: it is gone, or a zombie not yet waited for (``table``: process_table())."""
+    if pid in table:
+        return "<defunct>" in table[pid][1]
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return True
+    except OSError:  # another user's (PermissionError): there
+        pass
+    return False
+
+
+def threads_in_use(lock_dir, table, clean=False, ended=None):
+    """(threads taken by runs of the queue, threads of RELION jobs running without it, [(pid, threads, label)]).
+
+    A run holds its threads until its relion_pipeliner ends. RELION starts each job in the background and goes on
+    once the job has written its exit file, so the lock, inherited by everything the job started, is still open
+    in what the job leaves behind: MPI processes still ending (or hung in MPI_Finalize), a program a job script
+    put in the background. Such a lock no longer counts as the run's: those processes count by their command
+    lines, as RELION jobs without the queue (0 when they are not RELION programs computing with threads).
+    ``ended``: a list, given the [(pid, threads, label)] of those locks."""
     held = held_threads(lock_dir, clean)
+    left = [h for h in held if run_ended(h[0], table)]
+    held = [h for h in held if h not in left]
+    if ended is not None:
+        ended.extend(left)
     holders = {pid for pid, _, _ in held}
     # not this process's own: a waiter has started nothing yet, and under cryo-savanna's window are the runs it
     # started (those that took no threads count)
@@ -371,20 +456,45 @@ class _Once:
         return self.got
 
 
-def wait(lock_dir, gpus, label, poll_s=POLL_S, busy=None, threads=0, max_threads=0, table=process_table):
-    """Wait until all ``gpus`` and ``threads`` (of ``max_threads``) are free; returns the descriptors holding their
-    locks (inheritable)."""
+def missing_inputs(inputs):
+    """Those of the files ``inputs`` not there yet."""
+    return [f for f in inputs if not os.path.exists(f)]
+
+
+def wait(lock_dir, gpus, label, poll_s=POLL_S, busy=None, threads=0, max_threads=0, table=process_table,
+         inputs=()):
+    """Wait until the files ``inputs`` are there, and all ``gpus`` and ``threads`` (of ``max_threads``) are free;
+    returns the descriptors holding their locks (inheritable)."""
     said = None
     while True:
+        missing = missing_inputs(inputs)
+        if missing:  # first: nothing is taken while the run could not start its job
+            text = "input %s not there yet" % ", ".join(missing)
+            if text != said:
+                _say("waiting: " + text)
+                said = text
+            time.sleep(poll_s)
+            continue
         table_once = _Once(table)  # one ps per look, for both GPUs and threads
         held = try_lock(lock_dir, gpus) if gpus else []
         why = None
-        if held is not None:
-            busy_now = (busy() if busy is not None else busy_gpus(table_once)) if gpus else set()
+        if held is not None and gpus:
+            # free: let go while nvidia-smi and ps are asked (seconds), or the GPUs would look taken all that time
+            # (to other runs, and in the status bar of cryo-savanna's windows)
+            for fd in held:
+                os.close(fd)
+            busy_now = busy() if busy is not None else busy_gpus(table_once)
             in_use = [g for g in gpus if g in busy_now]  # once per look (two nvidia-smi and a ps), not once per GPU
             if in_use:
                 why = "GPU %s in use by a RELION job started without the GPU queue (nvidia-smi)" % ", ".join(in_use)
-            elif threads:
+            else:
+                held = try_lock(lock_dir, gpus)  # None: another run took them meanwhile
+        if held is None:
+            taken = [g for g in gpus if holder(lock_dir, g)]
+            why = "GPU %s in use by %s" % (", ".join(gpus), "; ".join(sorted({holder(lock_dir, g) for g in taken}))
+                                            or "another run")
+        elif why is None:
+            if threads:
                 fd, why = try_threads(lock_dir, threads, max_threads, label, table_once)
                 if fd is not None:
                     held.append(fd)
@@ -392,10 +502,6 @@ def wait(lock_dir, gpus, label, poll_s=POLL_S, busy=None, threads=0, max_threads
                 break
             for fd in held:
                 os.close(fd)
-        else:
-            taken = [g for g in gpus if holder(lock_dir, g)]
-            why = "GPU %s in use by %s" % (", ".join(gpus), "; ".join(sorted({holder(lock_dir, g) for g in taken}))
-                                            or "another run")
         if why != said:
             _say("waiting: " + why)
             said = why
@@ -418,13 +524,13 @@ def wait(lock_dir, gpus, label, poll_s=POLL_S, busy=None, threads=0, max_threads
 
 
 def main(argv):
-    lock_dir, gpus, label, cmd, threads, limit = parse(argv)
+    lock_dir, gpus, label, cmd, threads, limit, inputs = parse(argv)
     try:
         os.makedirs(lock_dir, exist_ok=True)
     except OSError as e:
         print("gpu_wait.py: cannot make %s: %s" % (lock_dir, e), file=sys.stderr, flush=True)
         return 1
-    wait(lock_dir, gpus, label, threads=threads, max_threads=limit)
+    wait(lock_dir, gpus, label, threads=threads, max_threads=limit, inputs=inputs)
     try:
         os.execvp(cmd[0], cmd)
     except OSError as e:

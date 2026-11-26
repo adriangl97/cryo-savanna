@@ -238,7 +238,8 @@ class ActionsBase(QObject):
         """(anything to undelete, how many runs Stop runs can stop, the jobs runs still going hold, the jobs out
         of date)."""
         held = pl.held_jobs(pipeline) if pl is not None else {}
-        stoppable = len({r.id for r in pl.repeating_runs()} | {h.run.id for h in held.values() if h.stoppable}
+        stoppable = len({r.id for r in pl.repeating_runs()}  # (as Pipeliner.stoppable_runs)
+                        | {h.run.id for h in held.values() if h.stoppable or not h.current}
                         | {r.id for r, _ in pl.stuck_runs(pipeline, held)}) if pl is not None else 0
         stale = checker.check(pipeline) if checker is not None and pipeline is not None else {}
         return ops is not None and bool(ops.trash()), stoppable, held, stale

@@ -10,13 +10,15 @@ freeze); ``when_done`` for a value that is shown when it is there.
 from __future__ import annotations
 
 import threading
+import time
 from collections.abc import Callable
 
 from qtpy.QtCore import QEventLoop, Qt, QTimer
-from qtpy.QtWidgets import QProgressDialog, QWidget
+from qtpy.QtWidgets import QDialog, QLabel, QVBoxLayout, QWidget
 
 QUICK_S = 0.15  # work done within this needs no note (and no flicker of one)
 POLL_MS = 30
+TICK_MS = 1000  # the note's time so far, written again this often
 
 
 class _Work(threading.Thread):
@@ -38,19 +40,32 @@ class _Work(threading.Thread):
         return self.value
 
 
-class _Note(QProgressDialog):
-    """A note without buttons that stays until the work is done (Esc and the close button do nothing)."""
+class _Note(QDialog):
+    """A note without buttons that stays until the work is done (Esc and the close button do nothing), with the
+    seconds gone by. Not a busy bar: Fusion animates one at about 100 frames a second, and over X11 each frame is
+    sent; the time, written once a second, shows as well that the work goes on."""
 
     def __init__(self, text: str, parent: QWidget | None):
-        super().__init__(text, "", 0, 0, parent)
-        self.setCancelButton(None)
+        super().__init__(parent)
         self.setWindowTitle("cryo-savanna")
         self.setWindowModality(Qt.ApplicationModal)
-        self.setMinimumDuration(0)
-        self.setAutoClose(False)
-        self.setAutoReset(False)
         self.setWindowFlag(Qt.WindowCloseButtonHint, False)
+        self.setWindowFlag(Qt.WindowContextHelpButtonHint, False)
+        self.text = text
+        self.label = QLabel(f"{text}\n0 s")  # two lines from the start: the note keeps its size
+        self.label.setAlignment(Qt.AlignCenter)
+        self.label.setMinimumWidth(self.label.fontMetrics().averageCharWidth() * 40)
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(24, 18, 24, 18)
+        lay.addWidget(self.label)
         self.finished_work = False
+        self._start = time.monotonic()
+        self._tick = QTimer(self)
+        self._tick.timeout.connect(self._show_time)
+        self._tick.start(TICK_MS)
+
+    def _show_time(self) -> None:
+        self.label.setText(f"{self.text}\n{int(time.monotonic() - self._start)} s")
 
     def reject(self) -> None:
         if self.finished_work:
@@ -58,6 +73,7 @@ class _Note(QProgressDialog):
 
     def closeEvent(self, e) -> None:
         if self.finished_work:
+            self._tick.stop()
             super().closeEvent(e)
         else:
             e.ignore()

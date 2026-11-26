@@ -37,7 +37,7 @@ from pathlib import Path
 
 from cryo_savanna.env.child import external_environ
 from cryo_savanna.jobdefs import external_jobs
-from cryo_savanna.project import processes, references, scratch
+from cryo_savanna.project import processes, references, scratch, tomo_select
 from cryo_savanna.project.gpu_queue import GpuQueue, is_waiting
 from cryo_savanna.project.jobstar import JobStar
 from cryo_savanna.project.lock import PipelineLock
@@ -122,6 +122,8 @@ class Held:
     waiting_for: list[str] = field(default_factory=list)  # its input files not there yet (RELION waits for them)
     gpus_waiting: list[str] = field(default_factory=list)  # the run waits for these GPUs (the local GPU queue)
     threads_waiting: int = 0  # the run waits for this many threads (the local thread queue)
+    scheduled: bool = True  # the pipeline has it as Scheduled (not Running: its run has not started it)
+    after: str = ""  # a job further down its run: the job the run is at now, which has to end first
 
     @property
     def waiting(self) -> bool:
@@ -139,9 +141,18 @@ class Held:
         return self.current and self.threads_waiting > 0
 
     @property
+    def not_started(self) -> bool:
+        """The run is at this job and has not started it, with nothing it is seen to wait for (no input file
+        missing, no GPU or thread awaited): it starts it at any moment, or its relion_pipeliner is stalled
+        (RELION waits for something else, or hangs)."""
+        return self.current and self.scheduled and not (self.waiting or self.waiting_for_gpus
+                                                        or self.waiting_for_threads)
+
+    @property
     def stoppable(self) -> bool:
-        """Nothing of the job runs yet (its inputs, GPUs or threads are awaited): its run can be ended now."""
-        return self.waiting or self.waiting_for_gpus or self.waiting_for_threads
+        """Nothing of the job runs yet (its inputs, GPUs or threads are awaited, or it is not started): its run
+        can be ended now."""
+        return self.current and self.scheduled
 
     def describe(self) -> str:
         started = time.strftime("%d %b %H:%M", time.localtime(self.run.started))
@@ -154,7 +165,10 @@ class Held:
         elif self.waiting:
             text += ", waiting for " + ", ".join(self.waiting_for)
         elif not self.current:
-            text += ", after the job it runs now"
+            text += (f", after {self.after.rstrip('/') or 'the job it is at now'}: a run starts each of its jobs "
+                     "once the one before has ended")
+        elif self.not_started:
+            text += ", not started yet"
         return text
 
 
@@ -344,6 +358,10 @@ class Pipeliner:
                      f" ++++ (done interactively in cryo-savanna, which wrote the files this command writes)\n ++++ \n")
         (d / RELION_JOB_EXIT_SUCCESS).touch()
         PipelineOps(self.project_dir).mark_finished(job)
+        try:  # a selection of tomography particles: their optimisation set (the window tries again if this fails)
+            tomo_select.complete(self.project_dir, job)
+        except (OSError, ValueError, RuntimeError):  # (LockError, OpsError)
+            pass
 
     def _runner_for(self, jobstar: JobStar) -> None:
         """A job made from one of cryo-savanna's own forms (a CLI tool, pytom, AreTomo3, tomogram masks) runs
@@ -383,7 +401,7 @@ class Pipeliner:
         limit = q.max_threads if q is not None and threads else 0
         if (gpus or threads) and q is not None:  # waits for them, then becomes the relion_pipeliner
             label = f"{', '.join(j.rstrip('/') for j in jobs)} in {self.project_dir} ({_user()})"
-            cmd = q.command(cmd, gpus, label, threads)
+            cmd = q.command(cmd, gpus, label, threads, self._first_inputs(jobs))
         runs = self._gui_dir("runs")
         log = runs / f"{rid}.log"
         with open(log, "ab") as out:
@@ -398,6 +416,39 @@ class Pipeliner:
         if threads > limit > 0:
             self.oversubscribed.append(rec)
         return rec
+
+    def _first_inputs(self, jobs: list[str]) -> list[str]:
+        """The input files of the first of a run's jobs, as the pipeline has them (RELION's pipeliner waits for
+        them before it starts the job); [] when the pipeline cannot be read."""
+        try:
+            pr = Pipeline.read(self.project_dir).processes.get(jobs[0])
+        except (OSError, ValueError, RuntimeError):
+            return []
+        return list(dict.fromkeys(pr.inputs)) if pr is not None else []
+
+    def run_scheduled(self, jobs: list[str], together: bool = False, repeat: int = 1, **run_args) -> list[RunRecord]:
+        """Run scheduled jobs (Job → Run scheduled…). A relion_pipeliner runs its jobs one after the other, each
+        once the one before has ended, whether its inputs are there or not: so jobs that do not take inputs from
+        each other get a run each and start at once (staleness.independent_groups), and those that do share one,
+        each after the jobs it reads from. ``together`` (or a repeating run, as RELION's scheduler repeats its
+        list): all in one run, in this order."""
+        if not jobs:
+            raise PipelinerError("no jobs to run")
+        if together or repeat > 1 or len(jobs) == 1:
+            return [self.run(jobs, repeat=repeat, **run_args)]
+        from cryo_savanna.project.staleness import independent_groups
+        self._check_free(jobs)  # all of them before the first run starts
+        groups = independent_groups(Pipeline.read(self.project_dir), jobs)
+        started: list[RunRecord] = []
+        for group in groups:
+            try:
+                started.append(self.run(group, repeat=repeat, **run_args))
+            except Exception as e:
+                if not started:
+                    raise
+                done = "; ".join(", ".join(j.rstrip("/") for j in r.jobs) for r in started)
+                raise PipelinerError(f"{e}\n\nStarted before this: {done}") from e
+        return started
 
     def rerun(self, jobs: list[str]) -> tuple[list[str], RunRecord]:
         """Run finished jobs again with their own settings (out of date: project/staleness.py): each is
@@ -487,11 +538,15 @@ class Pipeliner:
                 pr = p.processes[job]
                 missing = ([n for n in pr.inputs if not (self.project_dir / n).exists()]
                            if k == 0 and pr.status == STATUS_SCHEDULED else [])
-                out[job] = Held(rec, k == 0, missing, gpus if k == 0 else [], threads if k == 0 else 0)
+                if missing and "--input" in rec.command:  # its waiter takes nothing before they are there
+                    gpus, threads = [], 0
+                out[job] = Held(rec, k == 0, missing, gpus if k == 0 else [], threads if k == 0 else 0,
+                                pr.status == STATUS_SCHEDULED, after=ahead[0] if k else "")
         return out
 
     def _waiting_for(self, rec: RunRecord) -> str:
-        """"gpus" or "threads": what the waiter of a run (gpu_wait.py) said last it waits for; "" when unknown."""
+        """"gpus", "threads" or "inputs": what the waiter of a run (gpu_wait.py) said last it waits for; "" when
+        unknown."""
         try:
             with open(self.project_dir / rec.log, "rb") as fh:
                 fh.seek(0, os.SEEK_END)
@@ -502,7 +557,7 @@ class Pipeliner:
         last = tail.rsplit("local queue: waiting: ", 1)
         if len(last) < 2:
             return ""
-        return "gpus" if last[1].startswith("GPU ") else "threads"
+        return "gpus" if last[1].startswith("GPU ") else "inputs" if last[1].startswith("input ") else "threads"
 
     def _check_free(self, jobs: list[str]) -> None:
         """Refuse to run jobs that a run still going is to run already (two pipeliners for one job: both
@@ -518,9 +573,14 @@ class Pipeliner:
                 + "\n\nWait for it, or stop that run first (Job → Stop runs…).")
 
     def stoppable_runs(self, pipeline: Pipeline | None = None) -> list[tuple[RunRecord, str]]:
-        """Runs that can be stopped, newest first: (run, "repeating") for a repeating run (it stops after its
-        current job), (run, "waiting") for a run on this host that waits for the input files of its next job
-        (its relion_pipeliner can be ended now: nothing of the job has started)."""
+        """Runs that can be stopped, newest first, and how:
+
+        - "repeating": a repeating run; it stops after its current job;
+        - "waiting": a run on this host at a job it has not started (it waits for its input files, GPUs or
+          threads, or is stalled): its relion_pipeliner can be ended now, and its jobs stay Scheduled;
+        - "stuck": a run whose job no longer runs (stuck_runs): ended, the job marked aborted (end_stuck);
+        - "busy": a run on this host that runs a job now and has Scheduled jobs after it (they show "in a
+          run"): it stops at that job once that job is aborted (current_job)."""
         out: dict[str, tuple[RunRecord, str]] = {r.id: (r, "repeating") for r in self.repeating_runs()}
         p = pipeline if pipeline is not None else Pipeline.read(self.project_dir)
         held = self.held_jobs(p)
@@ -529,7 +589,16 @@ class Pipeliner:
                 out[h.run.id] = (h.run, "waiting")
         for rec, _job in self.stuck_runs(p, held):
             out[rec.id] = (rec, "stuck")  # (a repeating run too: it would never get to the end of its job)
+        for h in held.values():
+            if not h.current and h.run.id not in out:
+                out[h.run.id] = (h.run, "busy")
         return sorted(out.values(), key=lambda x: x[0].started, reverse=True)
+
+    def current_job(self, rec: RunRecord, pipeline: Pipeline | None = None) -> str | None:
+        """The job a run is at: the first of its jobs the pipeline has as Scheduled or Running (held_jobs)."""
+        p = pipeline if pipeline is not None else Pipeline.read(self.project_dir)
+        return next((j for j in rec.jobs if j in p.processes
+                     and p.processes[j].status in (STATUS_SCHEDULED, STATUS_RUNNING)), None)
 
     def stuck_runs(self, pipeline: Pipeline | None = None, held: dict[str, Held] | None = None
                    ) -> list[tuple[RunRecord, str]]:
@@ -565,7 +634,8 @@ class Pipeliner:
                 if not processes.job_processes(self.project_dir, job, [rec.pid], table=table)]
 
     def end_run(self, rec: RunRecord, why: str = "a run that waits for its inputs") -> None:
-        """End the relion_pipeliner of a run that waits for input files (stoppable_runs). It is ended while
+        """End the relion_pipeliner of a run that has not started its job (stoppable_runs "waiting": it waits for
+        input files, GPUs or threads, or is stalled; or a stuck one, see end_stuck). It is ended while
         cryo-savanna holds RELION's pipeline lock, so it is not in the middle of writing the pipeline (RELION
         writes the file in place: a pipeliner ended there leaves it empty). The jobs it was to run stay
         Scheduled."""
@@ -584,6 +654,16 @@ class Pipeliner:
                 time.sleep(0.2)
         if rec.is_alive():
             raise PipelinerError(f"relion_pipeliner {rec.pid} did not stop.")
+        job = self.current_job(rec)
+        if job is not None and Pipeline.read(self.project_dir).processes[job].status == STATUS_SCHEDULED:
+            try:
+                started = processes.job_processes(self.project_dir, job)
+            except processes.ForceAbortError:
+                started = []
+            if started:  # it was starting the job just then
+                raise PipelinerError(f"relion_pipeliner {rec.pid} was stopped, but it had just started "
+                                     f"{job.rstrip('/')}: {len(started)} process(es) of it run. Force abort it "
+                                     "(Job → Abort…), then mark it as failed or overwrite it.")
 
     def end_stuck(self, rec: RunRecord, job: str, wait_s: float | None = None) -> None:
         """End a run whose job no longer runs (stuck_runs; or one whose processes cannot be found here): write

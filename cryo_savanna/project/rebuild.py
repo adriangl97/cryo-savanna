@@ -99,7 +99,10 @@ OUTPUTS: dict[str, list[tuple[tuple[str, ...], str, str]]] = {
     "relion.extract": [_o("particles.star", _PARTS)],
     "relion.select": [_o("particles.star", _PARTS), _o("micrographs.star", _MICS), _o("movies.star", _MOVIES),
                       _o("class_averages.star", "Image2DGroupMetadata.star.relion.classaverages"),
-                      _o("particles_split*.star", _PARTS, "all"), _o("micrographs_split*.star", _MICS, "all")],
+                      _o("particles_split*.star", _PARTS, "all"), _o("micrographs_split*.star", _MICS, "all"),
+                      # cryo-savanna's, for tomography particles (project/tomo_select.py)
+                      _o("optimisation_set.star", _OPTSET + ".select"),
+                      _o("optimisation_set_split*.star", _OPTSET + ".select", "all")],
     "relion.class2d": [_o("run_it*_data.star", _PARTS + ".class2d", "last"),
                        _o("run_it*_optimiser.star", "OptimiserData.star.relion.class2d", "last")],
     "relion.initialmodel": [_o("initial_model.mrc", "DensityMap.mrc.relion.initialmodel"),

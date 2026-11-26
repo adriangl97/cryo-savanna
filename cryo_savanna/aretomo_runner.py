@@ -820,7 +820,7 @@ def check_executable(opts):
 def picking_warnings(opts):
     """Settings whose tomograms are not in RELION's frame: particles picked in them (e.g. by template
     matching) may land in the wrong place when RELION extracts subtomograms from the aligned tilt series."""
-    out = []
+    out = []  # type: list[str]
     if not reconstruct(opts):
         return out
     if FLIP_VOL.get(text(opts, "flip_vol"), "1") == "2":

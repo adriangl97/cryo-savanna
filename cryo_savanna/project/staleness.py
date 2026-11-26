@@ -140,6 +140,33 @@ def dependency_order(pipeline: Pipeline, jobs: list[str]) -> list[str]:
     return out + [j for j in jobs if j not in needs]
 
 
+def independent_groups(pipeline: Pipeline, jobs: list[str]) -> list[list[str]]:
+    """``jobs`` split into groups that do not take inputs from each other, each in dependency_order, in the order
+    of their first job: one relion_pipeliner runs its jobs one after the other (each after the last one ended),
+    so jobs of different groups can each have a run of their own, and start at once."""
+    chosen = [j for j in jobs if j in pipeline.processes]
+    group = {j: j for j in chosen}  # union-find over "takes an input from"
+
+    def root(j: str) -> str:
+        while group[j] != j:
+            group[j] = group[group[j]]
+            j = group[j]
+        return j
+
+    for j in chosen:
+        for _, p in _input_jobs(pipeline, j):
+            if p in group:
+                group[root(j)] = root(p)
+    members: dict[str, list[str]] = {}
+    for j in chosen:
+        members.setdefault(root(j), []).append(j)
+    order = {n: i for i, n in enumerate(pipeline.processes)}
+    out = [dependency_order(pipeline, m) for m in members.values()]
+    out.sort(key=lambda g: min(order[j] for j in g))
+    unknown = [j for j in jobs if j not in pipeline.processes]
+    return out + ([unknown] if unknown else [])
+
+
 def downstream(pipeline: Pipeline, job: str, among: dict[str, Stale]) -> list[str]:
     """``job`` (if it is in ``among``) and the jobs of ``among`` that depend on it, in pipeline order."""
     want = {job}

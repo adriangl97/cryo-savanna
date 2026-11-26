@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING
 
 from qtpy.QtCore import Qt, QTimer
 from qtpy.QtWidgets import (
+    QCheckBox,
     QDialog,
     QDialogButtonBox,
     QFormLayout,
@@ -65,6 +66,15 @@ class RunScheduledDialog(QDialog):
         self.sec_wait_after = QSpinBox()
         self.sec_wait_after.setRange(1, 3600)
         self.sec_wait_after.setValue(10)
+        self.separate = QCheckBox("Start jobs that do not use each other's outputs at once, each in a run of its own")
+        self.separate.setChecked(True)
+        self.separate.setToolTip(
+            "A run starts each of its jobs once the one before has ended, even when its inputs are already there.\n"
+            "Ticked: jobs that do not take inputs from each other run side by side; a job that does runs after\n"
+            "those it reads from, in their run. Not ticked: all in one run, one after the other (as RELION's\n"
+            "scheduler). Jobs on the same GPUs wait for each other only with Preferences → Local GPU queue.\n"
+            "A repeating run (more than once) always runs them all in one run.")
+        self.repeat.valueChanged.connect(lambda n: self.separate.setEnabled(n <= 1))
         form = QFormLayout()
         form.addRow("Run the jobs this many times:", self.repeat)
         form.addRow("Wait at least (min) between repeats:", self.min_wait)
@@ -75,9 +85,12 @@ class RunScheduledDialog(QDialog):
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
         lay = QVBoxLayout(self)
-        lay.addWidget(QLabel("Jobs run one after the other, each waiting for its input files. "
-                             "The run stops at the first failed or aborted job."))
+        intro = QLabel("Each job waits for its input files. A run starts its jobs one after the other, each once "
+                       "the one before has ended, and stops at the first failed or aborted job.")
+        intro.setWordWrap(True)
+        lay.addWidget(intro)
         lay.addWidget(self.list)
+        lay.addWidget(self.separate)
         lay.addLayout(form)
         lay.addWidget(buttons)
 
@@ -87,7 +100,8 @@ class RunScheduledDialog(QDialog):
 
     def run_args(self) -> dict:
         return dict(repeat=self.repeat.value(), min_wait=self.min_wait.value(),
-                    min_wait_before=self.min_wait_before.value(), sec_wait_after=self.sec_wait_after.value())
+                    min_wait_before=self.min_wait_before.value(), sec_wait_after=self.sec_wait_after.value(),
+                    together=not self.separate.isChecked())
 
 
 
@@ -189,13 +203,22 @@ class RunActions(_Base):
         if dlg.exec() != QDialog.Accepted or not dlg.selected():
             return
         selected, args = dlg.selected(), dlg.run_args()
-        self._run("Run scheduled jobs", lambda: pl.run(selected, **args))
+
+        def done(runs) -> None:
+            if len(runs) > 1:
+                self.message.emit(f"Started {len(runs)} runs side by side: " + "; ".join(
+                    ", ".join(self._label(j) for j in r.jobs) for r in runs))
+        self._run("Run scheduled jobs", lambda: pl.run_scheduled(selected, **args), done)
 
     def stop_runs(self) -> None:
-        """Stop a run: a repeating one after the job it runs (RELION's pipeliner checks its flag file), one that
-        waits for the input files of its next job now (its relion_pipeliner is ended; the job stays Scheduled)."""
+        """Stop a run (Pipeliner.stoppable_runs): a repeating one after the job it runs (RELION's pipeliner
+        checks its flag file); one that has not started its job now (its relion_pipeliner is ended; the job
+        stays Scheduled); one whose job no longer runs now (the job marked aborted); one that runs a job with
+        others scheduled after it by aborting that job (it stops there)."""
         pl, snap = self._ready()[1], self.snapshot
-        runs = pl.stoppable_runs(snap.pipeline if snap is not None else None)
+        pipeline = snap.pipeline if snap is not None else None
+        runs = pl.stoppable_runs(pipeline)
+        at = {r.id: pl.current_job(r, pipeline) or "" for r, _ in runs}  # the job each is at ("": none any more)
         if not runs:
             self._look_at_project()
             self.update_state()
@@ -211,11 +234,15 @@ class RunActions(_Base):
             elif kind == "stuck":
                 what = (f"{self._label(stuck[rec.id])} is not running any more, but its relion_pipeliner "
                         f"({rec.pid}) still waits for it · ends now, the job marked aborted")
+            elif kind == "busy":
+                what = f"runs {self._label(at[rec.id])} now · stops once it is aborted (asked next)"
             else:
-                what = "waits for its inputs or its GPUs · stops now"
+                what = (f"has not started {self._label(at[rec.id])} (waits for its inputs, GPUs or threads, or "
+                        "stalled) · stops now, its jobs stay Scheduled" if at[rec.id] else "stops now")
             return (f"{time.strftime('%d %b %H:%M', time.localtime(rec.started))} · {what} · "
                     + ", ".join(self._label(j) for j in rec.jobs))
-        runs = [(r, k) for r, k in runs if k != "stuck" or r.id in stuck]  # (one that ended meanwhile: not shown)
+        runs = [(r, k) for r, k in runs if (k != "stuck" or r.id in stuck)  # (one that ended meanwhile: not shown)
+                and (k != "busy" or at[r.id])]
         if not runs:
             self.message.emit("No run that can be stopped is going.")
             return
@@ -229,13 +256,17 @@ class RunActions(_Base):
         elif kind == "stuck":
             job = stuck[rec.id]
             self._run(f"End the run of {self._label(job)}", lambda: pl.end_stuck(rec, job))
+        elif kind == "busy":
+            self._abort(at[rec.id])  # the run stops at the aborted job; the jobs after it stay Scheduled
         else:
             self._run("Stop run", lambda: pl.end_run(rec))
 
     def abort_job(self) -> None:
-        job = self.current
-        if job is None:
-            return
+        if self.current is not None:
+            self._abort(self.current)
+
+    def _abort(self, job: str) -> None:
+        """Abort ``job``: ask how, then do it."""
         pl = self._ready()[1]
         q = self.queue.live.get(job) if self.queue is not None else None
         if q is not None and self.slurm is not None:

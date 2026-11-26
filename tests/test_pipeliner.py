@@ -266,6 +266,8 @@ def test_the_jobs_of_runs_still_going_are_known(spa_copy):
         assert sorted(held) == ["Polish/job015/", "Refine3D/job016/"]
         assert held["Polish/job015/"].current and not held["Polish/job015/"].waiting  # it runs
         assert not held["Refine3D/job016/"].current  # after the job that runs now
+        assert held["Refine3D/job016/"].after == "Polish/job015/"
+        assert "after Polish/job015" in held["Refine3D/job016/"].describe()
         going.kill()
         going.wait()
         held = pl.held_jobs()
@@ -347,3 +349,96 @@ def test_the_note_of_a_job_done_here_has_relions_dates_whatever_the_locale(spa_c
     Pipeliner(spa_copy, exe="/nonexistent").finish_done_here(job, lambda _job: None, "relion_display ...")
     started = last_start(spa_copy / job / "note.txt")  # " ++++ Executing new job on Thu Mar  5 10:00:00 2026"
     assert started is not None and before - 2 <= started <= time.time() + 1
+
+
+def test_a_run_that_has_not_started_its_job_can_be_stopped(spa_copy):
+    """At a Scheduled job with its inputs there and no GPU or thread awaited ("Scheduled · in a run"), but not
+    started: its relion_pipeliner is stalled, or starts it at any moment. Stop runs ends it; the job stays
+    Scheduled."""
+    job = "Refine3D/job016/"
+    (spa_copy / "Polish/job015/shiny.star").write_text("")  # its input: nothing to wait for
+    proc = _live_run(spa_copy, "a", [job])
+    try:
+        pl = Pipeliner(spa_copy, exe="relion_pipeliner", environ={})
+        h = pl.held_jobs()[job]
+        assert h.current and not h.waiting and h.not_started and h.stoppable and "not started yet" in h.describe()
+        [(rec, kind)] = pl.stoppable_runs()
+        assert kind == "waiting" and pl.current_job(rec) == job
+        pl.end_run(rec)
+        assert proc.poll() is not None and pl.held_jobs() == {}
+        assert Pipeline.read(spa_copy).processes[job].status == "Scheduled"
+    finally:
+        proc.kill()
+        proc.wait()
+
+
+def test_a_run_ended_just_as_it_started_its_job_says_so(spa_copy):
+    from tests.test_processes import start, wait_found
+    job = "Refine3D/job016/"
+    (spa_copy / "Polish/job015/shiny.star").write_text("")
+    proc = _live_run(spa_copy, "a", [job])
+    sh = start(spa_copy, job)  # started by the run just then (the pipeline does not say Running yet)
+    try:
+        wait_found(spa_copy, job, 1)
+        pl = Pipeliner(spa_copy, exe="relion_pipeliner", environ={})
+        [(rec, _)] = pl.stoppable_runs()
+        with pytest.raises(PipelinerError, match="had just started Refine3D/job016"):
+            pl.end_run(rec)
+        assert proc.poll() is not None
+    finally:
+        sh.kill()
+        proc.kill()
+        proc.wait()
+
+
+def test_a_run_busy_with_a_job_before_scheduled_ones_is_offered(spa_copy):
+    """Its later jobs show "Scheduled · in a run"; it stops once the job it runs is aborted."""
+    proc = _live_run(spa_copy, "b", ["Polish/job015/", "Refine3D/job016/"])  # Polish/job015/ is Running
+    try:
+        pl = Pipeliner(spa_copy, exe="relion_pipeliner", environ={})
+        assert not pl.held_jobs()["Refine3D/job016/"].current
+        [(rec, kind)] = pl.stoppable_runs()
+        assert (rec.id, kind) == ("b", "busy") and pl.current_job(rec) == "Polish/job015/"
+    finally:
+        proc.kill()
+        proc.wait()
+
+
+def test_jobs_that_do_not_read_from_each_other_are_in_groups_of_their_own(spa_copy):
+    from cryo_savanna.project.staleness import independent_groups
+    p = Pipeline.read(spa_copy)
+    # Refine3D/job016 reads Polish/job015's particles and MaskCreate/job012's mask: one group, after both
+    assert independent_groups(p, ["Refine3D/job016/", "Class2D/job006/", "Polish/job015/", "Class2D/job018/",
+                                  "MaskCreate/job012/"]) == [
+        ["Class2D/job006/"], ["MaskCreate/job012/", "Polish/job015/", "Refine3D/job016/"], ["Class2D/job018/"]]
+    assert independent_groups(p, ["Class2D/job018/"]) == [["Class2D/job018/"]]
+
+
+def test_run_scheduled_starts_independent_jobs_at_once(spa_copy, monkeypatch):
+    """A relion_pipeliner starts each of its jobs once the one before has ended (even with its inputs there), so
+    jobs that do not read from each other get a run each; a repeating run, or "together", stays one run."""
+    pl = Pipeliner(spa_copy, exe="relion_pipeliner", environ={})
+    started: list[tuple[list[str], int]] = []
+    monkeypatch.setattr(pl, "run", lambda jobs, repeat=1, **kw: started.append((list(jobs), repeat)) or jobs)
+    jobs = ["Class2D/job006/", "Refine3D/job016/", "Class2D/job018/", "Polish/job015/"]
+    assert len(pl.run_scheduled(jobs, sec_wait_after=1)) == 3
+    assert started == [(["Class2D/job006/"], 1), (["Polish/job015/", "Refine3D/job016/"], 1),
+                       (["Class2D/job018/"], 1)]
+    started.clear()
+    pl.run_scheduled(jobs, together=True)
+    pl.run_scheduled(jobs, repeat=3)
+    assert started == [(jobs, 1), (jobs, 3)]
+
+
+def test_run_scheduled_starts_nothing_when_a_job_is_in_a_run_already(spa_copy, monkeypatch):
+    proc = _live_run(spa_copy, "a", ["Refine3D/job016/"])
+    try:
+        pl = Pipeliner(spa_copy, exe="relion_pipeliner", environ={})
+        started: list[list[str]] = []
+        monkeypatch.setattr(pl, "run", lambda jobs, **kw: started.append(jobs))
+        with pytest.raises(PipelinerError, match="Already in a run"):
+            pl.run_scheduled(["Class2D/job006/", "Refine3D/job016/"])
+        assert started == []  # not the first group either
+    finally:
+        proc.kill()
+        proc.wait()

@@ -192,7 +192,7 @@ polling interval (Preferences, or `--poll`), and views of running jobs read new 
   option (Import, Subset selection, Join star files…) never wait. A job that asks for more threads than the limit
   waits until no RELION job runs on this machine, then starts and oversubscribes it: cryo-savanna warns when it
   is started, and its run.out says so. The threads are held by a `threads-<pid>.lock` file next to the GPU locks,
-  released when the run's processes end.
+  released when the run's relion_pipeliner ends (processes its jobs leave behind count only by their own `--j`).
 - **Threads, GPUs and RAM in use** (Preferences → Status bar, on by default): the status bar shows, next to
   "updated HH:MM:SS", the threads RELION jobs use on this machine out of the thread queue's limit, and how many
   of its GPUs are in use (locked by a run of the queue, or with a RELION job on them in nvidia-smi), looked at
@@ -310,6 +310,10 @@ napari tool for Run now; scheduled jobs always run RELION's tool:
 write (Select: particles.star, class_averages.star, backup_selection.star; Exclude tilt images:
 selected_tilt_series.star and tilt_series/*.star) and marks the job finished, so later jobs use it
 as any RELION job.
+
+**Select on tomography particles** (interactive or not, run here or by RELION) also gets an
+`optimisation_set.star` (`optimisation_set_split<N>.star` for each subset), which RELION's Select does
+not write.
 
 The job's **Selection** tab shows what it chose, in the same view as the selection window but
 read-only: all classes with the selected ones highlighted (and how many particles they hold), or
