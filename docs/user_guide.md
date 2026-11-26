@@ -313,12 +313,7 @@ as any RELION job.
 
 **Select on tomography particles** (interactive or not, run here or by RELION) also gets an
 `optimisation_set.star` (`optimisation_set_split<N>.star` for each subset), which RELION's Select does
-not write: the selected particles with the tomograms and trajectories of the particles they were
-selected from. It is one of the job's outputs, so the next job (Refine3D, Class3D, Reconstruct
-particle, CTF refinement, frame alignment...) takes it as its "Input optimisation set", without
-direct entries. A Select RELION ran gets it once cryo-savanna sees the job finished (when the
-project is open, and not read-only). The reference maps, mask and FSC of a refinement are left out:
-they are of all its particles, not of those selected.
+not write.
 
 The job's **Selection** tab shows what it chose, in the same view as the selection window but
 read-only: all classes with the selected ones highlighted (and how many particles they hold), or
