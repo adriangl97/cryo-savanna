@@ -827,7 +827,6 @@ class MainWindow(QMainWindow):
         if self.usage is not None:
             tip += ("\n\nThreads and GPUs RELION jobs use on this machine (anyone's, any project; "
                     f"limit: Preferences → Local thread queue):\n{self.usage.detail or 'none'}"
-                    + (f"\nGPUs in use: {', '.join(self.usage.gpus)}" if self.usage.gpus else "")
                     + ("\n\nRAM: in use by every program on this machine (GB = 1024³ bytes)"
                        if self.usage.ram_text() else ""))
         elif self.usage_error:

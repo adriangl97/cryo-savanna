@@ -246,6 +246,10 @@ class Usage:
                 f"({100 * self.ram_used_gb / self.ram_total_gb:.0f}%)")
 
 
+def _short(args: str, n: int = 80) -> str:
+    return args if len(args) <= n else args[:n - 1] + "…"
+
+
 def _gpu_lock_held(path: Path) -> bool:
     import errno
     import fcntl
@@ -272,14 +276,21 @@ def usage(queue: GpuQueue, thread_limit: int) -> Usage:
     table = gpu_wait.process_table()
     tracked, untracked, held = gpu_wait.threads_in_use(str(lock_dir), table)
     ids = gpu_wait.gpu_index()  # {uuid: number}
-    names = set(gpu_wait.busy_gpus(lambda: table, ids)) if ids else set()
-    for f in lock_dir.glob("gpu-*.lock"):
-        if _gpu_lock_held(f):
-            names.add(f.name[len("gpu-"):-len(".lock")])
-    gpus = sorted({ids.get(g) or g for g in names}, key=lambda g: (not g.isdigit(), int(g) if g.isdigit() else 0, g))
+    why: dict[str, list[str]] = {}  # GPU -> what makes it in use
+    for n, procs in (gpu_wait.busy_gpu_procs(lambda: table, ids) if ids else {}).items():
+        why.setdefault(n, []).extend(f"process {pid} ({_short(args)}), in nvidia-smi" for pid, args in procs)
+    files = sorted(lock_dir.glob("gpu-*.lock"))
+    looked = gpu_wait.flock_held([str(f) for f in files])  # Linux: without touching the files
+    for f in files:
+        if looked.get(str(f)) if looked is not None else _gpu_lock_held(f):
+            name = f.name[len("gpu-"):-len(".lock")]
+            label = gpu_wait.holder(str(lock_dir), name) or "a run"
+            why.setdefault(ids.get(name) or name, []).append(f"locked by {label}")
+    gpus = sorted(why, key=lambda g: (not g.isdigit(), int(g) if g.isdigit() else 0, g))
     detail = [f"{n} threads: {lab}" for _, n, lab in held]
     if untracked:
         detail.append(f"{untracked} threads: RELION jobs started without the queue (their --j, MPI ranks)")
+    detail += [f"GPU {g}: " + "; ".join(why[g]) for g in gpus]
     ram = local_ram_use_gb()
     return Usage(tracked + untracked, thread_limit, gpus, len(ids), "\n".join(detail),
                  *(ram if ram is not None else (None, None)))

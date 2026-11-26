@@ -392,6 +392,59 @@ def test_only_relion_jobs_on_a_gpu_make_a_run_wait(monkeypatch):
            "--query-compute-apps=gpu_uuid,pid": "GPU-a, 12\nGPU-b, 31\nGPU-c, 21\nGPU-c, 40\n"}
     monkeypatch.setattr(W, "_nvidia_smi", lambda args: smi[args[0]])
     assert W.busy_gpus(lambda: table) == {"0", "GPU-a", "2", "GPU-c"}  # not GPU 1: only the notebook is on it
+    assert W.busy_gpu_procs(lambda: table) == {"0": [(12, table[12][1])], "2": [(21, table[21][1])]}
+
+
+def test_relion_as_a_word_is_not_a_relion_job():
+    """A tmux or screen session, a module or a conda environment named relion: what runs in them is not RELION's
+    (was: a notebook in "tmux new -s relion" on a GPU made it look in use)."""
+    from cryo_savanna import gpu_wait as W
+    table = {
+        10: (1, "tmux new -s relion"),
+        11: (10, "-bash"),
+        12: (11, "python -m ipykernel_launcher"),
+        20: (1, "bash -c module load relion && jupyter-lab"),
+        21: (20, "jupyter-lab"),
+        30: (1, "/opt/relion-5.1/bin/relion --tomo"),  # RELION's GUI
+        31: (30, "napari"),  # started from it
+        40: (1, "relion"),
+    }
+    assert [p for p in table if W.is_relion_job(p, table)] == [30, 31, 40]
+
+
+def test_a_waiting_run_does_not_keep_its_gpus_locked_while_it_looks(tmp_path):
+    from cryo_savanna import gpu_wait as W
+    free_while_looking = []
+
+    def busy():  # what another run (or the status bar) finds while this one asks nvidia-smi
+        fds = W.try_lock(str(tmp_path), ["0", "1"])
+        free_while_looking.append(fds is not None)
+        for fd in fds or []:
+            os.close(fd)
+        return set() if len(free_while_looking) > 1 else {"1"}
+    held = W.wait(str(tmp_path), ["0", "1"], "test", poll_s=0, busy=busy)
+    try:
+        assert free_while_looking == [True, True]
+        assert W.try_lock(str(tmp_path), ["0"]) is None  # and kept once it starts
+    finally:
+        for fd in held:
+            os.close(fd)
+
+
+def test_locks_are_looked_at_in_proc_locks_without_taking_them(tmp_path):
+    from cryo_savanna import gpu_wait as W
+    a, b = tmp_path / "gpu-0.lock", tmp_path / "gpu-1.lock"
+    a.write_text("")
+    b.write_text("")
+    st = os.stat(a)
+    dev = "%02x:%02x:%d" % (os.major(st.st_dev), os.minor(st.st_dev), st.st_ino)
+    text = ("1: FLOCK  ADVISORY  WRITE 4242 %s 0 EOF\n"
+            "2: -> FLOCK  ADVISORY  WRITE 4343 %s 0 EOF\n"  # one waiting for it: holds nothing
+            "3: POSIX  ADVISORY  WRITE 4444 00:00:1 0 EOF\n" % (dev, "%02x:%02x:%d" % (os.major(st.st_dev),
+                                                                                    os.minor(st.st_dev),
+                                                                                    os.stat(b).st_ino)))
+    assert W.flock_held([str(a), str(b), str(tmp_path / "none")], text) == {
+        str(a): True, str(b): False, str(tmp_path / "none"): False}
 
 
 # ---------------------------------------------------------------------------- the local thread queue
@@ -558,7 +611,7 @@ def test_usage_counts_threads_and_gpus_of_the_machine(tmp_path, monkeypatch):
     monkeypatch.setattr(W, "process_table", lambda: {10: (1, "relion_refine --o Class2D/job001/run --j 3"),
                                                       11: (1, "relion_refine_mpi --o Class3D/job002/run --gpu")})
     monkeypatch.setattr(W, "gpu_index", lambda: {"GPU-a": "0", "GPU-b": "1", "GPU-c": "2"})
-    monkeypatch.setattr(W, "busy_gpus", lambda table, ids: {"GPU-b", "1"})
+    monkeypatch.setattr(W, "busy_gpu_procs", lambda table, ids: {"1": [(11, table()[11][1])]})
     fd = os.open(W.lock_path(str(tmp_path), "0"), os.O_RDWR | os.O_CREAT)
     fcntl.flock(fd, fcntl.LOCK_EX)
     fd2, _ = W.try_threads(str(tmp_path), 8, 64, "Refine3D/job009", lambda: {})
@@ -570,6 +623,7 @@ def test_usage_counts_threads_and_gpus_of_the_machine(tmp_path, monkeypatch):
     assert (u.threads, u.gpus, u.gpu_count) == (3 + 1 + 8, ["0", "1"], 3)
     assert u.text() == "RELION here: 12/64 threads, 2/3 GPUs"
     assert "8 threads: Refine3D/job009" in u.detail and "4 threads: RELION jobs started without" in u.detail
+    assert "GPU 0: locked by" in u.detail and "GPU 1: process 11 (relion_refine_mpi" in u.detail
     assert G.Usage(0, 8, [], 0).text() == "RELION here: 0/8 threads"  # no GPUs: not mentioned
     assert G.Usage(0, 8, [], 0).ram_text() == ""  # RAM unknown: not shown
     assert G.Usage(0, 8, [], 0, "", 12.345, 64.0).ram_text() == "RAM 12.35/64.00 GB (19%)"
