@@ -17,6 +17,7 @@ treat them as a checklist, and expect some steps to need fixing on the way.
 | Pipeline and STAR reading/writing | `cryo_savanna/project/pipeline.py`, `star.py` (`CURRENT_MDT_VERSION`) | `src/pipeliner.cpp` (`PipeLine::read`/`write`), `src/metadata_table.cpp` |
 | Alias, mark finished/failed, delete, undelete | `cryo_savanna/project/ops.py` | `src/pipeliner.cpp` |
 | Select and Exclude tilt images output files | `cryo_savanna/project/selection.py` | `src/displayer.cpp`, `tomography_python_programs/exclude_tilt_images` |
+| Select's optimisation sets for tomography (RELION writes none) | `cryo_savanna/project/tomo_select.py` | `getCommandsSelectJob`, `src/ml_optimiser.cpp` (`<root>_optimisation_set.star`) |
 | Which program a job passes "Additional arguments" to | `cryo_savanna/jobdefs/flags.py` (`JOB_PROGRAMS`) | `src/pipeline_jobs.cpp` (`getCommands*`) |
 | The flags each job writes itself (left out of the Advanced parameters tab) | `cryo_savanna/jobdefs/command-flags-5.1.1.json` | `src/pipeline_jobs.cpp` (`getCommands*Job`, `getTomoInputCommmand`) |
 | Several references of a 3D classification as a STAR file | `cryo_savanna/project/references.py` | `src/ml_model.cpp` (`initialiseFromImages`), `getCommandsClass3DJob` |

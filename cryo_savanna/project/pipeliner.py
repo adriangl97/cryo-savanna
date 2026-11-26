@@ -37,7 +37,7 @@ from pathlib import Path
 
 from cryo_savanna.env.child import external_environ
 from cryo_savanna.jobdefs import external_jobs
-from cryo_savanna.project import processes, references, scratch
+from cryo_savanna.project import processes, references, scratch, tomo_select
 from cryo_savanna.project.gpu_queue import GpuQueue, is_waiting
 from cryo_savanna.project.jobstar import JobStar
 from cryo_savanna.project.lock import PipelineLock
@@ -358,6 +358,10 @@ class Pipeliner:
                      f" ++++ (done interactively in cryo-savanna, which wrote the files this command writes)\n ++++ \n")
         (d / RELION_JOB_EXIT_SUCCESS).touch()
         PipelineOps(self.project_dir).mark_finished(job)
+        try:  # a selection of tomography particles: their optimisation set (the window tries again if this fails)
+            tomo_select.complete(self.project_dir, job)
+        except (OSError, ValueError, RuntimeError):  # (LockError, OpsError)
+            pass
 
     def _runner_for(self, jobstar: JobStar) -> None:
         """A job made from one of cryo-savanna's own forms (a CLI tool, pytom, AreTomo3, tomogram masks) runs

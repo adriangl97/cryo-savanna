@@ -37,6 +37,7 @@ from cryo_savanna import COPYRIGHT, LICENSE_NOTICE, __version__
 from cryo_savanna.env.relion_env import RelionEnv, relion_version, version_warning
 from cryo_savanna.images.cache import ThumbCache
 from cryo_savanna.jobdefs.model import JobDefs
+from cryo_savanna.project import tomo_select
 from cryo_savanna.project.gpu_queue import GpuQueue, Usage, usage
 from cryo_savanna.project.main_inputs import MainInputs
 from cryo_savanna.project.rebuild import find_job_dirs
@@ -89,7 +90,10 @@ class _Call(QRunnable):
             result = self.fn()
         except Exception as e:  # noqa: BLE001 - reported in the GUI
             result = e
-        self.signals.done.emit(self.tag, result)
+        try:
+            self.signals.done.emit(self.tag, result)
+        except RuntimeError:  # the window was closed meanwhile: nobody to tell
+            pass
 
 
 class LoaderWorker(QObject):
@@ -233,6 +237,10 @@ class MainWindow(QMainWindow):
         self._queue_pool = QThreadPool(self)
         self._queue_pool.setMaxThreadCount(1)
         self._queue_tasks: set[_Call] = set()
+        # optimisation sets of Select jobs on tomography particles (project/tomo_select.py): (job, its last change)
+        # looked at, and the look going
+        self._optsets_seen: set[tuple[str, float | None]] = set()
+        self._optsets_call: _Call | None = None
         # the threads and GPUs RELION jobs use on this machine (Preferences → Status bar), looked at in its own thread
         self._usage_pool = QThreadPool(self)
         self._usage_pool.setMaxThreadCount(1)
@@ -553,6 +561,7 @@ class MainWindow(QMainWindow):
         self.info.main_inputs = loader.main_inputs
         self._tomo_decided = not self.tomo_auto
         self.summaries.clear()
+        self._optsets_seen.clear()
         self.tree.clear_summaries()
         self.graph.clear_summaries()
         self._summary_thread = QThread(self)
@@ -643,7 +652,42 @@ class MainWindow(QMainWindow):
             self.logs.refresh()
         if self.queue_state.checked_at == 0 and self.queue_timer.isActive():
             self._poll_queue()  # first look at the queue as soon as the jobs are known
+        self._complete_selections(snap)
         self._update_status()
+
+    # ------------------------------------------------------------------ optimisation sets of Select jobs
+    def _complete_selections(self, snap: ProjectSnapshot) -> None:
+        """Write the optimisation sets of finished Select jobs on tomography particles, which RELION does not
+        write, and add them to the pipeline (in a thread; project/tomo_select.py). Each job is looked at once per
+        change of its files."""
+        if self.readonly or self._optsets_call is not None:
+            return
+        nodes = snap.pipeline.nodes
+        todo = [n for n in tomo_select.candidates(snap.pipeline)
+                if n in snap.jobs and (n, snap.jobs[n].modified) not in self._optsets_seen
+                and any(tomo_select.set_for(f) not in nodes for f in tomo_select.particle_outputs(snap.pipeline, n))]
+        if not todo:
+            return
+        self._optsets_seen.update((n, snap.jobs[n].modified) for n in todo)
+        project, pipeline = snap.project_dir, snap.pipeline
+
+        def work() -> list[str]:
+            return [s for job in todo for s in tomo_select.complete(project, job, pipeline)]
+        call = self._optsets_call = _Call(("optsets", project), work)
+        call.signals.done.connect(self._on_optsets)
+        QThreadPool.globalInstance().start(call)
+
+    @Slot(object, object)
+    def _on_optsets(self, tag, result) -> None:
+        self._optsets_call = None
+        if tag[1] != self.loader.project_dir:  # another project by now
+            return
+        if isinstance(result, Exception):
+            self.statusBar().showMessage(f"Optimisation set of a Select job not written: {result}", 15000)
+        elif result:
+            self.statusBar().showMessage(f"Wrote {', '.join(result)}: the optimisation set of the selected particles, "
+                                         "for the next jobs' \"Input optimisation set\"", 15000)
+            self.refresh(force=True)
 
     # ------------------------------------------------------------------ RELION version
     def _check_version(self) -> None:
