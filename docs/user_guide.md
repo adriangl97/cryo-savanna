@@ -133,8 +133,9 @@ polling interval (Preferences, or `--poll`), and views of running jobs read new 
   after 30 s is terminated, and killed 30 s later.
 - **Additional external jobs** (New job → Other programs, and the menu bar): programs that are not RELION's, run as External
   jobs and in the pipeline like any job. See [pytom template matching](#pytom-template-matching),
-  [Tomogram masks](#tomogram-masks-for-pytom), [AreTomo3](#aretomo3-tilt-series-alignment-and-reconstruction) and
-  [Split off zero-weight particles](#split-off-zero-weight-particles).
+  [Tomogram masks](#tomogram-masks-for-pytom), [AreTomo3](#aretomo3-tilt-series-alignment-and-reconstruction),
+  [Split off zero-weight particles](#split-off-zero-weight-particles) and
+  [CryoSPARC particles to RELION](#cryosparc-particles-to-relion-pyem-csparc2star).
 - **Queue:** "Submit to queue" uses the queue settings of the loaded RELION module (RELION_QSUB_*).
   On a SLURM cluster the list shows each queued job's state (queued and why, or running where and
   for how long), Abort can cancel it with scancel, and jobs that SLURM ended without RELION noticing
@@ -577,6 +578,48 @@ refinement, else the newest one) and works out the rest:
   micrographs (`rlnMicrographName`) the named particles are in.
 
 The job writes `accepted_particles.star` and `rejected_particles.star`, and for tomography an `optimisation_set.star`.
+
+### CryoSPARC particles to RELION (pyem csparc2star)
+
+**Additional external jobs → CryoSPARC particles to RELION (pyem csparc2star)** converts a CryoSPARC particle
+set into a `particles.star` in the RELION project, with [pyem](https://github.com/asarnow/pyem)'s
+`csparc2star.py`. pyem does not come with cryo-savanna: it runs from the conda environment named on the
+*csparc2star* tab (`$CRYO_SAVANNA_PYEM_ENV` sets the default, else `pyem`; empty: `csparc2star.py` is on the
+PATH). A new job takes the environment and the CryoSPARC project folder from the project's last such job.
+
+- *Input*: the particle `.cs` file (e.g. `J45/J45_008_particles.cs` of a refinement, or an exported set) and
+  its passthrough `.cs` files. When none are given, the job's `J45_passthrough_particles.cs` beside it is
+  added. The stacks are found from the paths in the `.cs` files, whichever job wrote them (Extract,
+  Downsample, Restack, ...), in the *CryoSPARC project folder*. When that is empty, the folders above the
+  `.cs` file are searched.
+- *Particles for RELION*:
+  - **Use the stacks directly**: each CryoSPARC stack is linked into the job as `Stacks/<its CryoSPARC
+    path>.mrcs`, and `rlnImageName` points at the links. The links are absolute symbolic links; nothing in
+    the CryoSPARC project is copied or changed. The optics groups are CryoSPARC's exposure groups, with the
+    stacks' pixel size and box, so downsampled particles work too.
+  - **Re-extract in RELION**: the particles are put on *RELION micrographs* of this project (e.g. CtfFind's
+    `micrographs_ctf.star`, made from the same movies). They get its micrograph names, coordinates in its
+    pixels (scaled by the micrographs' sizes, for binning or downsampled micrographs) and its optics
+    groups. run.out then gives the settings for Extract: "Re-extract refined particles?" Yes with this
+    `particles.star`, "Re-center refined coordinates?" Yes when the particles have 3D poses, and the box
+    size in the micrographs' pixels. *Keep CryoSPARC's CTF?* No leaves CryoSPARC's defocus out, so Extract
+    takes CtfFind's.
+  - Micrographs are matched by name: CryoSPARC's without its UID, extension and motion-correction suffix
+    (`_patch_aligned_doseweighted`, ...). Particles whose micrograph is not in the RELION micrographs are
+    left out of a re-extraction, with a warning. With the stacks used directly, the RELION micrographs are
+    optional; when given, the particles are put on them too (for the Picks view and CTF refinement).
+- *Y axis of the coordinates*, as in pyem's wiki:
+  - *pyem's default* (the default): coordinates for RELION, on micrographs the same way up as CryoSPARC's.
+    Re-extracted, the particles are CryoSPARC's own images, so the poses and the CTF stay as they are.
+  - *--inverty*: CryoSPARC's own coordinate values, to import the particles into CryoSPARC again.
+  - *Upside-down micrographs*: the RELION micrographs are upside-down against CryoSPARC's (e.g.
+    CryoSPARC's Patch Motion against RELION's motion correction or MotionCor3). This passes `--inverty`
+    and, to re-extract, `--flipy`, which also mirrors the poses and the defocus angle. Stacks used
+    directly keep their poses.
+
+  Check the job's **Picks** tab: the picks should sit on the particles.
+- *csparc2star*: pyem's options (classes, minimum class posterior, refinement box size, swaps and
+  inversions of the axes, transform, copied coordinates, ...) and more arguments.
 
 ## Preferences (Ctrl+,)
 

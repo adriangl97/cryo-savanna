@@ -113,6 +113,9 @@ and can be used interchangeably, even at the same time, on the same project.
   - Split off zero-weight particles: when a refinement or classification stops because a particle
   got all-zero weights ("A particle image was compared to the reference and resulted in all-zero
   weights"). This job will separate out (rejected) those particles or all the particles in that tomogram/micrograph.
+  - CryoSPARC particles to RELION with pyem's csparc2star.py (from its own conda environment): the
+  CryoSPARC stacks linked into the job as .mrcs (nothing of CryoSPARC's copied or changed), or the particles
+  put on the project's RELION micrographs for re-extraction.
 - Class2D, Class3D, Refine3D and InitialModel jobs that have not written an iteration yet can be
   marked failed (RELION refuses and leaves them Running), and then overwritten.
 
@@ -202,7 +205,9 @@ which runs the AreTomo3 executable named in the job. Tomogram mask jobs run thro
 job's Masks tab. Splits of zero-weight particles run through `cryo_savanna/split_runner.py` (copied as
 `.cryo-savanna/split_runner.py`), which only reads and writes STAR files. MemBrain-seg jobs run through
 `cryo_savanna/membrain_runner.py` (copied as `.cryo-savanna/membrain_runner.py`), which runs `membrain` from
-the conda environment named in the job: cryo-savanna does not include or import MemBrain-seg. All of them import the helpers they
+the conda environment named in the job: cryo-savanna does not include or import MemBrain-seg. CryoSPARC
+particles to RELION run through `cryo_savanna/csparc_runner.py` (copied as `.cryo-savanna/csparc_runner.py`),
+which runs pyem's `csparc2star.py` from the conda environment named in the job. All of them import the helpers they
 share from `cryo_savanna/runner_common.py`, copied with them as `.cryo-savanna/runner_common.py`.
 
 ### SLURM

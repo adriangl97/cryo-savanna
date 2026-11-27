@@ -3,8 +3,8 @@
 """The kinds of RELION External jobs cryo-savanna makes with a form and a runner of its own, in one place.
 
 Each is a *family*: the CLI tools (jobdefs/cli_tools.py), pytom (pytom_jobs.py), AreTomo3 (aretomo_jobs.py),
-the tomogram masks (tomomask_jobs.py), the split of zero-weight particles (split_jobs.py) and MemBrain-seg
-(membrain_jobs.py). To RELION they are
+the tomogram masks (tomomask_jobs.py), the split of zero-weight particles (split_jobs.py), MemBrain-seg
+(membrain_jobs.py) and CryoSPARC particles to RELION (csparc_jobs.py). To RELION they are
 all ``relion.external`` jobs; what tells them apart is the runner their executable names (``python3 .cryo-savanna/<runner>.py <kind>``). The rest of
 cryo-savanna asks here, not each family in turn:
 
@@ -30,13 +30,22 @@ from pathlib import Path
 from typing import Any
 
 from cryo_savanna.env.relion_env import RelionEnv
-from cryo_savanna.jobdefs import aretomo_jobs, cli_tools, membrain_jobs, pytom_jobs, split_jobs, tomomask_jobs
+from cryo_savanna.jobdefs import (
+    aretomo_jobs,
+    cli_tools,
+    csparc_jobs,
+    membrain_jobs,
+    pytom_jobs,
+    split_jobs,
+    tomomask_jobs,
+)
 from cryo_savanna.jobdefs.flags import FlagSource
 from cryo_savanna.jobdefs.model import JobDefs, JobVariant
 from cryo_savanna.project.jobstar import JobStar
 
 EXTERNAL = cli_tools.EXTERNAL
 CLI, PYTOM, ARETOMO, TOMOMASK, SPLIT, MEMBRAIN = "cli", "pytom", "aretomo", "tomomask", "split", "membrain"
+CSPARC = "csparc"
 
 
 @dataclass(frozen=True)
@@ -69,6 +78,9 @@ FAMILIES: tuple[Family, ...] = (
     Family(MEMBRAIN, membrain_jobs.membrain_kind, lambda kind: membrain_jobs.TITLES[kind],
            membrain_jobs.install_runner, membrain_jobs.membrain_main_input,
            lambda defs, env, flags: membrain_jobs.MembrainCatalog(defs, env),
+           lambda catalog, kind, tomo: catalog.variant(kind)),
+    Family(CSPARC, csparc_jobs.csparc_kind, lambda kind: csparc_jobs.TITLES[kind], csparc_jobs.install_runner,
+           csparc_jobs.csparc_main_input, lambda defs, env, flags: csparc_jobs.CsparcCatalog(defs, env),
            lambda catalog, kind, tomo: catalog.variant(kind)),
 )
 BY_NAME = {f.name: f for f in FAMILIES}
@@ -122,7 +134,7 @@ def program_title(fn_exe: str) -> str:
 class Forms:
     """The forms of every family for one RELION environment: each family's catalog (which builds a form
     on first use), by family name and as ``.cli``, ``.pytom``, ``.aretomo``, ``.tomomask``, ``.split``,
-    ``.membrain``."""
+    ``.membrain``, ``.csparc``."""
 
     def __init__(self, defs: JobDefs, env: RelionEnv, flag_source: FlagSource | None = None):
         self.defs, self.env = defs, env

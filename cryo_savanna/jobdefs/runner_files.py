@@ -4,7 +4,7 @@
 
 RELION runs ``python3 .cryo-savanna/<runner>.py ...``: a copy of cryo-savanna's runner, so that the jobs
 keep working when cryo-savanna is moved or updated. The runners (pytom_runner.py, aretomo_runner.py,
-mask_runner.py, split_runner.py, membrain_runner.py) import runner_common.py from beside them, so it always
+mask_runner.py, split_runner.py, membrain_runner.py, csparc_runner.py) import runner_common.py from beside them, so it always
 goes in first.
 """
 

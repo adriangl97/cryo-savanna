@@ -7,12 +7,28 @@ import sys
 
 import pytest
 
-from cryo_savanna import aretomo_runner, mask_runner, membrain_runner, pytom_runner, runner_common, split_runner
-from cryo_savanna.jobdefs import aretomo_jobs, membrain_jobs, pytom_jobs, runner_files, split_jobs, tomomask_jobs
+from cryo_savanna import (
+    aretomo_runner,
+    csparc_runner,
+    mask_runner,
+    membrain_runner,
+    pytom_runner,
+    runner_common,
+    split_runner,
+)
+from cryo_savanna.jobdefs import (
+    aretomo_jobs,
+    csparc_jobs,
+    membrain_jobs,
+    pytom_jobs,
+    runner_files,
+    split_jobs,
+    tomomask_jobs,
+)
 
 RUNNERS = [(pytom_jobs, "pytom_runner.py", "match"), (aretomo_jobs, "aretomo_runner.py", "align"),
            (tomomask_jobs, "mask_runner.py", "masks"), (split_jobs, "split_runner.py", "zero_weights"),
-           (membrain_jobs, "membrain_runner.py", "segment")]
+           (membrain_jobs, "membrain_runner.py", "segment"), (csparc_jobs, "csparc_runner.py", "csparc2star")]
 
 
 @pytest.mark.parametrize("jobs, runner, mode", RUNNERS)
@@ -66,7 +82,8 @@ def test_pytom_runner_keeps_the_names_older_runners_use():
 
 def test_each_runner_says_its_own_name(capsys):
     for module, who in ((pytom_runner, "pytom"), (aretomo_runner, "AreTomo3"), (mask_runner, "tomogram masks"),
-                        (split_runner, "split particles"), (membrain_runner, "membrain-seg")):
+                        (split_runner, "split particles"), (membrain_runner, "membrain-seg"),
+                        (csparc_runner, "csparc2star")):
         runner_common.WHO = module.WHO
         module.say("hello")
         assert capsys.readouterr().out == f" ++++ {who}: hello\n"

@@ -264,10 +264,15 @@ def _membrain_views(ctx: JobContext, kind: str, add, add_maps) -> None:
             add(MEMBRAIN_SCORES, "Scores", job=ctx.name)
 
 
+def _csparc_views(ctx: JobContext, kind: str, add, add_maps) -> None:
+    """CryoSPARC particles to RELION (jobdefs/csparc_jobs.py): nothing of its own; its particles.star gets the
+    Particles view with the job's outputs, and the Picks view on the RELION micrographs it names."""
+
+
 # The viewers of the External jobs made from cryo-savanna's own forms, by family (jobdefs/external_jobs.py):
 # (ctx, kind, add, add_maps). A CLI tool has none of its own: its output files get the usual ones.
 EXTERNAL_VIEWS = {"pytom": _pytom_views, "aretomo": _aretomo_views, "tomomask": _tomomask_views,
-                  "split": _split_views, "membrain": _membrain_views}
+                  "split": _split_views, "membrain": _membrain_views, "csparc": _csparc_views}
 
 
 def views_for(ctx: JobContext) -> list[ViewSpec]:

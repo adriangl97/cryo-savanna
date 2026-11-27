@@ -18,7 +18,7 @@ from qtpy.QtGui import QKeySequence
 from qtpy.QtWidgets import QAction, QMainWindow, QMenu
 
 from cryo_savanna.env.relion_env import RelionEnv
-from cryo_savanna.jobdefs import aretomo_jobs, membrain_jobs, split_jobs, tomomask_jobs
+from cryo_savanna.jobdefs import aretomo_jobs, csparc_jobs, membrain_jobs, split_jobs, tomomask_jobs
 from cryo_savanna.jobdefs.cli_catalog import CATEGORIES, describe
 from cryo_savanna.jobdefs.model import JobDefs
 from cryo_savanna.jobdefs.pytom_jobs import DESCRIPTIONS as PYTOM_DESCRIPTIONS
@@ -152,7 +152,9 @@ class JobActions(FormActions, SelectionActions, RunActions, PipelineActions, Act
                   + [(f"membrain:{k}", t, membrain_jobs.DESCRIPTIONS[k], partial(self.new_membrain_job, k))
                      for k, t in membrain_jobs.MENU_TEXT.items()],  # membranes in the tomograms
                   [(f"split:{k}", t, split_jobs.DESCRIPTIONS[k], partial(self.new_split_job, k))
-                   for k, t in split_jobs.MENU_TEXT.items()]]  # the particles a failed refinement stopped on
+                   for k, t in split_jobs.MENU_TEXT.items()]  # the particles a failed refinement stopped on
+                  + [(f"csparc:{k}", t, csparc_jobs.DESCRIPTIONS[k], partial(self.new_csparc_job, k))
+                     for k, t in csparc_jobs.MENU_TEXT.items()]]  # CryoSPARC's particles into the project
         for n, group in enumerate(groups):
             if n:
                 self.external_menu.addSeparator()

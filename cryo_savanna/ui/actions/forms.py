@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
 """New, clone, continue and overwrite jobs, and what happens when the job editor submits one: RELION's job
 types, the CLI tools (jobdefs/cli_tools.py) and cryo-savanna's own External jobs (pytom, AreTomo3, tomogram
-masks, zero-weight particle splits, MemBrain-seg: jobdefs/external_jobs.py)."""
+masks, zero-weight particle splits, MemBrain-seg, csparc2star: jobdefs/external_jobs.py)."""
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ from qtpy.QtCore import Qt
 from qtpy.QtWidgets import QApplication, QMessageBox
 
 from cryo_savanna.env.relion_env import RelionEnvError
-from cryo_savanna.jobdefs import aretomo_jobs, external_jobs, membrain_jobs, split_jobs, tomomask_jobs
+from cryo_savanna.jobdefs import aretomo_jobs, csparc_jobs, external_jobs, membrain_jobs, split_jobs, tomomask_jobs
 from cryo_savanna.jobdefs.cli_tools import CliVariant
 from cryo_savanna.jobdefs.model import JobVariant
 from cryo_savanna.jobdefs.pytom_jobs import TITLES as PYTOM_TITLES
@@ -153,6 +153,26 @@ class FormActions(_Base):
         self._edit(variant.program, self.editor.new_job, variant, values,
                    f"{variant.description}. Runs as a RELION External job (quick: it only reads and writes STAR "
                    "files).")
+
+    def new_csparc_job(self, kind: str = csparc_jobs.CSPARC2STAR) -> None:
+        """CryoSPARC particles to RELION: the form, with the pyem environment and CryoSPARC project of the
+        project's last such job and its newest micrographs."""
+        try:
+            variant = self.csparc.variant(kind)
+        except RelionEnvError as e:
+            self._env_error("csparc2star", e)
+            return
+        values = variant.default_values(self.env)
+        pipeline = self.snapshot.pipeline if self.snapshot is not None else None
+        if self.project_dir is not None:
+            jobs = [n for n, j in self.snapshot.jobs.items() if j.program in csparc_jobs.TITLES.values()] \
+                if self.snapshot is not None else None
+            values.update(csparc_jobs.last_settings(self.project_dir, pipeline, jobs))
+        if pipeline is not None:
+            values.update(csparc_jobs.newest_micrographs(pipeline))
+        self._edit(variant.program, self.editor.new_job, variant, values,
+                   f"{variant.description}. Runs as a RELION External job (pyem from its conda environment; "
+                   "quick: it reads and writes metadata and makes links).")
 
     def _variant_for(self, js: JobStar) -> JobVariant:
         """The form for a job: its job type's, or a CLI tool's, pytom's or AreTomo3's for External jobs made

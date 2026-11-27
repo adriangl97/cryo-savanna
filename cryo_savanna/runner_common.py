@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
 #
 # Part of cryo-savanna; a copy of it goes into every project that runs its pytom, AreTomo3, tomogram mask,
-# membrain-seg or particle split jobs, beside their runners, and travels with it.
+# membrain-seg, particle split or csparc2star jobs, beside their runners, and travels with it.
 #
 # This program is free software; you can redistribute it and/or modify it under the terms of the GNU
 # General Public License as published by the Free Software Foundation; either version 2 of the License,
@@ -15,7 +15,8 @@
 # this program; if not, see <https://www.gnu.org/licenses/old-licenses/gpl-2.0.html>.
 """What the runners of cryo-savanna's "Additional external jobs" share.
 
-pytom_runner.py, aretomo_runner.py, mask_runner.py, membrain_runner.py and split_runner.py are started by RELION
+pytom_runner.py, aretomo_runner.py, mask_runner.py, membrain_runner.py, split_runner.py and csparc_runner.py are
+started by RELION
 as External jobs
 (``python3 .cryo-savanna/<runner>.py <mode> --o <job dir> [--in_* F]... --j <threads> --<option> <value> ...``)
 and import this file from beside them: the arguments of an External job, the exit files and
